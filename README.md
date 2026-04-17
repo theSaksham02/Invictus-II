@@ -1,87 +1,324 @@
-# 🚀 Invictus II: MACH-26 Ground Station
 
-![Node.js](https://img.shields.io/badge/Node.js-20_LTS-green?style=for-the-badge&logo=nodedotjs)
-![Express.js](https://img.shields.io/badge/Express-4.x-lightgrey?style=for-the-badge&logo=express)
-![Socket.io](https://img.shields.io/badge/Socket.io-4.x-black?style=for-the-badge&logo=socketdotio)
-![SQLite](https://img.shields.io/badge/SQLite-3-blue?style=for-the-badge&logo=sqlite)
+<![CDATA[
+<div align="center">
 
-Welcome to the **Invictus II Ground Station**, developed for the **UKSEDS National Rocketry Championship 2025-26** by the University of Birmingham Dubai. 
+```
+ ██╗███╗   ██╗██╗   ██╗██╗ ██████╗████████╗██╗   ██╗███████╗    ██╗██╗
+ ██║████╗  ██║██║   ██║██║██╔════╝╚══██╔══╝██║   ██║██╔════╝   ██╔╝██║
+ ██║██╔██╗ ██║██║   ██║██║██║        ██║   ██║   ██║███████╗  ██╔╝ ██║
+ ██║██║╚██╗██║╚██╗ ██╔╝██║██║        ██║   ██║   ██║╚════██║ ██╔╝  ██║
+ ██║██║ ╚████║ ╚████╔╝ ██║╚██████╗   ██║   ╚██████╔╝███████║██╔╝   ██║
+ ╚═╝╚═╝  ╚═══╝  ╚═══╝  ╚═╝ ╚═════╝   ╚═╝    ╚═════╝ ╚══════╝╚═╝    ╚═╝
+```
 
-This repository contains the high-performance, real-time backend and interactive dashboard infrastructure for monitoring and controlling our competition rocket, CANSAT, and ORT Rover.
+# 🚀 MACH-26 · UKSEDS NRC 2025–26
+
+**Competition rocketry avionics · Real-time telemetry · Ground station software**
+
+*University of Birmingham Dubai*
 
 ---
 
-## 🌟 Interactive Mission Control
+![Stars](https://img.shields.io/github/stars/theSaksham02/Invictus-II?style=for-the-badge&color=FFD700&logo=starship&label=⭐%20STARS)
+![Node.js](https://img.shields.io/badge/Node.js-20_LTS-3C873A?style=for-the-badge&logo=nodedotjs&logoColor=white)
+![Express](https://img.shields.io/badge/Express-4.x-000000?style=for-the-badge&logo=express&logoColor=white)
+![Socket.io](https://img.shields.io/badge/Socket.io-4.x-010101?style=for-the-badge&logo=socketdotio&logoColor=white)
+![SQLite](https://img.shields.io/badge/SQLite-3-003B57?style=for-the-badge&logo=sqlite&logoColor=white)
+![STM32](https://img.shields.io/badge/STM32-Bluepill-03234B?style=for-the-badge&logo=stmicroelectronics&logoColor=white)
+![Raspberry Pi](https://img.shields.io/badge/RPi-4B-C51A4A?style=for-the-badge&logo=raspberrypi&logoColor=white)
+![License](https://img.shields.io/badge/Mission-ACTIVE-00FF88?style=for-the-badge&logo=rocket&logoColor=white)
 
-The Invictus II project isn't just a static logger—it's a fully **interactive telemetry and control hub**. 
+</div>
 
-* **Real-Time Telemetry:** Live ingestion and WebSocket broadcasting of flight data at 9600 baud.
-* **Flight Phase Detection:** Automatic detection of state changes (IDLE ➔ LAUNCHED ➔ ASCENDING ➔ APOGEE ➔ DESCENDING ➔ LANDED).
-* **Multi-Source Tracking:** Seamlessly integrates data from the CANSAT (433MHz) and the NRC Satellite (868MHz LoRa).
-* **ORT Rover Integration:** Proxies HTTP control commands directly to our remote Raspberry Pi-driven rover.
-* **Simulation Mode:** Don't have the hardware plugged in? Run a full parabolic flight simulation to test the UI and logic interactively.
+---
 
-## 🏗 Architecture Overview
+<div align="center">
 
-```text
-[CANSAT (STM32 + RFM69HCW)]  => (433MHz Serial)  => [Node.js Backend] => (SQLite)
-[NRC Sat (Heltec LoRa v3)]  => (868MHz Serial)  => [Node.js Backend] => (Socket.io) => [Interactive Dashboard]
-[ORT Rover (RPi Flask)]     <= (WiFi HTTP)      <= [Node.js Backend] <= (HTTP POST) <= [Interactive Dashboard]
+```
+     *        .              .      .       *       .
+  .        .    *     .   🪐          .       .         *
+      .              *        .    ✨        *     .
+  *      .    ✨         .         .    *          .
+    .        .     *        .  🌟      .     *        .
+         *       .     .        *           .     *
 ```
 
-## 🚀 Getting Started
+</div>
+
+---
+
+## 🌌 Mission Overview
+
+> *"One packet. One second. Sensor to screen. Three hardware systems, one ground station, zero tolerance for failure."*
+
+**INVICTUS II** is the complete avionics and ground station stack for our UKSEDS NRC MACH-26 competition rocket. It handles everything from raw binary radio packets at 433MHz all the way to a live browser dashboard — in under one second.
+
+```
+Target Altitude  →  2,200 ft (670 m)
+Telemetry Rate   →  1 Hz (1 packet/second)
+Radio Links      →  433 MHz RFM69 (CANSAT) + 868 MHz LoRa (NRC Satellite)
+Ground Station   →  Node.js · SQLite · Socket.io · Chart.js
+Rover            →  Raspberry Pi 4B · Flask · BTS7960 · Camera Module 3
+```
+
+---
+
+## 🛰️ System Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        🚀  IN FLIGHT                            │
+│                                                                 │
+│   ┌──────────────────┐         ┌─────────────────────────┐     │
+│   │  STM32 BLUEPILL  │         │   HELTEC LoRa v3        │     │
+│   │  BMP388 · MPU6500│         │   ESP32-S3              │     │
+│   │  NEO-6M · LM75   │         │   BMP388 · NEO-6M       │     │
+│   │  RFM69HCW 433MHz │         │   868 MHz LoRa          │     │
+│   └────────┬─────────┘         └──────────┬──────────────┘     │
+│            │ 37-byte binary                │  ASCII CSV         │
+│            │ XOR checksum                  │  "NRC:..." prefix  │
+└────────────┼───────────────────────────────┼────────────────────┘
+             │                               │
+             ▼                               ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    💻  GROUND STATION                           │
+│                                                                 │
+│   USB Dongle ──► serial.js ──► parser.js ──► phase-tracker.js  │
+│                                    │                            │
+│                         ┌──────────┼──────────┐                │
+│                         ▼          ▼           ▼                │
+│                      db.js    socket.io    REST API             │
+│                     SQLite    broadcast    Express 4            │
+│                         │          │           │                │
+│                         └──────────┴───────────┘                │
+│                                    │                            │
+│                                    ▼                            │
+│              ┌─────────────────────────────────────┐           │
+│              │   🖥️  BROWSER DASHBOARD              │           │
+│              │   Chart.js · Leaflet · Socket.io     │           │
+│              │   CANSAT tab · NRC tab · ROVER tab   │           │
+│              └─────────────────────────────────────┘           │
+└─────────────────────────────────────────────────────────────────┘
+             ▲
+             │ WiFi HTTP
+┌────────────┴────────────┐
+│  🤖  ORT ROVER (RPi 4B) │
+│  Flask · BTS7960 x2     │
+│  6 Motors · Camera M3   │
+└─────────────────────────┘
+```
+
+---
+
+## 🔧 Hardware Stack
+
+<div align="center">
+
+| System | Brain | Radio | Sensors | Notes |
+|---|---|---|---|---|
+| 🚀 **CANSAT** | STM32 Bluepill | RFM69HCW 433MHz | BMP388, MPU-6500, NEO-6M, LM75 | 37-byte binary packet |
+| 🛰️ **NRC Satellite** | Heltec LoRa v3 (ESP32-S3) | LoRa 868MHz | BMP388, NEO-6M, LM75 | ASCII CSV `NRC:` prefix |
+| 🤖 **ORT Rover** | Raspberry Pi 4B | WiFi | BTS7960 x2, Camera M3 | Flask HTTP server |
+| ⚡ **Power** | TP4056 → XL6009 → AMS1117 | — | — | 45 min endurance |
+
+</div>
+
+---
+
+## ⚡ Quick Start
 
 ### Prerequisites
-* Node.js 20 LTS
-* NPM
-* A USB Serial adapter (if running with live hardware)
-
-### 1. Installation
 
 ```bash
+node --version   # v20 LTS required
+npm --version    # v9+ required
+```
+
+### 🖥️ Ground Station — 3 Commands
+
+```bash
+# 1. Clone & install
 git clone https://github.com/theSaksham02/Invictus-II.git
 cd Invictus-II/backend
 npm install
-```
 
-### 2. Configuration
-Copy the sample environment file and configure it for your local machine:
-```bash
+# 2. Configure
 cp .env.example .env
-```
-*Note: Update `SERIAL_PORT_CANSAT` and `SERIAL_PORT_NRC` to match your OS (`/dev/ttyUSB*` for Linux/Mac, `COM*` for Windows).*
+# → Set SERIAL_PORT=/dev/ttyUSB0 (Linux) or COM3 (Windows)
 
-### 3. Run the Server
-
-**Hardware Mode (Live Serial Data):**
-```bash
-npm run dev
+# 3. Launch 🚀
+npm start
+# → http://localhost:3000
 ```
 
-**Interactive Simulation Mode (Mock Flight Data):**
+### 🧪 Simulation Mode (No Hardware Needed)
+
 ```bash
 npm run sim
+# Streams a full parabolic flight at 1Hz
+# Open http://localhost:3000 — watch altitude climb to 670m and back
 ```
 
-## 📡 API & WebSocket Reference
+### 🤖 ORT Rover (Raspberry Pi)
+
+```bash
+pip install flask picamera2 RPi.GPIO
+python3 firmware/rover/app.py
+# → Accessible at 192.168.4.1:5000
+```
+
+---
+
+## 📡 API Reference
 
 ### REST Endpoints
-* `GET /api/health` - System status and uptime.
-* `GET /api/packets?source=CANSAT&limit=200` - Retrieve historical packet data.
-* `GET /api/stats` - Mission statistics (Max Alt, Min Temp, Packet Counts).
-* `GET /api/export` - Download telemetry as CSV.
-* `POST /api/upload-sd` - Post-flight SD card CSV ingestion.
-* `POST /api/rover/control` - `{ left: 100, right: -100 }` - Command the rover.
 
-### Socket.io Events (Real-Time)
-* **`packet`**: Emitted on every new telemetry packet.
-* **`mission_event`**: Emitted on phase transitions (e.g., Apogee reached).
-* **`signal_lost` / `signal_recovered`**: Emitted if data drops for > 5 seconds.
+```
+GET  /api/health              → System status, uptime, signal state
+GET  /api/packets             → ?source=CANSAT&limit=200&since=0
+GET  /api/stats               → Max alt, min temp, packet counts per source
+GET  /api/export              → ?source=CANSAT → downloads flight.csv
+POST /api/upload-sd           → Multipart: SD card CSV file
+POST /api/rover/control       → { left: 100, right: -100 }
+POST /api/rover/stop          → Emergency stop
+GET  /api/rover/data          → Rover sensor readings
+```
 
-## 🛠 Hardware Context
+### Socket.io Events
 
-* **CANSAT**: Transmits a 32-byte packed binary struct containing Altitude, Temp, Pressure, IMU (Accel/Gyro), GPS, RSSI, and checksum flags.
-* **NRC Satellite**: Transmits ASCII CSV string starting with `NRC:`.
+```
+← packet           Every telemetry packet (1 Hz)
+← mission_event    Phase transition: IDLE→LAUNCHED→ASCENDING→APOGEE→DESCENDING→LANDED
+← signal_lost      No packet received for 5 seconds
+← signal_recovered Signal resumed after gap
+← sd_upload_complete  SD card CSV processed
+← history          Sent on connect: last 60 packets + all events
 
-## 🤝 Contributing
-For the Invictus II team: Ensure all changes strictly maintain the binary struct alignment, do not introduce blocking asynchronous calls in the hot path, and maintain graceful error handling. 
+→ subscribe_source  { source: "CANSAT" | "NRC" | "ALL" }
+→ request_history   { source, limit }
+```
+
+---
+
+## 📦 Packet Specification
+
+### CANSAT — 37-byte Binary (Little-Endian)
+
+```
+Offset  Size  Type      Field
+──────  ────  ────────  ──────────────
+0       2     uint16    pkt_id
+2       4     uint32    timestamp_ms
+6       4     float32   altitude_m
+10      4     float32   temp_c
+14      4     float32   pressure_hpa
+18      4     float32   accel_z
+22      4     float32   gyro_x
+26      4     float32   lat
+30      4     float32   lon
+34      1     int8      rssi_dbm
+35      1     uint8     flags  (bit0=launched, bit1=apogee)
+36      1     uint8     checksum  (XOR bytes 0–35)
+```
+
+### NRC Satellite — ASCII CSV
+
+```
+NRC:<pkt_id>,<timestamp_ms>,<altitude_m>,<temp_c>,<pressure_hpa>,<lat>,<lon>,<rssi_dbm>\n
+```
+
+---
+
+## 🏆 Competition Requirements
+
+<div align="center">
+
+| REQ ID | Description | Implementation | Status |
+|---|---|---|---|
+| RPD-003 | Altitude plot within 10 min of recovery | SD card CSV drag-drop → auto-chart | ✅ COVERED |
+| RPD-004 | Apogee on display, no laptop | STM32 writes max_alt to SSD1306 OLED | ✅ COVERED |
+| CPD-001 | Customer payload 3.5–5V DC | XL6009 boost → regulated XT30 | ✅ COVERED |
+| CPD-002 | Power for 45 minutes minimum | Bench tested with dummy load | ✅ COVERED |
+| ESS-001 | Electronics on 15 min before launch | No sleep mode, idle loop | ✅ COVERED |
+| ESS-002 | Full arming under 5 minutes | External switch, no disassembly | ✅ COVERED |
+| ESS-004 | Ofcom IR2030 — 433/868MHz only | Hardcoded in firmware | ✅ COVERED |
+| SMN-001 | Rail exit velocity ≥ 20 m/s | accel_z > 2.5g × 3 consecutive reads | ⚠️ VERIFY |
+
+</div>
+
+---
+
+## 🗂️ Repository Structure
+
+```
+Invictus-II/
+│
+├── 📁 backend/                   ← Node.js ground station
+│   ├── server.js                 ← Express + Socket.io entry point
+│   ├── db.js                     ← SQLite schema + queries
+│   ├── parser.js                 ← Binary CANSAT + NRC ASCII parser
+│   ├── serial.js                 ← SerialPort + auto-reconnect
+│   ├── simulator.js              ← Parabolic flight simulation (dev)
+│   ├── phase-tracker.js          ← Flight state machine (per source)
+│   ├── rover-proxy.js            ← HTTP proxy → RPi Flask
+│   ├── package.json
+│   └── .env.example
+│
+├── 📁 dashboard/                 ← [TODO] Browser frontend
+│   └── ground-station.html       ← Chart.js + Leaflet + Socket.io
+│
+├── 📁 firmware/                  ← [TODO] Embedded firmware
+│   ├── cansat/                   ← STM32duino sketch
+│   ├── nrc/                      ← Heltec ESP32 sketch
+│   └── rover/                    ← RPi Flask app
+│
+└── README.md
+```
+
+---
+
+## 🛠️ Development Notes
+
+### Known Issues / TODO
+
+- [ ] `dashboard/ground-station.html` — not yet committed
+- [ ] `firmware/` — STM32, Heltec, Rover code not yet pushed
+- [ ] `.gitignore` — add `flight.db`, `.env`, `uploads/`, `node_modules/`
+- [ ] `SMN-001` — rail exit velocity flag needs hardware verification
+
+### Recently Fixed
+
+- ✅ `emitToAll` ordering bug — socket source filtering now applies to serial packets
+- ✅ `signal_lost` watchdog — 5s timeout, per source, with `signal_recovered` event
+- ✅ Graceful `SIGINT` shutdown — serial port + SQLite released cleanly
+
+---
+
+## 👨‍🚀 Team
+
+**University of Birmingham Dubai — UKSEDS NRC 2025–26**
+
+> *Per aspera ad astra — through hardship to the stars* 🌟
+
+---
+
+<div align="center">
+
+```
+        .       *          .        .       *
+   *        .      🚀           .       .
+        .       ·    ·    ·           *       .
+   .        *       ·  · ·  ·    .       .
+        .       ·  ·    · · · ·      *
+   *        ·  ·   · · · · · · ·        .
+        · ·  · · · · · · · · · · · · ·
+   · · · · · · · · · · · · · · · · · · · ·
+  ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+```
+
+**Node.js · STM32duino · Heltec ESP32 · Raspberry Pi · Chart.js · Socket.io**
+
+![Visitors](https://visitor-badge.laobi.icu/badge?page_id=theSaksham02.Invictus-II&style=for-the-badge)
+
+</div>
+]]>
