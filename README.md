@@ -1,5 +1,3 @@
-
-<![CDATA[
 <div align="center">
 
 ```
@@ -26,7 +24,7 @@
 ![SQLite](https://img.shields.io/badge/SQLite-3-003B57?style=for-the-badge&logo=sqlite&logoColor=white)
 ![STM32](https://img.shields.io/badge/STM32-Bluepill-03234B?style=for-the-badge&logo=stmicroelectronics&logoColor=white)
 ![Raspberry Pi](https://img.shields.io/badge/RPi-4B-C51A4A?style=for-the-badge&logo=raspberrypi&logoColor=white)
-![License](https://img.shields.io/badge/Mission-ACTIVE-00FF88?style=for-the-badge&logo=rocket&logoColor=white)
+![Mission](https://img.shields.io/badge/Mission-ACTIVE-00FF88?style=for-the-badge&logoColor=white)
 
 </div>
 
@@ -93,11 +91,11 @@ Rover            →  Raspberry Pi 4B · Flask · BTS7960 · Camera Module 3
 │                         └──────────┴───────────┘                │
 │                                    │                            │
 │                                    ▼                            │
-│              ┌─────────────────────────────────────┐           │
-│              │   🖥️  BROWSER DASHBOARD              │           │
-│              │   Chart.js · Leaflet · Socket.io     │           │
-│              │   CANSAT tab · NRC tab · ROVER tab   │           │
-│              └─────────────────────────────────────┘           │
+│              ┌──────────────────────────────────────┐          │
+│              │   🖥️  BROWSER DASHBOARD               │          │
+│              │   Chart.js · Leaflet · Socket.io      │          │
+│              │   CANSAT tab · NRC tab · ROVER tab    │          │
+│              └──────────────────────────────────────┘          │
 └─────────────────────────────────────────────────────────────────┘
              ▲
              │ WiFi HTTP
@@ -174,28 +172,28 @@ python3 firmware/rover/app.py
 ### REST Endpoints
 
 ```
-GET  /api/health              → System status, uptime, signal state
-GET  /api/packets             → ?source=CANSAT&limit=200&since=0
-GET  /api/stats               → Max alt, min temp, packet counts per source
-GET  /api/export              → ?source=CANSAT → downloads flight.csv
-POST /api/upload-sd           → Multipart: SD card CSV file
-POST /api/rover/control       → { left: 100, right: -100 }
-POST /api/rover/stop          → Emergency stop
-GET  /api/rover/data          → Rover sensor readings
+GET  /api/health          →  System status, uptime, signal state
+GET  /api/packets         →  ?source=CANSAT&limit=200&since=0
+GET  /api/stats           →  Max alt, min temp, packet counts per source
+GET  /api/export          →  ?source=CANSAT → downloads flight.csv
+POST /api/upload-sd       →  Multipart: SD card CSV file
+POST /api/rover/control   →  { left: 100, right: -100 }
+POST /api/rover/stop      →  Emergency stop
+GET  /api/rover/data      →  Rover sensor readings
 ```
 
 ### Socket.io Events
 
 ```
-← packet           Every telemetry packet (1 Hz)
-← mission_event    Phase transition: IDLE→LAUNCHED→ASCENDING→APOGEE→DESCENDING→LANDED
-← signal_lost      No packet received for 5 seconds
-← signal_recovered Signal resumed after gap
+← packet              Every telemetry packet (1 Hz)
+← mission_event       IDLE→LAUNCHED→ASCENDING→APOGEE→DESCENDING→LANDED
+← signal_lost         No packet received for 5 seconds
+← signal_recovered    Signal resumed after gap
 ← sd_upload_complete  SD card CSV processed
-← history          Sent on connect: last 60 packets + all events
+← history             Sent on connect: last 60 packets + all events
 
-→ subscribe_source  { source: "CANSAT" | "NRC" | "ALL" }
-→ request_history   { source, limit }
+→ subscribe_source    { source: "CANSAT" | "NRC" | "ALL" }
+→ request_history     { source, limit }
 ```
 
 ---
@@ -205,20 +203,20 @@ GET  /api/rover/data          → Rover sensor readings
 ### CANSAT — 37-byte Binary (Little-Endian)
 
 ```
-Offset  Size  Type      Field
-──────  ────  ────────  ──────────────
-0       2     uint16    pkt_id
-2       4     uint32    timestamp_ms
-6       4     float32   altitude_m
-10      4     float32   temp_c
-14      4     float32   pressure_hpa
-18      4     float32   accel_z
-22      4     float32   gyro_x
-26      4     float32   lat
-30      4     float32   lon
-34      1     int8      rssi_dbm
-35      1     uint8     flags  (bit0=launched, bit1=apogee)
-36      1     uint8     checksum  (XOR bytes 0–35)
+Offset  Size  Type     Field
+──────  ────  ───────  ─────────────────────────────
+0       2     uint16   pkt_id
+2       4     uint32   timestamp_ms
+6       4     float32  altitude_m
+10      4     float32  temp_c
+14      4     float32  pressure_hpa
+18      4     float32  accel_z
+22      4     float32  gyro_x
+26      4     float32  lat
+30      4     float32  lon
+34      1     int8     rssi_dbm
+35      1     uint8    flags  (bit0=launched  bit1=apogee)
+36      1     uint8    checksum  (XOR of bytes 0–35)
 ```
 
 ### NRC Satellite — ASCII CSV
@@ -253,24 +251,24 @@ NRC:<pkt_id>,<timestamp_ms>,<altitude_m>,<temp_c>,<pressure_hpa>,<lat>,<lon>,<rs
 ```
 Invictus-II/
 │
-├── 📁 backend/                   ← Node.js ground station
-│   ├── server.js                 ← Express + Socket.io entry point
-│   ├── db.js                     ← SQLite schema + queries
-│   ├── parser.js                 ← Binary CANSAT + NRC ASCII parser
-│   ├── serial.js                 ← SerialPort + auto-reconnect
-│   ├── simulator.js              ← Parabolic flight simulation (dev)
-│   ├── phase-tracker.js          ← Flight state machine (per source)
-│   ├── rover-proxy.js            ← HTTP proxy → RPi Flask
+├── 📁 backend/
+│   ├── server.js          ← Express + Socket.io entry point
+│   ├── db.js              ← SQLite schema + queries
+│   ├── parser.js          ← Binary CANSAT + NRC ASCII parser
+│   ├── serial.js          ← SerialPort + auto-reconnect
+│   ├── simulator.js       ← Parabolic flight simulation (dev)
+│   ├── phase-tracker.js   ← Flight state machine (per source)
+│   ├── rover-proxy.js     ← HTTP proxy → RPi Flask
 │   ├── package.json
 │   └── .env.example
 │
-├── 📁 dashboard/                 ← [TODO] Browser frontend
-│   └── ground-station.html       ← Chart.js + Leaflet + Socket.io
+├── 📁 dashboard/          ← [TODO]
+│   └── ground-station.html
 │
-├── 📁 firmware/                  ← [TODO] Embedded firmware
-│   ├── cansat/                   ← STM32duino sketch
-│   ├── nrc/                      ← Heltec ESP32 sketch
-│   └── rover/                    ← RPi Flask app
+├── 📁 firmware/           ← [TODO]
+│   ├── cansat/            ← STM32duino sketch
+│   ├── nrc/               ← Heltec ESP32 sketch
+│   └── rover/             ← RPi Flask app
 │
 └── README.md
 ```
@@ -279,17 +277,17 @@ Invictus-II/
 
 ## 🛠️ Development Notes
 
-### Known Issues / TODO
+### TODO
 
-- [ ] `dashboard/ground-station.html` — not yet committed
-- [ ] `firmware/` — STM32, Heltec, Rover code not yet pushed
-- [ ] `.gitignore` — add `flight.db`, `.env`, `uploads/`, `node_modules/`
-- [ ] `SMN-001` — rail exit velocity flag needs hardware verification
+- [ ] Push `dashboard/ground-station.html`
+- [ ] Push `firmware/` — STM32, Heltec, Rover code
+- [ ] Add `.gitignore` — protect `flight.db`, `.env`, `uploads/`, `node_modules/`
+- [ ] Hardware-verify `SMN-001` rail exit velocity flag
 
 ### Recently Fixed
 
 - ✅ `emitToAll` ordering bug — socket source filtering now applies to serial packets
-- ✅ `signal_lost` watchdog — 5s timeout, per source, with `signal_recovered` event
+- ✅ `signal_lost` watchdog — 5s timeout, per source, with `signal_recovered`
 - ✅ Graceful `SIGINT` shutdown — serial port + SQLite released cleanly
 
 ---
@@ -321,4 +319,3 @@ Invictus-II/
 ![Visitors](https://visitor-badge.laobi.icu/badge?page_id=theSaksham02.Invictus-II&style=for-the-badge)
 
 </div>
-]]>
