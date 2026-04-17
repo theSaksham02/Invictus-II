@@ -23,12 +23,62 @@ app.use(express.json());
 let uptimeStart = Date.now();
 let isSimMode = process.env.SIM_MODE === 'true';
 
-// Broadcast helper wrapped in try/catch
+// ── FIX: Define filtered emitToAll BEFORE passing to serial.initSerial ──────
+// Per-socket source subscription filtering for 'packet' events.
+// All other events broadcast to everyone.
 let emitToAll = (evt, payload) => {
-  try { io.emit(evt, payload); } catch (e) {}
+  if (evt === 'packet') {
+    io.sockets.sockets.forEach(s => {
+      if (!s.data.source || s.data.source === 'ALL' || s.data.source === payload.source) {
+        try { s.emit(evt, payload); } catch (e) {}
+      }
+    });
+  } else {
+    try { io.emit(evt, payload); } catch (e) {}
+  }
 };
 
-// Init Serial or Sim
+// ── SIGNAL LOST WATCHDOG ──────────────────────────────────────────────────────
+// Emits 'signal_lost' if no packet received from a source for 5 seconds.
+// Emits 'signal_recovered' when packets resume after a gap.
+const lastPacketTime = { CANSAT: 0, NRC: 0 };
+const signalLost = { CANSAT: false, NRC: false };
+const SIGNAL_TIMEOUT_MS = 5000;
+
+function onPacketReceived(source) {
+  const now = Date.now();
+  if (signalLost[source]) {
+    const gapMs = now - lastPacketTime[source];
+    signalLost[source] = false;
+    try { emitToAll('signal_recovered', { source, gap_ms: gapMs }); } catch (e) {}
+    console.log(`[SIGNAL] ${source} recovered after ${(gapMs / 1000).toFixed(1)}s`);
+  }
+  lastPacketTime[source] = now;
+}
+
+setInterval(() => {
+  const now = Date.now();
+  ['CANSAT', 'NRC'].forEach(source => {
+    if (lastPacketTime[source] === 0) return; // never received, don't alert
+    const gap = now - lastPacketTime[source];
+    if (gap > SIGNAL_TIMEOUT_MS && !signalLost[source]) {
+      signalLost[source] = true;
+      try { emitToAll('signal_lost', { source, last_seen_ms: lastPacketTime[source] }); } catch (e) {}
+      console.warn(`[SIGNAL] ${source} signal lost — no packet for ${(gap / 1000).toFixed(1)}s`);
+    }
+  });
+}, 1000);
+
+// Wrap emitToAll to intercept 'packet' events and update watchdog
+const _emitToAll = emitToAll;
+emitToAll = (evt, payload) => {
+  if (evt === 'packet' && payload && payload.source) {
+    onPacketReceived(payload.source);
+  }
+  _emitToAll(evt, payload);
+};
+
+// ── INIT SERIAL OR SIM ────────────────────────────────────────────────────────
 let simStarted = false;
 serial.initSerial(emitToAll, () => {
   if (!simStarted && !isSimMode) {
@@ -43,11 +93,11 @@ if (isSimMode && !simStarted) {
   simulator.startSimulation(emitToAll);
 }
 
-// Routes
+// ── ROUTES ────────────────────────────────────────────────────────────────────
 app.get('/', (req, res) => {
   const dashPath = path.resolve(__dirname, process.env.DASHBOARD_PATH || '../dashboard/ground-station.html');
   if (fs.existsSync(dashPath)) res.sendFile(dashPath);
-  else res.send('<h1>Ground station starting...</h1>');
+  else res.send('<h1 style="font-family:monospace;color:#00d4ff;background:#020817;padding:2rem">INVICTUS II Ground Station — backend running, dashboard not yet deployed.</h1>');
 });
 
 app.get('/api/health', (req, res) => {
@@ -56,7 +106,11 @@ app.get('/api/health', (req, res) => {
     uptime_s: Math.floor((Date.now() - uptimeStart) / 1000),
     serial_connected: !isSimMode,
     db_packet_count: db.getStats('CANSAT').count + db.getStats('NRC').count,
-    sim_mode: isSimMode
+    sim_mode: isSimMode,
+    signal: {
+      CANSAT: { lost: signalLost.CANSAT, last_seen_ms: lastPacketTime.CANSAT },
+      NRC:    { lost: signalLost.NRC,    last_seen_ms: lastPacketTime.NRC }
+    }
   });
 });
 
@@ -82,7 +136,7 @@ app.post('/api/upload-sd', upload.single('file'), (req, res) => {
   const lines = fs.readFileSync(req.file.path, 'utf-8').split('\n');
   let inserted = 0, skipped = 0;
   const now = Date.now();
-  
+
   for (let i = 1; i < lines.length; i++) {
     const p = lines[i].trim().split(',');
     if (p.length < 10) { skipped++; continue; }
@@ -107,8 +161,8 @@ app.post('/api/upload-sd', upload.single('file'), (req, res) => {
     inserted++;
   }
   db.insertUpload({ filename: req.file.originalname, rows_inserted: inserted, uploaded_at: now });
-  fs.unlinkSync(req.file.path);
-  
+  try { fs.unlinkSync(req.file.path); } catch (e) {}
+
   const resp = { ok: true, inserted, skipped, filename: req.file.originalname };
   emitToAll('sd_upload_complete', resp);
   res.json(resp);
@@ -120,52 +174,49 @@ app.get('/api/export', (req, res) => {
   const csv = ['id,source,pkt_id,timestamp_ms,altitude_m,temp_c,pressure_hpa,accel_z,gyro_x,lat,lon,rssi_dbm,flags,received_at']
     .concat(rows.map(r => `${r.id},${r.source},${r.pkt_id},${r.timestamp_ms},${r.altitude_m},${r.temp_c},${r.pressure_hpa},${r.accel_z},${r.gyro_x},${r.lat},${r.lon},${r.rssi_dbm},${r.flags},${r.received_at}`))
     .join('\n');
-  
   res.header('Content-Type', 'text/csv');
   res.header('Content-Disposition', `attachment; filename="flight-${src}-${Date.now()}.csv"`);
   res.send(csv);
 });
 
 app.post('/api/rover/control', async (req, res) => res.json(await rover.control(req.body.left, req.body.right)));
-app.post('/api/rover/stop', async (req, res) => res.json(await rover.stop()));
-app.get('/api/rover/data', async (req, res) => res.json(await rover.data()));
+app.post('/api/rover/stop',    async (req, res) => res.json(await rover.stop()));
+app.get('/api/rover/data',     async (req, res) => res.json(await rover.data()));
 
-// Socket.io
+// ── SOCKET.IO ─────────────────────────────────────────────────────────────────
 io.on('connection', (socket) => {
   try {
     socket.emit('history', {
       cansat: db.getHistory('CANSAT', 60),
-      nrc: db.getHistory('NRC', 60),
+      nrc:    db.getHistory('NRC', 60),
       events: db.getAllEvents()
     });
   } catch (e) {}
 
-  socket.on('subscribe_source', (data) => { if(data && data.source) socket.data.source = data.source; });
+  socket.on('subscribe_source', (data) => {
+    if (data && data.source) socket.data.source = data.source;
+  });
+
   socket.on('request_history', (data) => {
-    if(!data || !data.source) return;
-    try { socket.emit('history', { source: data.source, packets: db.getHistory(data.source, data.limit || 200) }); } catch(e){}
+    if (!data || !data.source) return;
+    try {
+      socket.emit('history', {
+        source: data.source,
+        packets: db.getHistory(data.source, data.limit || 200)
+      });
+    } catch (e) {}
   });
 });
 
-const rawEmitToAll = emitToAll;
-emitToAll = (evt, payload) => {
-  if (evt === 'packet') {
-    io.sockets.sockets.forEach(s => {
-      if (!s.data.source || s.data.source === 'ALL' || s.data.source === payload.source) {
-        try { s.emit(evt, payload); } catch(e){}
-      }
-    });
-  } else {
-    rawEmitToAll(evt, payload);
-  }
-};
-
+// ── START ─────────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`[SYS] Server running on port ${PORT}`));
+server.listen(PORT, () => console.log(`[SYS] INVICTUS II Ground Station running on http://localhost:${PORT}`));
 
+// ── GRACEFUL SHUTDOWN ─────────────────────────────────────────────────────────
 process.on('SIGINT', () => {
-  console.log('\\n[SYS] Shutting down...');
-  if(isSimMode) simulator.stopSimulation();
-  try { db.db.close(); } catch(e){}
+  console.log('\n[SYS] Shutting down ground station...');
+  if (isSimMode) { try { simulator.stopSimulation(); } catch (e) {} }
+  try { db.db.close(); } catch (e) {}
+  console.log('[SYS] Serial port released. DB closed. Bye.');
   process.exit(0);
 });
