@@ -562,15 +562,24 @@
           const core = new THREE.Mesh(geo, coreMat);
           const wire = new THREE.Mesh(geo, wireMat);
           wire.scale.set(1.01, 1.01, 1.01);
-          const part = new THREE.Group(); part.add(core); part.add(wire); part.position.y = y; return part;
+          const part = new THREE.Group();
+          part.add(core); part.add(wire);
+          part.position.y = y;
+          return part;
         };
 
-        rocketGroup.add(buildPart(new THREE.CylinderGeometry(0.2, 0.2, 3, 16, 4), 0));
-        rocketGroup.add(buildPart(new THREE.ConeGeometry(0.2, 0.8, 16, 3), 1.9));
-        rocketGroup.add(buildPart(new THREE.CylinderGeometry(0.15, 0.2, 0.4, 16, 2), -1.7));
+        // Reordered Y positions to point nose UP
+        rocketGroup.add(buildPart(new THREE.CylinderGeometry(0.2, 0.2, 3, 16, 4), 0));     // Body
+        
+        const nose = buildPart(new THREE.ConeGeometry(0.2, 0.8, 16, 3), 1.9);
+        rocketGroup.add(nose);
+        
+        rocketGroup.add(buildPart(new THREE.CylinderGeometry(0.15, 0.2, 0.4, 16, 2), -1.7)); // Engine (Bottom)
+
         for(let i=0; i<4; i++) {
           const fin = buildPart(new THREE.BoxGeometry(0.04, 0.6, 0.5), 0);
-          fin.position.y = -1.3; fin.position.z = 0.3;
+          fin.position.y = -1.3; // Fins near bottom
+          fin.position.z = 0.3;
           const pivot = new THREE.Group(); pivot.add(fin); pivot.rotation.y = (i * Math.PI) / 2;
           rocketGroup.add(pivot);
         }
