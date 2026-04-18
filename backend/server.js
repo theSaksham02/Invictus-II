@@ -9,7 +9,7 @@ const fs = require('fs');
 
 const db = require('./db');
 const serial = require('./serial');
-const simulator = require('./simulator');
+const emulator = require('./emulator');
 const rover = require('./rover-proxy');
 
 const app = express();
@@ -81,18 +81,21 @@ emitToAll = (evt, payload) => {
 
 // ── INIT SERIAL OR SIM ────────────────────────────────────────────────────────
 let simStarted = false;
+if (isSimMode) {
+  process.env.SIM_MODE = 'true';
+  emulator.startEmulator();
+  simStarted = true;
+}
+
 serial.initSerial(emitToAll, () => {
   if (!simStarted && !isSimMode) {
-    console.log('[SYS] Falling back to simulation mode');
+    console.log('[SYS] Hardware Not Found: Falling back to HITL Emulator');
     isSimMode = true;
+    process.env.SIM_MODE = 'true';
     simStarted = true;
-    simulator.startSimulation(emitToAll);
+    emulator.startEmulator();
   }
 });
-if (isSimMode && !simStarted) {
-  simStarted = true;
-  simulator.startSimulation(emitToAll);
-}
 
 // ── ROUTES ────────────────────────────────────────────────────────────────────
 app.get('/', (req, res) => {
@@ -216,7 +219,7 @@ server.listen(PORT, () => console.log(`[SYS] INVICTUS II Ground Station running 
 // ── GRACEFUL SHUTDOWN ─────────────────────────────────────────────────────────
 process.on('SIGINT', () => {
   console.log('\n[SYS] Shutting down ground station...');
-  if (isSimMode) { try { simulator.stopSimulation(); } catch (e) {} }
+  if (isSimMode) { try { emulator.stopEmulator(); } catch (e) {} }
   try { db.db.close(); } catch (e) {}
   console.log('[SYS] Serial port released. DB closed. Bye.');
   process.exit(0);

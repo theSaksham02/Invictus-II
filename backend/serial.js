@@ -1,4 +1,4 @@
-const { SerialPort } = require('serialport');
+const { SerialPort, SerialPortMock } = require('serialport');
 const { ByteLengthParser, ReadlineParser } = require('serialport');
 const { parseCansat, parseNrc } = require('./parser');
 const { insertPacket, insertEvent } = require('./db');
@@ -8,14 +8,14 @@ const CANSAT_PORT = process.env.SERIAL_PORT_CANSAT || '/dev/ttyUSB0';
 const NRC_PORT    = process.env.SERIAL_PORT_NRC    || '/dev/ttyUSB1';
 const CANSAT_BAUD = parseInt(process.env.SERIAL_BAUD_CANSAT || '9600', 10);
 const NRC_BAUD    = parseInt(process.env.SERIAL_BAUD_NRC || '9600', 10);
-const SIM_MODE    = process.env.SIM_MODE === 'true';
 
 let cansatPort, nrcPort;
 let lastSeen = { CANSAT: Date.now(), NRC: Date.now() };
 let lostReported = { CANSAT: false, NRC: false };
 
 function initSerial(emitFn, enableSimFallback) {
-  if (SIM_MODE) return enableSimFallback();
+  const isSimMode = process.env.SIM_MODE === 'true';
+  const PortClass = isSimMode ? SerialPortMock : SerialPort;
 
   setInterval(() => {
     const now = Date.now();
@@ -43,14 +43,15 @@ function initSerial(emitFn, enableSimFallback) {
 
   const connectCansat = () => {
     try {
-      cansatPort = new SerialPort({ path: CANSAT_PORT, baudRate: CANSAT_BAUD });
+      cansatPort = new PortClass({ path: CANSAT_PORT, baudRate: CANSAT_BAUD });
+      if (isSimMode) global.mockCansat = cansatPort;
       
       const parser = cansatPort.pipe(new ByteLengthParser({ length: 37 }));
       parser.on('data', (buf) => handlePacket(parseCansat(buf)));
       
       cansatPort.on('error', (err) => {
         console.warn('[SERIAL] CANSAT Error:', err.message);
-        if (!cansatPort.isOpen && enableSimFallback) enableSimFallback();
+        if (!isSimMode && !cansatPort.isOpen && enableSimFallback) enableSimFallback();
       });
       cansatPort.on('close', () => {
         console.warn('[SERIAL] CANSAT Closed, reconnecting...');
@@ -58,14 +59,15 @@ function initSerial(emitFn, enableSimFallback) {
       });
     } catch (e) {
       console.warn('[SERIAL] CANSAT Init Error:', e.message);
-      if (enableSimFallback) enableSimFallback();
+      if (!isSimMode && enableSimFallback) enableSimFallback();
     }
   };
 
   const connectNrc = () => {
     if (CANSAT_PORT === NRC_PORT) return; 
     try {
-      nrcPort = new SerialPort({ path: NRC_PORT, baudRate: NRC_BAUD });
+      nrcPort = new PortClass({ path: NRC_PORT, baudRate: NRC_BAUD });
+      if (isSimMode) global.mockNrc = nrcPort;
       const parser = nrcPort.pipe(new ReadlineParser({ delimiter: '\n' }));
       parser.on('data', (line) => handlePacket(parseNrc(line)));
       
