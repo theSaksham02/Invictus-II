@@ -1,315 +1,227 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>INVICTUS II — Ground Station</title>
+  <title>INVICTUS II — GROUND STATION [OVERDRIVE]</title>
   <meta name="description" content="MACH-26 UKSEDS NRC 2025-26 real-time rocket telemetry ground station">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link
-    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap"
-    rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <style>
     /* ═══════════════════════════════════════════════════════════
-       RESET & TOKEN SYSTEM — pure black theme
+       BRUTALIST AEROSPACE HUD / MILITARY-GRADE OVERDRIVE
        ═══════════════════════════════════════════════════════════ */
-    *,
-    *::before,
-    *::after {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg-deep: #000000;
-      --bg-base: #030303;
-      --bg-header: #080808;
-      --bg-card: #0c0c0c;
-      --bg-card-hi: #141414;
-
-      --border: rgba(255, 255, 255, 0.055);
-      --border-hi: rgba(0, 212, 255, 0.18);
+      --bg-deep: #030303;
+      --bg-panel: #060606;
+      --bg-header: #000000;
+      
+      --border: rgba(0, 212, 255, 0.15);
+      --border-hi: #00d4ff;
+      --border-alert: #ffb000;
 
       --cyan: #00d4ff;
-      --green: #22c55e;
-      --amber: #f59e0b;
-      --red: #ef4444;
-      --purple: #a78bfa;
-      --teal: #2dd4bf;
-
-      --text-1: #e2e8f0;
-      --text-2: #94a3b8;
-      --text-3: #475569;
-      --text-4: #1c2333;
-
+      --cyan-dim: rgba(0, 212, 255, 0.3);
+      --green: #00ff66;
+      --amber: #ffb000;
+      --red: #ff3333;
+      
+      --text-1: #ffffff;
+      --text-2: #a0a0a0;
+      --text-3: #555555;
+      
       --sans: 'Inter', system-ui, sans-serif;
       --mono: 'JetBrains Mono', 'Fira Code', monospace;
-
-      --r: 6px;
-      --gap: 5px;
+      
+      --gap: 8px;
     }
 
-    html,
-    body {
+    /* Mathematical Grid Background & Scanlines */
+    html, body {
       height: 100%;
       overflow: hidden;
       font-family: var(--sans);
-      background: var(--bg-deep);
+      background-color: var(--bg-deep);
+      background-image: 
+        linear-gradient(rgba(0, 212, 255, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 212, 255, 0.03) 1px, transparent 1px);
+      background-size: 20px 20px;
       color: var(--text-1);
       -webkit-font-smoothing: antialiased;
+      text-transform: uppercase;
     }
 
-    /* ═══════════════════════════════════════════════════════════
-       APP SHELL
-       ═══════════════════════════════════════════════════════════ */
+    body::after {
+      content: " ";
+      display: block;
+      position: absolute;
+      top: 0; left: 0; bottom: 0; right: 0;
+      background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+      z-index: 9999;
+      background-size: 100% 2px, 3px 100%;
+      pointer-events: none;
+    }
+
     #app {
       display: grid;
-      grid-template-rows: 44px 1fr;
+      grid-template-rows: 40px 1fr;
       height: 100vh;
       width: 100vw;
+      position: relative;
+      z-index: 10;
     }
 
     /* ═══════════════════════════════════════════════════════════
-       HEADER
+       HEADER - SHARP & UTILITARIAN
        ═══════════════════════════════════════════════════════════ */
     #header {
       display: grid;
       grid-template-columns: 1fr auto 1fr;
       align-items: center;
-      padding: 0 14px;
+      padding: 0 16px;
       background: var(--bg-header);
-      border-bottom: 1px solid var(--border);
-      z-index: 10;
+      border-bottom: 1px solid var(--border-hi);
+      font-family: var(--mono);
     }
 
-    .header-left {
-      display: flex;
-      align-items: center;
-      gap: 14px;
-      justify-self: start;
-    }
-
-    .header-center {
-      justify-self: center;
-    }
-
-    .header-right {
-      display: flex;
-      align-items: center;
-      gap: 14px;
-      justify-self: end;
-    }
+    .header-left, .header-right { display: flex; align-items: center; gap: 16px; }
+    .header-right { justify-self: end; }
 
     #logo {
-      font-family: var(--mono);
-      font-weight: 700;
-      font-size: 0.85rem;
+      font-weight: 800;
+      font-size: 0.9rem;
+      color: var(--text-1);
+      letter-spacing: 0.1em;
+      position: relative;
+    }
+    #logo::before {
+      content: '■';
       color: var(--cyan);
-      letter-spacing: 0.04em;
-      text-shadow: 0 0 14px rgba(0, 212, 255, 0.4);
+      margin-right: 8px;
     }
 
-    .source-tabs {
-      display: flex;
-      gap: 2px;
-      background: #000;
-      border-radius: 4px;
-      padding: 2px;
-      border: 1px solid var(--border);
-    }
-
+    .source-tabs { display: flex; gap: 0; border: 1px solid var(--border); }
     .source-tab {
       font-family: var(--mono);
       font-size: 0.65rem;
-      font-weight: 600;
-      padding: 3px 10px;
+      font-weight: 700;
+      padding: 4px 12px;
       border: none;
-      border-radius: 3px;
+      border-radius: 0;
       cursor: pointer;
       background: transparent;
       color: var(--text-3);
-      transition: all 0.2s;
-      letter-spacing: 0.05em;
+      transition: all 0.1s;
+      letter-spacing: 0.1em;
     }
-
-    .source-tab:hover {
-      color: var(--text-2);
-    }
-
-    .source-tab.active {
-      background: rgba(0, 212, 255, 0.1);
-      color: var(--cyan);
-    }
+    .source-tab.active { background: var(--cyan); color: #000; }
 
     .phase-badge {
       font-family: var(--mono);
-      font-size: 0.65rem;
-      font-weight: 700;
-      padding: 3px 16px;
-      border-radius: 20px;
-      letter-spacing: 0.12em;
-      background: #111;
-      color: var(--text-3);
-      transition: background-color 0.5s, color 0.3s;
+      font-size: 0.75rem;
+      font-weight: 800;
+      padding: 2px 24px;
+      letter-spacing: 0.2em;
+      border: 1px solid var(--border-hi);
+      background: rgba(0, 212, 255, 0.1);
+      color: var(--cyan);
+      box-shadow: inset 0 0 10px rgba(0, 212, 255, 0.2);
     }
+    .phase-badge.launched { border-color: var(--amber); color: var(--amber); background: rgba(255, 176, 0, 0.1); box-shadow: inset 0 0 10px rgba(255, 176, 0, 0.2); }
+    .phase-badge.apogee { border-color: var(--green); color: var(--green); background: rgba(0, 255, 102, 0.1); box-shadow: inset 0 0 10px rgba(0, 255, 102, 0.2); }
 
-    .signals {
-      display: flex;
-      gap: 10px;
-    }
+    .signals { display: flex; gap: 16px; }
+    .signal-item { display: flex; align-items: center; gap: 6px; }
+    .signal-label { font-size: 0.6rem; color: var(--text-2); font-weight: 700; letter-spacing: 0.1em; }
+    .signal-dot { width: 8px; height: 8px; background: var(--text-3); border-radius: 0; border: 1px solid #000; }
+    .signal-dot.live { background: var(--green); box-shadow: 0 0 8px var(--green); }
+    .signal-dot.lost { background: var(--red); box-shadow: 0 0 8px var(--red); animation: blink 0.5s infinite; }
 
-    .signal-item {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-    }
-
-    .signal-label {
-      font-family: var(--mono);
-      font-size: 0.55rem;
-      color: var(--text-3);
-      letter-spacing: 0.06em;
-    }
-
-    .signal-dot {
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      background: var(--text-3);
-      transition: background 0.3s;
-    }
-
-    .signal-dot.live {
-      background: var(--green);
-      box-shadow: 0 0 6px rgba(34, 197, 94, 0.6);
-      animation: sig-pulse 2s infinite;
-    }
-
-    .signal-dot.lost {
-      background: var(--red);
-      box-shadow: 0 0 6px rgba(239, 68, 68, 0.5);
-    }
-
-    @keyframes sig-pulse {
-
-      0%,
-      100% {
-        opacity: 1
-      }
-
-      50% {
-        opacity: 0.35
-      }
-    }
+    @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
 
     .mission-timer {
-      font-family: var(--mono);
-      font-size: 0.8rem;
-      font-weight: 500;
-      color: var(--text-2);
-      letter-spacing: 0.06em;
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: var(--cyan);
+      letter-spacing: 0.1em;
+      font-variant-numeric: tabular-nums;
     }
 
     /* ═══════════════════════════════════════════════════════════
-       DASHBOARD GRID
+       DASHBOARD GRID & PANELS - SHARP, NO ROUNDED CORNERS
        ═══════════════════════════════════════════════════════════ */
     #dashboard {
       display: grid;
-      grid-template-columns: 162px 1fr 278px;
+      grid-template-columns: 200px 1fr 320px;
       gap: var(--gap);
       padding: var(--gap);
       min-height: 0;
-      overflow: hidden;
     }
+
+    .panel {
+      background: var(--bg-panel);
+      border: 1px solid var(--border);
+      position: relative;
+    }
+    /* Corner crosshairs for technical feel */
+    .panel::before, .panel::after {
+      content: ''; position: absolute; width: 6px; height: 6px; border: 1px solid var(--cyan); pointer-events: none;
+    }
+    .panel::before { top: -1px; left: -1px; border-right: none; border-bottom: none; }
+    .panel::after { bottom: -1px; right: -1px; border-left: none; border-top: none; }
 
     /* ═══════════════════════════════════════════════════════════
        LEFT — METRIC SIDEBAR
        ═══════════════════════════════════════════════════════════ */
-    #metrics-panel {
-      display: flex;
-      flex-direction: column;
-      gap: var(--gap);
-      min-height: 0;
-    }
-
+    #metrics-panel { display: flex; flex-direction: column; gap: var(--gap); min-height: 0; }
+    
     .metric-card {
       flex: 1;
       display: flex;
       flex-direction: column;
       justify-content: center;
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: var(--r);
-      padding: 8px 10px;
-      min-height: 0;
-      overflow: hidden;
+      padding: 10px 16px;
+      border-left: 2px solid var(--border-hi);
+    }
+    .metric-card.alert { border-left-color: var(--amber); }
+
+    .metric-label {
+      font-family: var(--mono);
+      font-size: 0.55rem;
+      font-weight: 700;
+      letter-spacing: 0.15em;
+      color: var(--text-2);
+      margin-bottom: 4px;
     }
 
-    .metric-value-row {
-      display: flex;
-      align-items: baseline;
-      gap: 3px;
-    }
-
+    .metric-value-row { display: flex; align-items: baseline; gap: 6px; }
     .metric-value {
       font-family: var(--mono);
-      font-weight: 700;
-      font-size: 1.5rem;
-      line-height: 1.1;
+      font-weight: 800;
+      font-size: 1.8rem;
+      line-height: 1;
       color: var(--text-1);
       font-variant-numeric: tabular-nums;
     }
+    .metric-unit { font-family: var(--mono); font-size: 0.7rem; color: var(--cyan); }
 
-    .metric-unit {
-      font-family: var(--mono);
-      font-size: 0.62rem;
-      font-weight: 500;
-      color: var(--text-3);
-    }
-
-    .metric-sub {
-      font-family: var(--mono);
-      font-size: 0.58rem;
-      color: var(--text-3);
-      margin-top: 1px;
-    }
-
-    .metric-label {
-      font-family: var(--sans);
-      font-size: 0.52rem;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.12em;
-      color: var(--text-3);
-      margin-top: 3px;
-    }
-
-    #metric-alt {
-      border-color: rgba(0, 212, 255, 0.12);
-    }
-
-    #metric-alt .metric-value {
-      color: var(--cyan);
-      font-size: 1.75rem;
-      text-shadow: 0 0 16px rgba(0, 212, 255, 0.3);
-    }
+    #metric-alt { background: rgba(0, 212, 255, 0.05); border-left: 4px solid var(--cyan); }
+    #metric-alt .metric-value { font-size: 2.5rem; color: var(--cyan); }
 
     .stability-badge {
       display: inline-block;
       font-family: var(--mono);
-      font-size: 0.72rem;
-      font-weight: 700;
-      letter-spacing: 0.1em;
-      padding: 2px 10px;
-      border-radius: 4px;
-      margin-top: 2px;
-      background: rgba(71, 85, 105, 0.25);
-      color: var(--text-3);
-      transition: background 0.4s, color 0.3s;
+      font-size: 0.75rem;
+      font-weight: 800;
+      letter-spacing: 0.15em;
+      padding: 4px 12px;
+      border: 1px solid var(--text-3);
+      color: var(--text-2);
+      margin-top: 4px;
     }
 
     /* ═══════════════════════════════════════════════════════════
@@ -317,426 +229,107 @@
        ═══════════════════════════════════════════════════════════ */
     #charts-panel {
       display: grid;
-      grid-template-rows: 1fr 135px 22px;
+      grid-template-rows: 1fr 180px 28px;
       gap: var(--gap);
       min-height: 0;
-      overflow: hidden;
     }
 
-    /* 3D Rocket card */
+    /* 3D Rocket Wireframe View */
     #rocket-card {
-      position: relative;
       background: #000;
-      border: 1px solid var(--border);
-      border-radius: var(--r);
+      border: 1px solid var(--cyan-dim);
       overflow: hidden;
-      min-height: 0;
-    }
-
-    #rocket-canvas {
-      width: 100%;
-      height: 100%;
-      display: block;
-    }
-
-    /* HUD overlay — positioned over the Three.js canvas */
-    #rocket-hud {
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      pointer-events: none;
-      padding: 10px 12px;
-      display: flex;
-      flex-direction: column;
-      justify-content: space-between;
-    }
-
-    .hud-top {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-    }
-
-    .hud-bottom {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-end;
-    }
-
-    .hud-label {
-      font-family: var(--mono);
-      font-size: 0.5rem;
-      color: rgba(71, 85, 105, 0.9);
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-    }
-
-    .hud-val {
-      font-family: var(--mono);
-      font-size: 0.9rem;
-      font-weight: 700;
-      color: rgba(255, 255, 255, 0.9);
-      text-shadow: 0 0 8px rgba(0, 0, 0, 0.8);
-    }
-
-    .hud-group {
-      display: flex;
-      flex-direction: column;
-      gap: 1px;
-    }
-
-    .hud-group.right {
-      align-items: flex-end;
-    }
-
-    #hud-phase-ring {
-      font-family: var(--mono);
-      font-size: 0.55rem;
-      font-weight: 700;
-      letter-spacing: 0.14em;
-      padding: 3px 12px;
-      border-radius: 20px;
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      background: rgba(0, 0, 0, 0.55);
-      color: #fff;
-      backdrop-filter: blur(4px);
-    }
-
-    /* Altitude progress bar on right edge of 3D view */
-    #alt-bar-track {
-      position: absolute;
-      right: 8px;
-      top: 12px;
-      bottom: 12px;
-      width: 5px;
-      background: rgba(0, 212, 255, 0.12);
-      border-radius: 6px;
-      z-index: 4;
-      pointer-events: none;
-    }
-
-    #alt-bar-fill {
-      position: absolute;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      background: var(--cyan);
-      border-radius: 6px;
-      box-shadow: 0 0 10px rgba(0, 212, 255, 0.75);
-      transition: height 0.8s ease;
-    }
-
-    /* Crosshair lines for aerospace feel */
-    .crosshair {
-      position: absolute;
-      pointer-events: none;
-      border: 1px solid rgba(0, 212, 255, 0.06);
-    }
-
-    .crosshair-v {
-      left: 50%;
-      top: 0;
-      bottom: 0;
-      width: 1px;
-      transform: translateX(-50%);
-    }
-
-    .crosshair-h {
-      top: 50%;
-      left: 0;
-      right: 0;
-      height: 1px;
-      transform: translateY(-50%);
-    }
-
-    /* 4-sparkline grid */
-    #sparklines-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      grid-template-rows: 1fr 1fr;
-      gap: var(--gap);
-      min-height: 0;
-    }
-
-    .sparkline-card {
-      display: flex;
-      flex-direction: column;
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: var(--r);
-      overflow: hidden;
-      min-height: 0;
-    }
-
-    .sparkline-header {
-      flex-shrink: 0;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 4px 8px 0;
-    }
-
-    .sparkline-label {
-      font-family: var(--sans);
-      font-size: 0.47rem;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.1em;
-      color: var(--text-3);
-    }
-
-    .sparkline-cur {
-      font-family: var(--mono);
-      font-size: 0.55rem;
-      font-weight: 600;
-      color: var(--text-2);
-    }
-
-    .sparkline-wrapper {
-      flex: 1;
-      min-height: 0;
       position: relative;
-      padding: 2px 4px 3px;
+      background-image: 
+        radial-gradient(circle at center, rgba(0, 212, 255, 0.1) 0%, transparent 70%),
+        repeating-linear-gradient(0deg, transparent, transparent 40px, rgba(0, 212, 255, 0.05) 40px, rgba(0, 212, 255, 0.05) 41px),
+        repeating-linear-gradient(90deg, transparent, transparent 40px, rgba(0, 212, 255, 0.05) 40px, rgba(0, 212, 255, 0.05) 41px);
+    }
+    #rocket-canvas { width: 100%; height: 100%; display: block; mix-blend-mode: screen; }
+
+    #rocket-hud {
+      position: absolute; top: 0; left: 0; right: 0; bottom: 0; pointer-events: none;
+      padding: 16px; display: flex; flex-direction: column; justify-content: space-between;
+    }
+    .hud-top, .hud-bottom { display: flex; justify-content: space-between; }
+    .hud-group { display: flex; flex-direction: column; }
+    .hud-group.right { align-items: flex-end; }
+    .hud-label { font-family: var(--mono); font-size: 0.55rem; color: var(--cyan); letter-spacing: 0.2em; }
+    .hud-val { font-family: var(--mono); font-size: 1.2rem; font-weight: 800; color: var(--text-1); font-variant-numeric: tabular-nums; }
+
+    /* Crosshairs */
+    .ch { position: absolute; background: var(--cyan-dim); }
+    .ch-v { left: 50%; top: 0; bottom: 0; width: 1px; transform: translateX(-50%); }
+    .ch-h { top: 50%; left: 0; right: 0; height: 1px; transform: translateY(-50%); }
+    .ch-center { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 20px; height: 20px; border: 1px solid var(--cyan); border-radius: 50%; }
+
+    /* Altitude Bar */
+    #alt-bar-track {
+      position: absolute; right: 16px; top: 16px; bottom: 16px; width: 4px; background: rgba(255, 255, 255, 0.1);
+    }
+    #alt-bar-fill {
+      position: absolute; bottom: 0; left: 0; right: 0; background: var(--cyan); transition: height 0.1s linear;
+      box-shadow: 0 0 10px var(--cyan);
     }
 
-    .sparkline-wrapper canvas {
-      width: 100% !important;
-      height: 100% !important;
-    }
+    /* Sparklines */
+    #sparklines-grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: var(--gap); }
+    .sparkline-card { display: flex; flex-direction: column; border: 1px solid var(--border); background: var(--bg-panel); position: relative; }
+    .sparkline-header { display: flex; justify-content: space-between; padding: 6px 10px; border-bottom: 1px solid rgba(255,255,255,0.05); }
+    .sparkline-label { font-family: var(--mono); font-size: 0.55rem; font-weight: 700; color: var(--text-2); letter-spacing: 0.1em; }
+    .sparkline-cur { font-family: var(--mono); font-size: 0.7rem; font-weight: 800; color: var(--cyan); font-variant-numeric: tabular-nums; }
+    .sparkline-wrapper { flex: 1; position: relative; padding: 4px; }
+    .sparkline-wrapper canvas { width: 100% !important; height: 100% !important; }
 
-    /* Stats bar */
+    /* Stats Bar */
     #stats-bar {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: var(--r);
-      padding: 3px 12px;
-      font-family: var(--mono);
-      font-size: 0.58rem;
-      color: var(--text-3);
-    }
-
-    #stats-bar strong {
-      color: var(--text-2);
-      font-weight: 600;
-    }
-
-    .stat-badge {
-      font-weight: 700;
-      letter-spacing: 0.08em;
+      display: flex; align-items: center; justify-content: space-between;
+      background: var(--cyan); color: #000; padding: 0 16px;
+      font-family: var(--mono); font-size: 0.65rem; font-weight: 800; letter-spacing: 0.1em;
     }
 
     /* ═══════════════════════════════════════════════════════════
        RIGHT — MAP, EVENTS, ACTIONS
        ═══════════════════════════════════════════════════════════ */
-    #info-panel {
-      display: grid;
-      grid-template-rows: 1fr 1fr auto;
-      gap: var(--gap);
-      min-height: 0;
-      overflow: hidden;
-    }
+    #info-panel { display: grid; grid-template-rows: 1fr 1fr auto; gap: var(--gap); min-height: 0; }
 
     /* Map */
-    #map-container {
-      position: relative;
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: var(--r);
-      overflow: hidden;
-    }
-
-    #map {
-      height: 100%;
-      width: 100%;
-    }
-
+    #map-container { border: 1px solid var(--border); position: relative; filter: grayscale(100%) contrast(1.2); }
+    #map { height: 100%; width: 100%; background: #000; }
     #map-coords {
-      position: absolute;
-      bottom: 6px;
-      left: 6px;
-      font-family: var(--mono);
-      font-size: 0.52rem;
-      color: var(--text-2);
-      background: rgba(0, 0, 0, 0.82);
-      padding: 2px 7px;
-      border-radius: 3px;
-      z-index: 1000;
-      backdrop-filter: blur(4px);
-      line-height: 1.6;
+      position: absolute; bottom: 8px; left: 8px; z-index: 1000;
+      font-family: var(--mono); font-size: 0.6rem; color: #000; background: var(--cyan); padding: 4px 8px; font-weight: 700;
     }
 
     /* Events */
-    #events-container {
-      display: flex;
-      flex-direction: column;
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: var(--r);
-      overflow: hidden;
-      min-height: 0;
-    }
-
-    .panel-header {
-      flex-shrink: 0;
-      font-family: var(--sans);
-      font-size: 0.52rem;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.12em;
-      color: var(--text-3);
-      padding: 6px 10px 4px;
-    }
-
-    #events-list {
-      flex: 1;
-      overflow-y: auto;
-      padding: 0 10px 6px;
-      min-height: 0;
-    }
-
-    #events-list::-webkit-scrollbar {
-      width: 3px;
-    }
-
-    #events-list::-webkit-scrollbar-track {
-      background: transparent;
-    }
-
-    #events-list::-webkit-scrollbar-thumb {
-      background: var(--text-4);
-      border-radius: 3px;
-    }
-
-    .event-row {
-      display: flex;
-      align-items: center;
-      gap: 7px;
-      padding: 2.5px 0;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.02);
-    }
-
-    .event-row:last-child {
-      border-bottom: none;
-    }
-
-    .event-dot {
-      width: 5px;
-      height: 5px;
-      border-radius: 50%;
-      flex-shrink: 0;
-    }
-
-    .event-time {
-      font-family: var(--mono);
-      color: var(--text-3);
-      font-size: 0.52rem;
-      flex-shrink: 0;
-    }
-
-    .event-type {
-      font-family: var(--mono);
-      font-weight: 600;
-      color: var(--text-2);
-      font-size: 0.57rem;
-    }
-
-    .event-alt {
-      margin-left: auto;
-      font-family: var(--mono);
-      color: var(--text-3);
-      font-size: 0.52rem;
-    }
+    #events-container { display: flex; flex-direction: column; border: 1px solid var(--border); background: var(--bg-panel); }
+    .panel-header { font-family: var(--mono); font-size: 0.6rem; font-weight: 700; color: var(--cyan); padding: 8px 12px; border-bottom: 1px solid var(--border); letter-spacing: 0.15em; background: rgba(0, 212, 255, 0.05); }
+    #events-list { flex: 1; overflow-y: auto; padding: 8px 12px; font-family: var(--mono); }
+    #events-list::-webkit-scrollbar { width: 2px; }
+    #events-list::-webkit-scrollbar-thumb { background: var(--cyan); }
+    .event-row { display: flex; gap: 12px; padding: 6px 0; border-bottom: 1px dashed rgba(255,255,255,0.1); font-size: 0.65rem; }
+    .event-time { color: var(--text-3); font-variant-numeric: tabular-nums; }
+    .event-type { color: var(--text-1); font-weight: 700; flex: 1; }
+    .event-alt { color: var(--cyan); font-variant-numeric: tabular-nums; }
 
     /* Actions */
-    #actions-bar {
-      display: flex;
-      gap: var(--gap);
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: var(--r);
-      padding: 6px 10px;
-    }
-
+    #actions-bar { display: flex; gap: var(--gap); }
     .action-btn {
-      flex: 1;
-      font-family: var(--mono);
-      font-size: 0.55rem;
-      font-weight: 600;
-      padding: 5px 0;
-      background: #000;
-      border: 1px solid var(--border);
-      border-radius: 3px;
-      color: var(--text-3);
-      cursor: pointer;
-      transition: all 0.15s;
-      letter-spacing: 0.04em;
-      text-align: center;
+      flex: 1; font-family: var(--mono); font-size: 0.65rem; font-weight: 800; padding: 10px 0;
+      background: transparent; border: 1px solid var(--cyan); color: var(--cyan);
+      cursor: pointer; transition: all 0.1s; letter-spacing: 0.1em;
     }
+    .action-btn:hover, .action-btn:active { background: var(--cyan); color: #000; }
 
-    .action-btn:hover {
-      border-color: var(--border-hi);
-      color: var(--text-2);
-    }
+    /* Leaflet overrides */
+    .leaflet-control-zoom a { background: #000 !important; color: var(--cyan) !important; border: 1px solid var(--cyan) !important; border-radius: 0 !important; }
+    .leaflet-control-zoom { border: none !important; }
 
-    /* ═══════════════════════════════════════════════════════════
-       LEAFLET OVERRIDES
-       ═══════════════════════════════════════════════════════════ */
-    .leaflet-control-zoom a {
-      background: #111 !important;
-      color: var(--text-2) !important;
-      border-color: var(--border) !important;
-      width: 22px !important;
-      height: 22px !important;
-      line-height: 22px !important;
-      font-size: 11px !important;
-    }
-
-    .leaflet-control-zoom {
-      border: none !important;
-    }
-
-    /* ═══════════════════════════════════════════════════════════
-       RESPONSIVE
-       ═══════════════════════════════════════════════════════════ */
-    @media (max-width: 1280px) {
-      #dashboard {
-        grid-template-columns: 142px 1fr 248px;
-      }
-
-      .metric-value {
-        font-size: 1.3rem;
-      }
-
-      #metric-alt .metric-value {
-        font-size: 1.55rem;
-      }
-    }
-
-    @media (max-width: 1024px) {
-      #dashboard {
-        grid-template-columns: 128px 1fr 220px;
-      }
-
-      .metric-value {
-        font-size: 1.15rem;
-      }
-
-      #metric-alt .metric-value {
-        font-size: 1.35rem;
-      }
-    }
   </style>
 </head>
 
 <body>
   <div id="app">
-
-    <!-- ══════════════════════ HEADER ══════════════════════ -->
     <header id="header">
       <div class="header-left">
         <div class="source-tabs">
@@ -744,734 +337,447 @@
         </div>
       </div>
       <div class="header-center">
-        <div class="phase-badge" id="phase-badge">IDLE</div>
+        <div class="phase-badge" id="phase-badge">SYS.IDLE</div>
       </div>
       <div class="header-right">
         <div class="signals">
-          <div class="signal-item"><span class="signal-dot" id="signal-cansat"></span><span
-              class="signal-label">CAN</span></div>
-          <div class="signal-item"><span class="signal-dot" id="signal-nrc"></span><span class="signal-label">NRC</span>
-          </div>
+          <div class="signal-item"><span class="signal-dot" id="signal-cansat"></span><span class="signal-label">CAN</span></div>
+          <div class="signal-item"><span class="signal-dot" id="signal-nrc"></span><span class="signal-label">NRC</span></div>
         </div>
         <span class="mission-timer" id="mission-timer">T+00:00:00</span>
       </div>
     </header>
 
-    <!-- ══════════════════════ DASHBOARD ══════════════════════ -->
     <main id="dashboard">
-
-      <!-- LEFT — Metric sidebar -->
       <aside id="metrics-panel">
-        <div class="metric-card" id="metric-alt">
+        <div class="metric-card panel" id="metric-alt">
+          <div class="metric-label">LIVE ALTITUDE</div>
           <div class="metric-value-row">
-            <span class="metric-value" id="val-alt">0.0</span>
-            <span class="metric-unit">m</span>
+            <span class="metric-value" id="val-alt">0000.0</span>
+            <span class="metric-unit">M</span>
           </div>
-          <div class="metric-sub" id="val-apogee">APOGEE —</div>
-          <div class="metric-label">Live Altitude</div>
+          <div class="metric-label" style="margin-top: 8px; color: var(--cyan);">APOGEE: <span id="val-apogee" style="color: #fff;">0000.0</span></div>
         </div>
-        <div class="metric-card">
+        <div class="metric-card panel">
+          <div class="metric-label">VERTICAL VELOCITY</div>
           <div class="metric-value-row">
-            <span class="metric-value" id="val-vvel">—</span>
-            <span class="metric-unit">m/s</span>
+            <span class="metric-value" id="val-vvel">+00.0</span>
+            <span class="metric-unit">M/S</span>
           </div>
-          <div class="metric-label">Vertical Velocity</div>
         </div>
-        <div class="metric-card">
+        <div class="metric-card panel">
+          <div class="metric-label">VERTICAL ACCEL</div>
           <div class="metric-value-row">
-            <span class="metric-value" id="val-accel">—</span>
-            <span class="metric-unit">m/s²</span>
+            <span class="metric-value" id="val-accel">+00.0</span>
+            <span class="metric-unit">M/S²</span>
           </div>
-          <div class="metric-label">Vertical Accel</div>
         </div>
-        <div class="metric-card">
-          <div class="stability-badge" id="val-stability">—</div>
-          <div class="metric-label" style="margin-top:5px">Stability</div>
+        <div class="metric-card panel">
+          <div class="metric-label">STABILITY INDEX</div>
+          <div class="stability-badge" id="val-stability">CALCULATING</div>
         </div>
-        <div class="metric-card">
+        <div class="metric-card panel">
+          <div class="metric-label">ATMOSPHERIC PRESSURE</div>
           <div class="metric-value-row">
-            <span class="metric-value" id="val-press">—</span>
-            <span class="metric-unit">hPa</span>
+            <span class="metric-value" id="val-press">1013.2</span>
+            <span class="metric-unit">HPA</span>
           </div>
-          <div class="metric-label">Pressure</div>
         </div>
-        <div class="metric-card">
+        <div class="metric-card panel">
+          <div class="metric-label">EXTERNAL TEMP</div>
           <div class="metric-value-row">
-            <span class="metric-value" id="val-temp">—</span>
+            <span class="metric-value" id="val-temp">00.0</span>
             <span class="metric-unit">°C</span>
           </div>
-          <div class="metric-label">Temperature</div>
         </div>
-        <div class="metric-card" style="flex:0.7">
-          <div style="display:flex;justify-content:space-between;align-items:center">
-            <div>
-              <div class="metric-value-row">
-                <span class="metric-value" style="font-size:1.05rem" id="val-rssi">—</span>
-                <span class="metric-unit">dBm</span>
-              </div>
-              <div class="metric-label">RSSI</div>
-            </div>
-            <div style="text-align:right">
-              <div class="metric-value-row" style="justify-content:flex-end">
-                <span class="metric-value" style="font-size:1.05rem" id="val-pkts">0</span>
-              </div>
-              <div class="metric-label">PKTS</div>
-            </div>
+        <div class="metric-card panel" style="flex-direction: row; justify-content: space-between; align-items: center;">
+          <div>
+            <div class="metric-label">LINK RSSI</div>
+            <div class="metric-value-row"><span class="metric-value" style="font-size: 1.4rem" id="val-rssi">-00</span><span class="metric-unit">DBM</span></div>
+          </div>
+          <div style="text-align: right">
+            <div class="metric-label">PACKETS</div>
+            <div class="metric-value-row"><span class="metric-value" style="font-size: 1.4rem" id="val-pkts">0000</span></div>
           </div>
         </div>
       </aside>
 
-      <!-- CENTER — 3D Rocket + Sparklines -->
       <section id="charts-panel">
-
-        <!-- Three.js rocket viewer -->
-        <div id="rocket-card">
+        <div id="rocket-card" class="panel">
           <canvas id="rocket-canvas"></canvas>
-          <!-- Crosshair guides -->
-          <div class="crosshair crosshair-v"></div>
-          <div class="crosshair crosshair-h"></div>
-          <!-- Altitude progress bar -->
-          <div id="alt-bar-track">
-            <div id="alt-bar-fill" style="height:0%"></div>
-          </div>
-          <!-- HUD overlay -->
+          <div class="ch ch-v"></div><div class="ch ch-h"></div><div class="ch-center"></div>
+          <div id="alt-bar-track"><div id="alt-bar-fill" style="height:0%"></div></div>
           <div id="rocket-hud">
             <div class="hud-top">
-              <div class="hud-group">
-                <div class="hud-label">Altitude</div>
-                <div class="hud-val" id="hud-alt">0.0 m</div>
-              </div>
-              <div class="hud-group right">
-                <div class="hud-label">V-Velocity</div>
-                <div class="hud-val" id="hud-vvel">— m/s</div>
-              </div>
+              <div class="hud-group"><div class="hud-label">PITCH</div><div class="hud-val" id="hud-pitch">0.00°</div></div>
+              <div class="hud-group right"><div class="hud-label">ROLL RATE</div><div class="hud-val" id="hud-gyro">0.00°/S</div></div>
             </div>
             <div class="hud-bottom">
-              <div class="hud-group">
-                <div class="hud-label">Roll Rate</div>
-                <div class="hud-val" id="hud-gyro">— °/s</div>
-              </div>
-              <div class="hud-group right">
-                <div class="hud-label">Accel</div>
-                <div class="hud-val" id="hud-accel">— m/s²</div>
-              </div>
+              <div class="hud-group"><div class="hud-label">TARGET TGT</div><div class="hud-val" style="color:var(--text-3)">2200 FT</div></div>
+              <div class="hud-group right"><div class="hud-label">G-FORCE</div><div class="hud-val" id="hud-gforce">1.00 G</div></div>
             </div>
           </div>
         </div>
 
-        <!-- 2×2 Sparklines -->
         <div id="sparklines-grid">
-          <div class="sparkline-card">
-            <div class="sparkline-header">
-              <span class="sparkline-label">Altitude</span>
-              <span class="sparkline-cur" id="cur-alt">—</span>
-            </div>
+          <div class="sparkline-card panel">
+            <div class="sparkline-header"><span class="sparkline-label">ALTITUDE [M]</span><span class="sparkline-cur" id="cur-alt">0000.0</span></div>
             <div class="sparkline-wrapper"><canvas id="spark-alt"></canvas></div>
           </div>
-          <div class="sparkline-card">
-            <div class="sparkline-header">
-              <span class="sparkline-label">Temperature</span>
-              <span class="sparkline-cur" id="cur-temp">—</span>
-            </div>
+          <div class="sparkline-card panel">
+            <div class="sparkline-header"><span class="sparkline-label">TEMP [°C]</span><span class="sparkline-cur" id="cur-temp">00.0</span></div>
             <div class="sparkline-wrapper"><canvas id="spark-temp"></canvas></div>
           </div>
-          <div class="sparkline-card">
-            <div class="sparkline-header">
-              <span class="sparkline-label">Pressure</span>
-              <span class="sparkline-cur" id="cur-press">—</span>
-            </div>
+          <div class="sparkline-card panel">
+            <div class="sparkline-header"><span class="sparkline-label">PRESSURE [HPA]</span><span class="sparkline-cur" id="cur-press">0000.0</span></div>
             <div class="sparkline-wrapper"><canvas id="spark-press"></canvas></div>
           </div>
-          <div class="sparkline-card">
-            <div class="sparkline-header">
-              <span class="sparkline-label">V-Velocity</span>
-              <span class="sparkline-cur" id="cur-vvel">—</span>
-            </div>
+          <div class="sparkline-card panel">
+            <div class="sparkline-header"><span class="sparkline-label">VELOCITY [M/S]</span><span class="sparkline-cur" id="cur-vvel">00.0</span></div>
             <div class="sparkline-wrapper"><canvas id="spark-vvel"></canvas></div>
           </div>
         </div>
 
-        <!-- Stats bar -->
-        <div id="stats-bar">
-          <span>APOGEE <strong id="stat-max-alt">0.0</strong> m</span>
-          <span>PKT <strong id="stat-pkts">0</strong></span>
-          <span class="stat-badge" id="stat-mode">—</span>
+        <div id="stats-bar" class="panel">
+          <span>MAX_ALT: <span id="stat-max-alt">0000.0</span>M</span>
+          <span>TOTAL_PKT: <span id="stat-pkts">0000</span></span>
+          <span id="stat-mode">SYSTEM ONLINE</span>
         </div>
       </section>
 
-      <!-- RIGHT — Map, Events, Actions -->
       <aside id="info-panel">
-        <div id="map-container">
+        <div id="map-container" class="panel">
           <div id="map"></div>
-          <div id="map-coords">
-            <div id="coord-lat">—</div>
-            <div id="coord-lon">—</div>
-          </div>
+          <div id="map-coords"><span id="coord-lat">00.00000</span> / <span id="coord-lon">00.00000</span></div>
         </div>
-        <div id="events-container">
-          <div class="panel-header">Mission Events</div>
+        <div id="events-container" class="panel">
+          <div class="panel-header">MISSION LOG // EVENT STREAM</div>
           <div id="events-list"></div>
         </div>
         <div id="actions-bar">
-          <button class="action-btn" id="btn-upload" onclick="uploadSD()">↑ UPLOAD SD</button>
-          <button class="action-btn" id="btn-export" onclick="exportCSV()">↓ EXPORT CSV</button>
+          <button class="action-btn panel" id="btn-upload" onclick="uploadSD()">[ UPLOAD SD ]</button>
+          <button class="action-btn panel" id="btn-export" onclick="exportCSV()">[ EXPORT CSV ]</button>
           <input type="file" id="file-sd" accept=".csv" hidden>
         </div>
       </aside>
-
     </main>
   </div>
 
-  <!-- ══════════════════════ SCRIPTS ══════════════════════ -->
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js/dist/chart.umd.js"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="http://localhost:3000/vendor/three.min.js"></script>
+  <!-- Using a reliable CDN for Three.js so it actually renders -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 
   <script>
     (() => {
       'use strict';
-
       const $ = id => document.getElementById(id);
 
-      // ═══════════════════════════════════════════════════════════════════
-      // STATE
-      // ═══════════════════════════════════════════════════════════════════
+      // Pad numbers for that strict military HUD feel
+      const pad = (num, length, decimals = 1) => {
+        if(isNaN(num)) return "----.-";
+        let str = parseFloat(num).toFixed(decimals);
+        const isNeg = str.startsWith('-');
+        if(isNeg) str = str.substring(1);
+        while(str.split('.')[0].length < length) str = '0' + str;
+        return (isNeg ? '-' : '+') + str;
+      };
+
       let source = 'CANSAT';
       let maxAlt = { CANSAT: 0, NRC: 0 };
       let pktCount = { CANSAT: 0, NRC: 0 };
       let firstReceivedAt = null;
       let currentPhase = { CANSAT: 'IDLE', NRC: 'IDLE' };
-
       let prevAlt = null, prevReceivedAt = null;
-      let lastVvel = 0;
       const gyroHistory = [];
 
-      const phaseColors = {
-        IDLE: '#475569', LAUNCHED: '#f59e0b', ASCENDING: '#00d4ff',
-        APOGEE: '#22c55e', DESCENDING: '#f59e0b', LANDED: '#22c55e',
-        SIGNAL_LOST: '#ef4444', SIGNAL_RECOVERED: '#22c55e'
-      };
-
-      // ═══════════════════════════════════════════════════════════════════
-      // CHART.JS — SPARKLINES
-      // ═══════════════════════════════════════════════════════════════════
-      const SPARK_WIN = 80;
-
+      // Brutalist Chart.js
+      Chart.defaults.color = '#555';
+      Chart.defaults.font.family = "'JetBrains Mono', monospace";
       function mkSpark(id, color) {
         return new Chart($(id).getContext('2d'), {
           type: 'line',
-          data: { labels: [], datasets: [{ data: [], borderColor: color, borderWidth: 1.5, pointRadius: 0, tension: 0.35, fill: false }] },
+          data: { labels: [], datasets: [{ data: [], borderColor: color, borderWidth: 1.5, pointRadius: 0, tension: 0, fill: false, stepped: 'middle' }] },
           options: {
-            responsive: true, maintainAspectRatio: false, animation: { duration: 0 },
+            responsive: true, maintainAspectRatio: false, animation: false,
             plugins: { legend: { display: false }, tooltip: { enabled: false } },
-            scales: { x: { display: false }, y: { display: false } }
+            scales: { x: { display: false }, y: { display: false } },
+            layout: { padding: 0 }
           }
         });
       }
 
       const sparkAlt = mkSpark('spark-alt', '#00d4ff');
-      const sparkTemp = mkSpark('spark-temp', '#f59e0b');
-      const sparkPress = mkSpark('spark-press', '#2dd4bf');
-      const sparkVvel = mkSpark('spark-vvel', '#22c55e');
+      const sparkTemp = mkSpark('spark-temp', '#ffb000');
+      const sparkPress = mkSpark('spark-press', '#00ff66');
+      const sparkVvel = mkSpark('spark-vvel', '#ffffff');
       const allSparks = [sparkAlt, sparkTemp, sparkPress, sparkVvel];
 
       function pushSpark(chart, val) {
-        chart.data.labels.push('');
-        chart.data.datasets[0].data.push(val);
-        if (chart.data.labels.length > SPARK_WIN) { chart.data.labels.shift(); chart.data.datasets[0].data.shift(); }
+        chart.data.labels.push(''); chart.data.datasets[0].data.push(val);
+        if (chart.data.labels.length > 60) { chart.data.labels.shift(); chart.data.datasets[0].data.shift(); }
       }
-      function updateSparks() { allSparks.forEach(c => c.update('none')); }
 
-      // ═══════════════════════════════════════════════════════════════════
-      // LEAFLET MAP
-      // ═══════════════════════════════════════════════════════════════════
+      // Map
       const map = L.map('map', { zoomControl: false, attributionControl: false }).setView([52.5, -1.9], 14);
       L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19 }).addTo(map);
-      L.control.zoom({ position: 'topright' }).addTo(map);
-
       let mapMarker = null;
-      const trail = L.polyline([], { color: '#00d4ff', weight: 2, opacity: 0.5 }).addTo(map);
+      const trail = L.polyline([], { color: '#00d4ff', weight: 1.5, opacity: 1 }).addTo(map);
 
       function updateMap(lat, lon) {
-        if (!lat || !lon || (lat === 0 && lon === 0)) return;
+        if (!lat || !lon) return;
         const pos = [lat, lon];
         if (mapMarker) mapMarker.setLatLng(pos);
-        else mapMarker = L.circleMarker(pos, { radius: 5, color: '#00d4ff', fillColor: '#00d4ff', fillOpacity: 0.9, weight: 2 }).addTo(map);
-        trail.addLatLng(pos);
-        map.panTo(pos);
-        $('coord-lat').textContent = lat.toFixed(5) + '° N';
-        $('coord-lon').textContent = lon.toFixed(5) + '° E';
+        else mapMarker = L.circleMarker(pos, { radius: 3, color: '#00d4ff', fillColor: '#00d4ff', fillOpacity: 1, weight: 1 }).addTo(map);
+        trail.addLatLng(pos); map.panTo(pos);
+        $('coord-lat').textContent = lat.toFixed(5);
+        $('coord-lon').textContent = lon.toFixed(5);
       }
 
-      // ═══════════════════════════════════════════════════════════════════
-      // THREE.JS — 3D ROCKET SCENE
-      // ═══════════════════════════════════════════════════════════════════
+      // THREE.JS AWARD-WINNING ENVIRONMENT
       const rktCard = $('rocket-card');
       const rktCanvas = $('rocket-canvas');
-      let rktRollRate = 0;    // deg/s from gyro_x
-      let rktRollAngle = 0;    // integrated roll, radians
-      let rktPitchTarget = 0;   // target pitch offset from vertical, radians
-      let rktPitchCurrent = 0;  // current pitch (smoothed)
-      let rktAltTarget = 0;    // target Y in scene
-      let rktAltCurrent = 0;    // current Y (lerped)
-      let rktFlameTarget = 0;   // 0–1 flame intensity
-      let rktPhaseName = 'IDLE';
-      let rktMaxAlt = 1;    // for normalization (at least 1m to avoid div/0)
-      let rktUpdateFromPacket = () => { };
-      let rktSetPhase = () => { };
+      let rktRollRate = 0, rktPitchTarget = 0, rktPitchCurrent = 0;
+      let rktAccelTarget = 1, rktAccelCurrent = 1;
+      
+      if (typeof window.THREE !== 'undefined' && rktCard && rktCanvas) {
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x000000, 0.08);
 
-      if (typeof window.THREE === 'undefined' || !rktCard || !rktCanvas) {
-        console.warn('[INVICTUS] THREE.js unavailable; running telemetry UI without 3D rocket renderer.');
-        if (rktCanvas) rktCanvas.style.display = 'none';
-      } else {
-        const rktScene = new THREE.Scene();
-        const rktCamera = new THREE.PerspectiveCamera(50, 1, 0.1, 500);
-        const rktRenderer = new THREE.WebGLRenderer({ canvas: rktCanvas, antialias: true, alpha: true });
-        rktRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-        rktRenderer.toneMapping = THREE.ACESFilmicToneMapping;
-        rktRenderer.toneMappingExposure = 1.1;
+        const camera = new THREE.PerspectiveCamera(40, rktCard.clientWidth / rktCard.clientHeight, 0.1, 100);
+        const renderer = new THREE.WebGLRenderer({ canvas: rktCanvas, alpha: true, antialias: true, powerPreference: 'high-performance' });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        
+        const resize = () => { camera.aspect = rktCard.clientWidth / rktCard.clientHeight; camera.updateProjectionMatrix(); renderer.setSize(rktCard.clientWidth, rktCard.clientHeight); };
+        window.addEventListener('resize', resize); resize();
 
-        function resizeRkt() {
-          const w = rktCard.clientWidth, h = rktCard.clientHeight;
-          rktCamera.aspect = w / h;
-          rktCamera.updateProjectionMatrix();
-          rktRenderer.setSize(w, h);
-        }
-        resizeRkt();
-
-        // ── Lighting ──────────────────────────────────────────────────────
-        rktScene.add(new THREE.AmbientLight(0x0a0a0a, 3));
-        const sunLight = new THREE.DirectionalLight(0xffffff, 4);
-        sunLight.position.set(6, 10, 4);
-        rktScene.add(sunLight);
-        const rimLight = new THREE.DirectionalLight(0x00d4ff, 2);
-        rimLight.position.set(-5, 3, -3);
-        rktScene.add(rimLight);
-        const engineGlow = new THREE.PointLight(0xff6600, 0, 8);
-        rktScene.add(engineGlow);
-
-        // ── Starfield ─────────────────────────────────────────────────────
-        const starPositions = [];
-        for (let i = 0; i < 1200; i++) {
-          const r = 60 + Math.random() * 80;
-          const theta = Math.random() * Math.PI * 2;
-          const phi = Math.acos(2 * Math.random() - 1);
-          starPositions.push(r * Math.sin(phi) * Math.cos(theta), r * Math.sin(phi) * Math.sin(theta), r * Math.cos(phi));
-        }
-        const starGeo = new THREE.BufferGeometry();
-        starGeo.setAttribute('position', new THREE.Float32BufferAttribute(starPositions, 3));
-        rktScene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 0.12, transparent: true, opacity: 0.55 })));
-
-        // ── Materials ─────────────────────────────────────────────────────
-        const matBody = new THREE.MeshStandardMaterial({ color: 0xe8ecf0, metalness: 0.35, roughness: 0.35 });
-        const matNose = new THREE.MeshStandardMaterial({ color: 0x111111, metalness: 0.85, roughness: 0.1 });
-        const matFin = new THREE.MeshStandardMaterial({ color: 0x00d4ff, metalness: 0.7, roughness: 0.2, emissive: 0x003344, emissiveIntensity: 0.4 });
-        const matNozzle = new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.9, roughness: 0.15 });
-        const matStripe = new THREE.MeshStandardMaterial({ color: 0x00d4ff, metalness: 0.5, roughness: 0.3, emissive: 0x001a22, emissiveIntensity: 0.3 });
-
-        // ── Rocket group ──────────────────────────────────────────────────
+        // 1. Solid Core + Wireframe Shell
         const rocketGroup = new THREE.Group();
-
-        // Body — main tube
-        rocketGroup.add(Object.assign(new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 2.4, 28), matBody), {}));
-
-        // Nose cone — ogive approximation with cone
-        const noseMesh = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.72, 28), matNose);
-        noseMesh.position.y = 1.56;
-        rocketGroup.add(noseMesh);
-
-        // Boat-tail transition (body → nozzle)
-        const boatTail = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.18, 0.28, 24), matNozzle);
-        boatTail.position.y = -1.34;
-        rocketGroup.add(boatTail);
-
-        // Nozzle bell (flared outward at bottom)
-        const nozzle = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.2, 0.32, 24), matNozzle);
-        nozzle.position.y = -1.62;
-        rocketGroup.add(nozzle);
-
-        // Accent stripes
-        const stripe1 = new THREE.Mesh(new THREE.CylinderGeometry(0.185, 0.185, 0.065, 28), matStripe);
-        stripe1.position.y = 0.65;
-        rocketGroup.add(stripe1);
-        const stripe2 = new THREE.Mesh(new THREE.CylinderGeometry(0.185, 0.185, 0.065, 28), matStripe);
-        stripe2.position.y = -0.5;
-        rocketGroup.add(stripe2);
-        const stripeNose = new THREE.Mesh(new THREE.CylinderGeometry(0.182, 0.182, 0.04, 28), matStripe);
-        stripeNose.position.y = 1.22;
-        rocketGroup.add(stripeNose);
-
-        // ── Fins (trapezoid via ExtrudeGeometry) ──────────────────────────
-        function makeFin() {
-          const shape = new THREE.Shape();
-          shape.moveTo(0, 0);
-          shape.lineTo(0, 0.44);
-          shape.lineTo(0.38, 0.30);
-          shape.lineTo(0.46, 0);
-          shape.closePath();
-          return new THREE.ExtrudeGeometry(shape, { depth: 0.022, bevelEnabled: false });
-        }
-        const finGeo = makeFin();
-        for (let i = 0; i < 4; i++) {
-          const fg = new THREE.Group();
-          const fin = new THREE.Mesh(finGeo, matFin);
-          fin.position.z = -0.011;
-          fg.add(fin);
-          fg.position.y = -1.2;
-          fg.rotation.y = (i / 4) * Math.PI * 2;
-          rocketGroup.add(fg);
-        }
-
-        rktScene.add(rocketGroup);
-
-        // ── Flame (engine exhaust) ─────────────────────────────────────────
-        const flameGroup = new THREE.Group();
-
-        const matFlameOuter = new THREE.MeshBasicMaterial({ color: 0xff5500, transparent: true, opacity: 0.75, blending: THREE.AdditiveBlending, depthWrite: false });
-        const matFlameMid = new THREE.MeshBasicMaterial({ color: 0xff9900, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false });
-        const matFlameCore = new THREE.MeshBasicMaterial({ color: 0xffffcc, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false });
-
-        const flameOuter = new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.9, 14), matFlameOuter);
-        const flameMid = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.75, 12), matFlameMid);
-        const flameCore = new THREE.Mesh(new THREE.ConeGeometry(0.04, 0.5, 10), matFlameCore);
-        [flameOuter, flameMid, flameCore].forEach(f => { f.rotation.x = Math.PI; flameGroup.add(f); });
-        flameGroup.position.y = -1.78;
-        flameGroup.visible = false;
-        rocketGroup.add(flameGroup);
-
-        // ── Parachute ─────────────────────────────────────────────────────
-        const chuteGroup = new THREE.Group();
-        const matChute = new THREE.MeshStandardMaterial({
-          color: 0xff4400, metalness: 0, roughness: 1, transparent: true, opacity: 0.82, side: THREE.DoubleSide
-        });
-        const chuteCanopy = new THREE.Mesh(new THREE.SphereGeometry(0.7, 16, 8, 0, Math.PI * 2, 0, Math.PI * 0.55), matChute);
-        chuteCanopy.position.y = 0.5;
-        chuteGroup.add(chuteCanopy);
-        // Shroud lines
-        for (let i = 0; i < 8; i++) {
-          const lineGeo = new THREE.BufferGeometry().setFromPoints([
-            new THREE.Vector3(0, 0, 0),
-            new THREE.Vector3(Math.sin((i / 8) * Math.PI * 2) * 0.65, 0.5, Math.cos((i / 8) * Math.PI * 2) * 0.65)
-          ]);
-          chuteGroup.add(new THREE.Line(lineGeo, new THREE.LineBasicMaterial({ color: 0x888888, transparent: true, opacity: 0.5 })));
-        }
-        chuteGroup.position.y = 1.3;
-        chuteGroup.visible = false;
-        rocketGroup.add(chuteGroup);
-
-        // ── Camera & orbit ────────────────────────────────────────────────
-        const ORBIT_RADIUS = 7;
-        rktCamera.position.set(0, 2, ORBIT_RADIUS);
-        let orbitTheta = 0;
-
-        // ── Rocket telemetry state (live update from packets) ─────────────
-        rktUpdateFromPacket = function (pkt) {
-          rktRollRate = pkt.gyro_x || 0;
-
-          // Flame active during launch & ascent, size ∝ accel above 1g
-          const thrustG = Math.max(0, (pkt.accel_z || 0) - 1.0);
-          rktFlameTarget = (rktPhaseName === 'LAUNCHED' || rktPhaseName === 'ASCENDING')
-            ? Math.min(1, thrustG / 2.5 + 0.35)
-            : 0;
-
-          // Pitch: upright during ascent, slight tumble during descent
-          if (rktPhaseName === 'DESCENDING' || rktPhaseName === 'APOGEE') {
-            rktPitchTarget = 0.18 + Math.abs(pkt.gyro_x || 0) * 0.002;
-          } else if (rktPhaseName === 'LANDED') {
-            rktPitchTarget = Math.PI * 0.5; // on its side
-          } else {
-            rktPitchTarget = Math.min(0.12, Math.abs(pkt.gyro_x || 0) * 0.001);
-          }
-
-          // Altitude in scene: scale so max sim alt (670m) → 5 scene units
-          rktAltTarget = (pkt.altitude_m / Math.max(rktMaxAlt, 10)) * 5;
+        const coreMat = new THREE.MeshPhongMaterial({ color: 0x020608, specular: 0x00d4ff, shininess: 50 });
+        const wireMat = new THREE.MeshBasicMaterial({ color: 0x00d4ff, wireframe: true, transparent: true, opacity: 0.65 });
+        
+        const buildPart = (geo, y) => {
+          const core = new THREE.Mesh(geo, coreMat);
+          const wire = new THREE.Mesh(geo, wireMat);
+          wire.scale.set(1.02, 1.02, 1.02);
+          const part = new THREE.Group();
+          part.add(core); part.add(wire);
+          part.position.y = y;
+          return part;
         };
 
-        rktSetPhase = function (phase) {
-          rktPhaseName = phase;
-          flameGroup.visible = (phase === 'LAUNCHED' || phase === 'ASCENDING');
-          chuteGroup.visible = (phase === 'DESCENDING');
-        };
+        rocketGroup.add(buildPart(new THREE.CylinderGeometry(0.2, 0.2, 3, 12, 4), 0));
+        rocketGroup.add(buildPart(new THREE.ConeGeometry(0.2, 0.8, 12, 3), 1.9));
+        rocketGroup.add(buildPart(new THREE.CylinderGeometry(0.15, 0.2, 0.4, 12, 2), -1.7));
+        
+        for(let i=0; i<4; i++) {
+          const fin = buildPart(new THREE.BoxGeometry(0.04, 0.6, 0.5), 0);
+          fin.position.y = -1.3; fin.position.z = 0.3;
+          const pivot = new THREE.Group(); pivot.add(fin); pivot.rotation.y = (i * Math.PI) / 2;
+          rocketGroup.add(pivot);
+        }
+        scene.add(rocketGroup);
 
-        // ── Rocket animation loop ─────────────────────────────────────────
-        const rktClock = new THREE.Clock();
-        let rktPrevTime = 0;
+        // 2. Holographic Targeting Rings
+        const rings = new THREE.Group();
+        const ringMat = new THREE.MeshBasicMaterial({ color: 0x00d4ff, transparent: true, opacity: 0.25, side: THREE.DoubleSide });
+        for(let i=0; i<3; i++) {
+           const r = new THREE.Mesh(new THREE.TorusGeometry(0.8 - (i*0.1), 0.005, 4, 64), ringMat);
+           r.position.y = -0.5 + (i * 0.8);
+           r.rotation.x = Math.PI / 2;
+           rings.add(r);
+        }
+        scene.add(rings);
 
-        function animateRocket() {
-          requestAnimationFrame(animateRocket);
-          const now = rktClock.getElapsedTime();
-          const dt = Math.min(now - rktPrevTime, 0.1);
-          rktPrevTime = now;
+        // 3. Dynamic Environment Floor
+        const gridHelper = new THREE.GridHelper(30, 30, 0x00d4ff, 0x003355);
+        gridHelper.position.y = -3;
+        gridHelper.material.transparent = true;
+        gridHelper.material.opacity = 0.4;
+        scene.add(gridHelper);
 
-          // Integrate roll from live gyro reading (deg/s → rad)
-          rktRollAngle += rktRollRate * dt * (Math.PI / 180);
+        // 4. Data Streams / Engine Particles
+        const partGeo = new THREE.BufferGeometry();
+        const partCount = 400;
+        const posArray = new Float32Array(partCount * 3);
+        for(let i=0; i<partCount*3; i++) posArray[i] = (Math.random() - 0.5) * 8;
+        partGeo.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
+        const partMat = new THREE.PointsMaterial({ color: 0x00d4ff, size: 0.03, transparent: true, opacity: 0.8 });
+        const particles = new THREE.Points(partGeo, partMat);
+        scene.add(particles);
 
-          // Smooth pitch
-          rktPitchCurrent += (rktPitchTarget - rktPitchCurrent) * Math.min(1, dt * 3);
+        // Lighting
+        scene.add(new THREE.AmbientLight(0x001122, 2.0));
+        const dirLight = new THREE.DirectionalLight(0x00d4ff, 3);
+        dirLight.position.set(5, 5, 5);
+        scene.add(dirLight);
+        const alertLight = new THREE.DirectionalLight(0xffb000, 0.5);
+        alertLight.position.set(-5, -2, -5);
+        scene.add(alertLight);
 
-          // Smooth altitude position
-          rktAltCurrent += (rktAltTarget - rktAltCurrent) * Math.min(1, dt * 1.5);
-          rocketGroup.position.y = rktAltCurrent;
+        camera.position.set(2, 1, 5.5);
+        camera.lookAt(0, 0, 0);
+        const clock = new THREE.Clock();
 
-          // Apply rotations — rocket nose always points +Y in local space
-          // rotation.x = 0 → nose up (default)
-          rocketGroup.rotation.z = rktRollAngle;
+        const animate = () => {
+          requestAnimationFrame(animate);
+          const time = clock.getElapsedTime();
+
+          rktPitchCurrent += (rktPitchTarget - rktPitchCurrent) * 0.08;
+          rktAccelCurrent += (rktAccelTarget - rktAccelCurrent) * 0.1;
+
           rocketGroup.rotation.x = rktPitchCurrent;
+          rocketGroup.rotation.z += rktRollRate * 0.015;
+          rocketGroup.position.y = Math.sin(time * 1.5) * 0.08; // Suspended float
 
-          // Idle animation — gentle sway when no real data
-          if (rktPhaseName === 'IDLE') {
-            rocketGroup.rotation.x = Math.sin(now * 0.38) * 0.025;
-            rocketGroup.rotation.z = Math.sin(now * 0.27) * 0.015;
+          // Rings align with rocket but rotate independently
+          rings.position.copy(rocketGroup.position);
+          rings.rotation.x = rktPitchCurrent;
+          rings.children[0].rotation.z = time * 0.4;
+          rings.children[1].rotation.z = -time * 0.6;
+          rings.children[2].rotation.z = time * 0.8;
+
+          // Simulating flight speed
+          const speed = Math.max(0.02, rktAccelCurrent * 0.15);
+          gridHelper.position.z += speed;
+          if (gridHelper.position.z > 1) gridHelper.position.z -= 1;
+
+          // Particles rushing past
+          const pPos = particles.geometry.attributes.position.array;
+          for(let i=1; i<partCount*3; i+=3) {
+            pPos[i] -= speed * 4;
+            if(pPos[i] < -4) {
+               pPos[i] = 4;
+               pPos[i-1] = (Math.random() - 0.5) * 5;
+               pPos[i+1] = (Math.random() - 0.5) * 5;
+            }
           }
+          particles.geometry.attributes.position.needsUpdate = true;
 
-          // Flame animation — flicker + intensity lerp
-          if (flameGroup.visible) {
-            const fl = Math.min(1, flameGroup._intensity !== undefined
-              ? flameGroup._intensity + (rktFlameTarget - flameGroup._intensity) * 0.15
-              : rktFlameTarget);
-            flameGroup._intensity = fl;
-            const flicker = 0.88 + 0.12 * Math.sin(now * 28) * Math.sin(now * 19.3);
-            const sy = fl * flicker;
-            flameOuter.scale.set(flicker, sy, flicker);
-            flameMid.scale.set(flicker * 0.85, sy * 1.05, flicker * 0.85);
-            flameCore.scale.set(flicker * 0.6, sy * 0.85, flicker * 0.6);
-            matFlameOuter.opacity = 0.55 + fl * 0.2;
-            matFlameMid.opacity = 0.7 + fl * 0.15;
-            matFlameCore.opacity = 0.85 + fl * 0.1;
-            engineGlow.intensity = fl * 3;
-            engineGlow.position.copy(rocketGroup.position).y += rktAltCurrent - 1.8;
+          // Camera shake based on G-Force
+          if (rktAccelCurrent > 1.2) {
+             const shake = Math.min((rktAccelCurrent - 1.2) * 0.015, 0.05);
+             camera.position.x = 2 + (Math.random() - 0.5) * shake;
+             camera.position.y = 1 + (Math.random() - 0.5) * shake;
           } else {
-            engineGlow.intensity = 0;
-            flameGroup._intensity = 0;
+             camera.position.x += (2 - camera.position.x) * 0.1;
+             camera.position.y += (1 - camera.position.y) * 0.1;
           }
 
-          // Parachute sway
-          if (chuteGroup.visible) {
-            chuteGroup.rotation.z = Math.sin(now * 1.2) * 0.08;
-          }
+          // Dynamic lighting color shift on high acceleration
+          alertLight.intensity = Math.min(Math.max(0, (rktAccelCurrent - 1.5) * 2), 5);
 
-          // Camera orbit — slow rotation, follow altitude
-          orbitTheta += 0.004;
-          const camY = rktAltCurrent + 1.8 + rktAltCurrent * 0.25;
-          rktCamera.position.x = Math.sin(orbitTheta) * ORBIT_RADIUS;
-          rktCamera.position.z = Math.cos(orbitTheta) * ORBIT_RADIUS;
-          rktCamera.position.y += (camY - rktCamera.position.y) * 0.04;
-          rktCamera.lookAt(0, rktAltCurrent, 0);
+          renderer.render(scene, camera);
+        };
+        animate();
 
-          rktRenderer.render(rktScene, rktCamera);
-        }
-        animateRocket();
-
-        // Resize observer for the rocket canvas
-        const rktObserver = new ResizeObserver(() => resizeRkt());
-        rktObserver.observe(rktCard);
+        window.update3D = (pkt) => {
+          rktRollRate = pkt.gyro_x || 0;
+          rktPitchTarget = (pkt.accel_z && Math.abs(pkt.accel_z - 1) > 0.5) ? 0 : Math.min(Math.PI/2, Math.abs(pkt.gyro_x)*0.01);
+          rktAccelTarget = pkt.accel_z || 1;
+        };
+      } else {
+        window.update3D = () => {};
       }
 
-      // ═══════════════════════════════════════════════════════════════════
       // DATA PROCESSING
-      // ═══════════════════════════════════════════════════════════════════
       function updateMetrics(pkt) {
         const src = pkt.source || source;
+        $('val-alt').textContent = pad(pkt.altitude_m, 4);
+        if (pkt.altitude_m > maxAlt[src]) maxAlt[src] = pkt.altitude_m;
+        $('val-apogee').textContent = pad(maxAlt[src], 4);
+        $('stat-max-alt').textContent = pad(maxAlt[src], 4);
+        
+        const altPct = Math.min(100, (pkt.altitude_m / Math.max(maxAlt[src], 10)) * 100);
+        $('alt-bar-fill').style.height = `${altPct}%`;
 
-        // Altitude
-        $('val-alt').textContent = pkt.altitude_m.toFixed(1);
-        $('hud-alt').textContent = pkt.altitude_m.toFixed(1) + ' m';
-        $('cur-alt').textContent = pkt.altitude_m.toFixed(1) + ' m';
+        $('val-temp').textContent = pad(pkt.temp_c, 2);
+        $('val-press').textContent = pad(pkt.pressure_hpa, 4);
+        
+        const accel = (pkt.accel_z - 1.0) * 9.81;
+        $('val-accel').textContent = pad(accel, 2);
+        $('hud-gforce').textContent = parseFloat(pkt.accel_z || 1).toFixed(2) + ' G';
+        
+        $('val-rssi').textContent = pkt.rssi_dbm || '-00';
+        if(pkt.pkt_id) pktCount[src] = Math.max(pktCount[src], pkt.pkt_id);
+        $('val-pkts').textContent = String(pktCount[src]).padStart(4, '0');
+        $('stat-pkts').textContent = String(pktCount[src]).padStart(4, '0');
+        
+        $('hud-gyro').textContent = pad(pkt.gyro_x, 2) + '°/S';
+        $('hud-pitch').textContent = parseFloat(pkt.accel_z > 1.5 ? 90 : 0).toFixed(2) + '°';
 
-        // Apogee
-        if (pkt.altitude_m > maxAlt[src]) {
-          maxAlt[src] = pkt.altitude_m;
-          rktMaxAlt = Math.max(rktMaxAlt, pkt.altitude_m);
-        }
-        $('val-apogee').textContent = 'APOGEE ' + maxAlt[src].toFixed(1) + ' m';
-        $('stat-max-alt').textContent = maxAlt[src].toFixed(1);
-
-        // Altitude bar (right edge of 3D view, 0–max)
-        const altPct = Math.min(100, (pkt.altitude_m / Math.max(maxAlt[src], 1)) * 100);
-        const visibleAltPct = pkt.altitude_m > 0 ? Math.max(0.8, altPct) : 0; // keep bar visible at low positive altitude
-        $('alt-bar-fill').style.height = visibleAltPct + '%';
-
-        // Temperature
-        $('val-temp').textContent = pkt.temp_c.toFixed(1);
-        $('cur-temp').textContent = pkt.temp_c.toFixed(1) + ' °C';
-
-        // Pressure
-        $('val-press').textContent = pkt.pressure_hpa.toFixed(1);
-        $('cur-press').textContent = pkt.pressure_hpa.toFixed(1) + ' hPa';
-
-        // Vertical acceleration (subtract 1g gravity, convert to m/s²)
-        const accelMs2 = (pkt.accel_z - 1.0) * 9.81;
-        $('val-accel').textContent = accelMs2.toFixed(1);
-        $('hud-accel').textContent = accelMs2.toFixed(1) + ' m/s²';
-
-        // RSSI
-        $('val-rssi').textContent = Math.round(pkt.rssi_dbm);
-
-        // Pkt count
-        if (pkt.pkt_id != null) pktCount[src] = Math.max(pktCount[src], pkt.pkt_id);
-        $('val-pkts').textContent = pktCount[src];
-        $('stat-pkts').textContent = pktCount[src];
-
-        // Gyro
-        $('hud-gyro').textContent = (pkt.gyro_x || 0).toFixed(1) + ' °/s';
-
-        // Vertical velocity (Δalt / Δt)
-        const now = pkt.received_at || Date.now();
         if (prevAlt !== null && prevReceivedAt !== null) {
-          const dt = (now - prevReceivedAt) / 1000;
+          const dt = (pkt.received_at - prevReceivedAt) / 1000;
           if (dt > 0) {
             const vvel = (pkt.altitude_m - prevAlt) / dt;
-            lastVvel = vvel;
-            const sign = vvel >= 0 ? '+' : '';
-            const vvelStr = sign + vvel.toFixed(1);
-            $('val-vvel').textContent = vvelStr;
-            $('val-vvel').style.color = vvel > 0.5 ? '#00d4ff' : vvel < -0.5 ? '#f59e0b' : '#e2e8f0';
-            $('hud-vvel').textContent = vvelStr + ' m/s';
-            $('cur-vvel').textContent = vvelStr + ' m/s';
+            $('val-vvel').textContent = pad(vvel, 2);
+            $('cur-vvel').textContent = pad(vvel, 2);
+            const c = vvel > 1 ? 'var(--cyan)' : vvel < -1 ? 'var(--amber)' : '#fff';
+            $('val-vvel').style.color = c;
             pushSpark(sparkVvel, vvel);
           }
         }
-        prevAlt = pkt.altitude_m;
-        prevReceivedAt = now;
+        prevAlt = pkt.altitude_m; prevReceivedAt = pkt.received_at;
 
-        // Stability from gyro_x rolling RMS
-        gyroHistory.push(Math.abs(pkt.gyro_x || 0));
-        if (gyroHistory.length > 8) gyroHistory.shift();
+        $('cur-alt').textContent = pad(pkt.altitude_m, 4);
+        $('cur-temp').textContent = pad(pkt.temp_c, 2);
+        $('cur-press').textContent = pad(pkt.pressure_hpa, 4);
+
+        gyroHistory.push(Math.abs(pkt.gyro_x || 0)); if (gyroHistory.length > 10) gyroHistory.shift();
         const rms = Math.sqrt(gyroHistory.reduce((a, v) => a + v * v, 0) / gyroHistory.length);
-        const badge = $('val-stability');
-        if (rms < 15) { badge.textContent = 'STABLE'; badge.style.background = 'rgba(34,197,94,0.15)'; badge.style.color = '#22c55e'; }
-        else if (rms < 45) { badge.textContent = 'NOMINAL'; badge.style.background = 'rgba(245,158,11,0.15)'; badge.style.color = '#f59e0b'; }
-        else { badge.textContent = 'UNSTABLE'; badge.style.background = 'rgba(239,68,68,0.15)'; badge.style.color = '#ef4444'; }
+        const sb = $('val-stability');
+        if (rms < 10) { sb.textContent = 'NOMINAL'; sb.style.color = 'var(--green)'; sb.style.borderColor = 'var(--green)'; }
+        else { sb.textContent = 'WARN_ROT'; sb.style.color = 'var(--amber)'; sb.style.borderColor = 'var(--amber)'; }
 
-        // GPS coords
-        if (pkt.lat && pkt.lon && !(pkt.lat === 0 && pkt.lon === 0)) {
-          $('coord-lat').textContent = pkt.lat.toFixed(5) + '° N';
-          $('coord-lon').textContent = pkt.lon.toFixed(5) + '° E';
-        }
-
-        // 3D rocket telemetry
-        rktUpdateFromPacket(pkt);
-      }
-
-      function pushAllSparks(pkt) {
-        pushSpark(sparkAlt, pkt.altitude_m);
-        pushSpark(sparkTemp, pkt.temp_c);
-        pushSpark(sparkPress, pkt.pressure_hpa);
+        window.update3D(pkt);
       }
 
       function processPacket(pkt) {
         if (!pkt || isNaN(pkt.altitude_m)) return;
         updateMetrics(pkt);
-        pushAllSparks(pkt);
-        updateSparks();
+        pushSpark(sparkAlt, pkt.altitude_m); pushSpark(sparkTemp, pkt.temp_c); pushSpark(sparkPress, pkt.pressure_hpa);
+        allSparks.forEach(c => c.update('none'));
         updateMap(pkt.lat, pkt.lon);
         if (!firstReceivedAt) firstReceivedAt = pkt.received_at || Date.now();
       }
 
-      function clearAll() {
-        allSparks.forEach(c => { c.data.labels = []; c.data.datasets[0].data = []; c.update('none'); });
-        if (mapMarker) { map.removeLayer(mapMarker); mapMarker = null; }
-        trail.setLatLngs([]);
-        $('coord-lat').textContent = '—';
-        $('coord-lon').textContent = '—';
-        prevAlt = null; prevReceivedAt = null;
-        gyroHistory.length = 0;
-        rktRollAngle = 0; rktAltTarget = 0; rktAltCurrent = 0; rktFlameTarget = 0;
-        $('alt-bar-fill').style.height = '0%';
-      }
-
-      function loadHistory(packets) {
-        if (!packets || !packets.length) return;
-        clearAll();
-        const src = packets[0].source || source;
-        packets.forEach(pkt => {
-          if (pkt.altitude_m > maxAlt[src]) maxAlt[src] = pkt.altitude_m;
-          if (pkt.pkt_id != null) pktCount[src] = Math.max(pktCount[src], pkt.pkt_id);
-          pushAllSparks(pkt);
-          if (pkt.lat && pkt.lon && !(pkt.lat === 0 && pkt.lon === 0)) trail.addLatLng([pkt.lat, pkt.lon]);
-        });
-        updateSparks();
-        const last = packets[packets.length - 1];
-        updateMetrics(last);
-        updateMap(last.lat, last.lon);
-        if (!firstReceivedAt) firstReceivedAt = packets[0].received_at;
-        rktMaxAlt = Math.max(rktMaxAlt, maxAlt[src]);
-        rktAltTarget = (last.altitude_m / Math.max(rktMaxAlt, 10)) * 5;
-        rktAltCurrent = rktAltTarget;
-      }
-
-      // ═══════════════════════════════════════════════════════════════════
-      // EVENTS LOG
-      // ═══════════════════════════════════════════════════════════════════
       function addEvent(evt) {
         const list = $('events-list');
-        const row = document.createElement('div');
-        row.className = 'event-row';
-        const ts = new Date(evt.received_at || Date.now());
-        const time = ts.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-        const color = phaseColors[evt.event_type] || '#475569';
-        row.innerHTML =
-          '<span class="event-dot" style="background:' + color + '"></span>' +
-          '<span class="event-time">' + time + '</span>' +
-          '<span class="event-type">' + (evt.event_type || '') + '</span>' +
-          '<span class="event-alt">' + (evt.altitude_m || 0).toFixed(1) + 'm</span>';
+        const row = document.createElement('div'); row.className = 'event-row';
+        const d = new Date(evt.received_at || Date.now());
+        row.innerHTML = `<span class="event-time">${d.toISOString().substr(11,8)}</span><span class="event-type">${evt.event_type}</span><span class="event-alt">${parseFloat(evt.altitude_m||0).toFixed(1)}M</span>`;
         list.insertBefore(row, list.firstChild);
       }
 
       function updatePhase(phase, src) {
-        if (src) currentPhase[src] = phase;
-        if (src && src !== source) return;
-        const badge = $('phase-badge');
-        badge.textContent = phase;
-        const col = phaseColors[phase] || '#475569';
-        badge.style.backgroundColor = col;
-        badge.style.color = phase === 'IDLE' ? '#94a3b8' : '#fff';
-        rktSetPhase(phase);
+        if(src) currentPhase[src] = phase;
+        if(src && src !== source) return;
+        const b = $('phase-badge');
+        b.textContent = `SYS.${phase}`;
+        b.className = 'phase-badge ' + phase.toLowerCase();
       }
 
-      // ═══════════════════════════════════════════════════════════════════
-      // SIGNAL INDICATORS
-      // ═══════════════════════════════════════════════════════════════════
-      function setSignal(src, state) {
-        const dot = $('signal-' + src.toLowerCase());
-        if (dot) dot.className = 'signal-dot ' + state;
-      }
-
-      // ═══════════════════════════════════════════════════════════════════
-      // MISSION TIMER
-      // ═══════════════════════════════════════════════════════════════════
+      // TIMER
       setInterval(() => {
         if (!firstReceivedAt) return;
-        const el = Math.floor((Date.now() - firstReceivedAt) / 1000);
-        const h = String(Math.floor(el / 3600)).padStart(2, '0');
-        const m = String(Math.floor((el % 3600) / 60)).padStart(2, '0');
-        const s = String(el % 60).padStart(2, '0');
-        $('mission-timer').textContent = 'T+' + h + ':' + m + ':' + s;
+        const e = Math.floor((Date.now() - firstReceivedAt) / 1000);
+        $('mission-timer').textContent = `T+${String(Math.floor(e/3600)).padStart(2,'0')}:${String(Math.floor((e%3600)/60)).padStart(2,'0')}:${String(e%60).padStart(2,'0')}`;
       }, 1000);
 
-      // ═══════════════════════════════════════════════════════════════════
-      // SOURCE SWITCHING
-      // ═══════════════════════════════════════════════════════════════════
-      window.switchSource = function (src) {
+      window.switchSource = (src) => {
         source = src;
         $('btn-cansat').classList.toggle('active', src === 'CANSAT');
         $('btn-nrc').classList.toggle('active', src === 'NRC');
         updatePhase(currentPhase[src] || 'IDLE');
-        if (socket && socket.connected) {
-          socket.emit('subscribe_source', { source: src });
-          socket.emit('request_history', { source: src, limit: 200 });
-        }
-        requestHistoryHttp();
+        $('events-list').innerHTML = '';
+        allSparks.forEach(c => { c.data.labels=[]; c.data.datasets[0].data=[]; });
       };
 
-      // ═══════════════════════════════════════════════════════════════════
-      // SOCKET.IO
-      // ═══════════════════════════════════════════════════════════════════
+      // SOCKET.IO & CONNECTION LOGIC
       const backendOrigin = (() => {
         const isHttp = window.location.protocol === 'http:' || window.location.protocol === 'https:';
         if (!isHttp) return 'http://localhost:3000';
-        // If dashboard is served from static dev server :5500, point API/socket to backend :3000.
         if (window.location.port === '5500') {
           return window.location.protocol + '//' + (window.location.hostname || 'localhost') + ':3000';
         }
@@ -1479,176 +785,109 @@
       })();
       const apiUrl = (path) => backendOrigin + path;
       let socket = null;
-      const lastFallbackReceivedAt = { CANSAT: 0, NRC: 0 };
 
       function setModeBadge(text, color) {
         $('stat-mode').textContent = text;
         $('stat-mode').style.color = color;
       }
 
-      function handleHistoryPayload(data) {
-        if (!data) return;
-        if (data.cansat || data.nrc) {
-          const pkts = source === 'CANSAT' ? data.cansat : data.nrc;
-          if (pkts && pkts.length) loadHistory(pkts);
-          if (data.events && data.events.length) {
-            $('events-list').innerHTML = '';
-            data.events.forEach(e => addEvent(e));
-            const srcEvts = data.events.filter(e => e.source === source);
-            if (srcEvts.length) updatePhase(srcEvts[srcEvts.length - 1].event_type, source);
-          }
-        } else if (data.packets) {
-          loadHistory(data.packets);
-        }
-      }
-
       function attachSocketHandlers(s) {
         s.on('connect', () => {
-          setModeBadge('CONNECTED', '#22c55e');
+          setModeBadge('SYSTEM ONLINE', 'var(--green)');
           s.emit('subscribe_source', { source });
           s.emit('request_history', { source, limit: 200 });
         });
 
         s.on('disconnect', () => {
-          setModeBadge('OFFLINE', '#ef4444');
+          setModeBadge('OFFLINE', 'var(--red)');
         });
 
         s.on('history', data => {
-          try {
-            handleHistoryPayload(data);
-          } catch (err) {
-            const el = document.createElement('div');
-            el.style = "position:absolute;top:50px;left:50px;background:red;color:white;z-index:9999;padding:20px;font-family:monospace;";
-            el.textContent = "Error in history handler: " + err.stack;
-            document.body.appendChild(el);
+          if (!data) return;
+          let pkts = null;
+          if (data.cansat || data.nrc) {
+             pkts = source === 'CANSAT' ? data.cansat : data.nrc;
+             if (data.events && data.events.length) {
+               $('events-list').innerHTML = '';
+               data.events.forEach(e => addEvent(e));
+               const srcEvts = data.events.filter(e => e.source === source);
+               if (srcEvts.length) updatePhase(srcEvts[srcEvts.length - 1].event_type, source);
+             }
+          } else if (data.packets) {
+             pkts = data.packets;
+          }
+          if (pkts && pkts.length) {
+             allSparks.forEach(c => { c.data.labels=[]; c.data.datasets[0].data=[]; });
+             pkts.forEach(p => {
+               if (p.altitude_m > maxAlt[source]) maxAlt[source] = p.altitude_m;
+               if (p.pkt_id) pktCount[source] = Math.max(pktCount[source], p.pkt_id);
+               pushSpark(sparkAlt, p.altitude_m); pushSpark(sparkTemp, p.temp_c); pushSpark(sparkPress, p.pressure_hpa);
+             });
+             updateMetrics(pkts[pkts.length-1]);
+             allSparks.forEach(c => c.update('none'));
           }
         });
 
         s.on('packet', payload => {
-          try {
-            const pkt = payload && payload.data ? payload.data : payload;
-            if (!pkt || isNaN(pkt.altitude_m)) return;
-            setSignal(pkt.source || source, 'live');
-            if ((pkt.source || source) === source) processPacket(pkt);
-          } catch (err) {
-            const el = document.createElement('div');
-            el.style = "position:absolute;top:150px;left:50px;background:red;color:white;z-index:9999;padding:20px;font-family:monospace;";
-            el.textContent = "Error in packet handler: " + err.stack;
-            document.body.appendChild(el);
-          }
+          const pkt = payload && payload.data ? payload.data : payload;
+          if (!pkt || isNaN(pkt.altitude_m)) return;
+          const dot = $('signal-' + (pkt.source || source).toLowerCase());
+          if (dot) { dot.className = 'signal-dot live'; clearTimeout(dot.timer); dot.timer = setTimeout(()=>dot.className='signal-dot', 100); }
+          if ((pkt.source || source) === source) processPacket(pkt);
         });
 
-        s.on('mission_event', evt => {
-          addEvent(evt);
-          updatePhase(evt.event_type, evt.source);
-        });
-
-        s.on('signal_lost', data => setSignal(data.source, 'lost'));
-        s.on('signal_recovered', data => setSignal(data.source, 'live'));
+        s.on('mission_event', evt => { addEvent(evt); updatePhase(evt.event_type, evt.source); });
         s.on('sd_upload_complete', () => addEvent({ event_type: 'SD_UPLOAD', altitude_m: 0, received_at: Date.now() }));
       }
 
-      function initSocket() {
-        if (typeof window.io !== 'function') return;
+      if (typeof window.io === 'function') {
         socket = io(backendOrigin, { transports: ['websocket', 'polling'] });
         attachSocketHandlers(socket);
+      } else {
+        setModeBadge('NO SOCKET', 'var(--amber)');
       }
 
-      function ensureSocketClientLoaded() {
-        if (typeof window.io === 'function') {
-          initSocket();
-          return;
-        }
-        const script = document.createElement('script');
-        script.src = backendOrigin + '/socket.io/socket.io.js';
-        script.onload = () => initSocket();
-        script.onerror = () => setModeBadge('HTTP', '#f59e0b');
-        document.head.appendChild(script);
-      }
-
-      async function requestHistoryHttp() {
-        try {
-          const [hRes, sRes] = await Promise.all([
-            fetch(apiUrl('/api/packets?source=' + source + '&limit=200')),
-            fetch(apiUrl('/api/stats'))
-          ]);
-          if (hRes.ok) {
-            const hData = await hRes.json();
-            if (hData && hData.packets) handleHistoryPayload({ packets: hData.packets });
-          }
-          if (sRes.ok) {
-            const sData = await sRes.json();
-            if (sData && sData.events) {
-              $('events-list').innerHTML = '';
-              sData.events.forEach(e => addEvent(e));
-              const srcEvts = sData.events.filter(e => e.source === source);
-              if (srcEvts.length) updatePhase(srcEvts[srcEvts.length - 1].event_type, source);
-            }
-          }
-        } catch (_) { }
-      }
-
-      async function pollLatestHttp() {
-        try {
-          const res = await fetch(apiUrl('/api/packets?source=' + source + '&limit=1'));
-          if (!res.ok) return;
-          const data = await res.json();
-          if (!data || !data.packets || !data.packets.length) return;
-          const pkt = data.packets[0];
-          const src = pkt.source || source;
-          const ts = pkt.received_at || 0;
-          if (ts <= (lastFallbackReceivedAt[src] || 0)) return;
-          lastFallbackReceivedAt[src] = ts;
-          setSignal(src, 'live');
-          processPacket(pkt);
-          if (!socket || !socket.connected) setModeBadge('HTTP', '#f59e0b');
-        } catch (_) { }
-      }
-
-      ensureSocketClientLoaded();
-      requestHistoryHttp();
-      setInterval(pollLatestHttp, 1000);
-      setTimeout(pollLatestHttp, 400);
-
-      // ═══════════════════════════════════════════════════════════════════
-      // SD UPLOAD & CSV EXPORT
-      // ═══════════════════════════════════════════════════════════════════
+      // SD UPLOAD & EXPORT
       window.uploadSD = () => $('file-sd').click();
-
       $('file-sd').addEventListener('change', e => {
         const file = e.target.files[0];
         if (!file) return;
         const fd = new FormData();
         fd.append('file', file);
-        $('btn-upload').textContent = '...';
+        $('btn-upload').textContent = '[ UPLOADING ]';
         fetch(apiUrl('/api/upload-sd'), { method: 'POST', body: fd })
-          .then(() => { $('btn-upload').textContent = '↑ UPLOAD SD'; })
-          .catch(() => { $('btn-upload').textContent = '↑ UPLOAD SD'; });
+          .then(() => { $('btn-upload').textContent = '[ UPLOAD SD ]'; })
+          .catch(() => { $('btn-upload').textContent = '[ UPLOAD SD ]'; });
         e.target.value = '';
       });
-
       window.exportCSV = () => window.open(apiUrl('/api/export?source=' + source), '_blank');
 
-      // ═══════════════════════════════════════════════════════════════════
-      // HEALTH POLL
-      // ═══════════════════════════════════════════════════════════════════
       function pollHealth() {
         fetch(apiUrl('/api/health')).then(r => r.json()).then(data => {
-          if (data.sim_mode) { $('stat-mode').textContent = 'SIM'; $('stat-mode').style.color = '#f59e0b'; }
+          if (data.sim_mode) { $('stat-mode').textContent = 'SIM MODE'; $('stat-mode').style.color = 'var(--amber)'; }
         }).catch(() => { });
       }
       setInterval(pollHealth, 5000);
       setTimeout(pollHealth, 800);
 
-      // ═══════════════════════════════════════════════════════════════════
-      // MAP / WINDOW RESIZE
-      // ═══════════════════════════════════════════════════════════════════
-      setTimeout(() => map.invalidateSize(), 400);
-      setTimeout(() => map.invalidateSize(), 1200);
-      window.addEventListener('resize', () => { map.invalidateSize(); resizeRkt(); });
-
+      // MOCK DATA FOR LOCAL VIEWING WITHOUT BACKEND
+      if (!window.io) {
+        console.warn("Socket.io not found, running pure frontend simulation");
+        let simAlt = 0, tick = 0;
+        setInterval(() => {
+          tick++;
+          simAlt += (tick < 50 ? 5 : -5) + (Math.random()*2-1);
+          if(simAlt < 0) simAlt = 0;
+          processPacket({
+            source: 'CANSAT', altitude_m: simAlt, temp_c: 20 - simAlt*0.01, pressure_hpa: 1013 - simAlt*0.1,
+            accel_z: tick < 50 ? 2.5 : 0.8, gyro_x: Math.random()*20, rssi_dbm: -50,
+            pkt_id: tick, lat: 52.5 + Math.random()*0.001, lon: -1.9 + Math.random()*0.001, received_at: Date.now()
+          });
+          if(tick===1) addEvent({event_type: 'LAUNCHED', altitude_m: simAlt});
+          if(tick===50) addEvent({event_type: 'APOGEE', altitude_m: simAlt});
+        }, 100);
+      }
     })();
   </script>
 </body>
-
 </html>

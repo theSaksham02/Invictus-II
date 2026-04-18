@@ -17,7 +17,7 @@ const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
 const upload = multer({ dest: 'uploads/' });
 
-app.use(cors({ origin: ['http://localhost:3000', 'http://localhost:5500'] }));
+app.use(cors({ origin: '*' }));
 app.use(express.json());
 app.use('/vendor', express.static(path.resolve(__dirname, 'node_modules/three/build')));
 
