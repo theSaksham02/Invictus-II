@@ -37,8 +37,23 @@ function startEmulator() {
       alt = 0 + (Math.random()*0.4 - 0.2); // LANDED
     }
 
-    lat += (Math.random() * 0.0001 - 0.00005);
-    lon += (Math.random() * 0.0001 - 0.00005);
+    // Simulated GPS Trajectory (Wind Drift)
+    let windLat = 0;
+    let windLon = 0;
+    
+    if (tick >= 30 && tick < 95) {
+      // Ascending: Fast vertical, minimal lateral drift
+      windLat = 0.00001;
+      windLon = 0.00002;
+    } else if (tick >= 95 && tick < 180) {
+      // Descending: Under parachute, significant wind drift
+      windLat = 0.00004;
+      windLon = 0.00009;
+    }
+    
+    // Apply smooth trajectory + micro-realistic NEO-6M sensor noise
+    lat += windLat + (Math.random() * 0.000002 - 0.000001);
+    lon += windLon + (Math.random() * 0.000002 - 0.000001);
 
     let flags = 0;
     if (tick >= 30) flags |= 0x01; // launched
