@@ -19,6 +19,7 @@ const upload = multer({ dest: 'uploads/' });
 
 app.use(cors({ origin: ['http://localhost:3000', 'http://localhost:5500'] }));
 app.use(express.json());
+app.use('/vendor', express.static(path.resolve(__dirname, 'node_modules/three/build')));
 
 let uptimeStart = Date.now();
 let isSimMode = process.env.SIM_MODE === 'true';

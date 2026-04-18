@@ -1,0 +1,1656 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>INVICTUS II — Ground Station</title>
+  <meta name="description" content="MACH-26 UKSEDS NRC 2025-26 real-time rocket telemetry ground station">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <style>
+    /* ═══════════════════════════════════════════════════════════
+       RESET & TOKEN SYSTEM — pure black theme
+       ═══════════════════════════════════════════════════════════ */
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    :root {
+      --bg-deep: #000000;
+      --bg-base: #030303;
+      --bg-header: #080808;
+      --bg-card: #0c0c0c;
+      --bg-card-hi: #141414;
+
+      --border: rgba(255, 255, 255, 0.055);
+      --border-hi: rgba(0, 212, 255, 0.18);
+
+      --cyan: #00d4ff;
+      --green: #22c55e;
+      --amber: #f59e0b;
+      --red: #ef4444;
+      --purple: #a78bfa;
+      --teal: #2dd4bf;
+
+      --text-1: #e2e8f0;
+      --text-2: #94a3b8;
+      --text-3: #475569;
+      --text-4: #1c2333;
+
+      --sans: 'Inter', system-ui, sans-serif;
+      --mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+      --r: 6px;
+      --gap: 5px;
+    }
+
+    html,
+    body {
+      height: 100%;
+      overflow: hidden;
+      font-family: var(--sans);
+      background: var(--bg-deep);
+      color: var(--text-1);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ═══════════════════════════════════════════════════════════
+       APP SHELL
+       ═══════════════════════════════════════════════════════════ */
+    #app {
+      display: grid;
+      grid-template-rows: 44px 1fr;
+      height: 100vh;
+      width: 100vw;
+    }
+
+    /* ═══════════════════════════════════════════════════════════
+       HEADER
+       ═══════════════════════════════════════════════════════════ */
+    #header {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      align-items: center;
+      padding: 0 14px;
+      background: var(--bg-header);
+      border-bottom: 1px solid var(--border);
+      z-index: 10;
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      justify-self: start;
+    }
+
+    .header-center {
+      justify-self: center;
+    }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      justify-self: end;
+    }
+
+    #logo {
+      font-family: var(--mono);
+      font-weight: 700;
+      font-size: 0.85rem;
+      color: var(--cyan);
+      letter-spacing: 0.04em;
+      text-shadow: 0 0 14px rgba(0, 212, 255, 0.4);
+    }
+
+    .source-tabs {
+      display: flex;
+      gap: 2px;
+      background: #000;
+      border-radius: 4px;
+      padding: 2px;
+      border: 1px solid var(--border);
+    }
+
+    .source-tab {
+      font-family: var(--mono);
+      font-size: 0.65rem;
+      font-weight: 600;
+      padding: 3px 10px;
+      border: none;
+      border-radius: 3px;
+      cursor: pointer;
+      background: transparent;
+      color: var(--text-3);
+      transition: all 0.2s;
+      letter-spacing: 0.05em;
+    }
+
+    .source-tab:hover {
+      color: var(--text-2);
+    }
+
+    .source-tab.active {
+      background: rgba(0, 212, 255, 0.1);
+      color: var(--cyan);
+    }
+
+    .phase-badge {
+      font-family: var(--mono);
+      font-size: 0.65rem;
+      font-weight: 700;
+      padding: 3px 16px;
+      border-radius: 20px;
+      letter-spacing: 0.12em;
+      background: #111;
+      color: var(--text-3);
+      transition: background-color 0.5s, color 0.3s;
+    }
+
+    .signals {
+      display: flex;
+      gap: 10px;
+    }
+
+    .signal-item {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .signal-label {
+      font-family: var(--mono);
+      font-size: 0.55rem;
+      color: var(--text-3);
+      letter-spacing: 0.06em;
+    }
+
+    .signal-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--text-3);
+      transition: background 0.3s;
+    }
+
+    .signal-dot.live {
+      background: var(--green);
+      box-shadow: 0 0 6px rgba(34, 197, 94, 0.6);
+      animation: sig-pulse 2s infinite;
+    }
+
+    .signal-dot.lost {
+      background: var(--red);
+      box-shadow: 0 0 6px rgba(239, 68, 68, 0.5);
+    }
+
+    @keyframes sig-pulse {
+
+      0%,
+      100% {
+        opacity: 1
+      }
+
+      50% {
+        opacity: 0.35
+      }
+    }
+
+    .mission-timer {
+      font-family: var(--mono);
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: var(--text-2);
+      letter-spacing: 0.06em;
+    }
+
+    /* ═══════════════════════════════════════════════════════════
+       DASHBOARD GRID
+       ═══════════════════════════════════════════════════════════ */
+    #dashboard {
+      display: grid;
+      grid-template-columns: 162px 1fr 278px;
+      gap: var(--gap);
+      padding: var(--gap);
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    /* ═══════════════════════════════════════════════════════════
+       LEFT — METRIC SIDEBAR
+       ═══════════════════════════════════════════════════════════ */
+    #metrics-panel {
+      display: flex;
+      flex-direction: column;
+      gap: var(--gap);
+      min-height: 0;
+    }
+
+    .metric-card {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      padding: 8px 10px;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    .metric-value-row {
+      display: flex;
+      align-items: baseline;
+      gap: 3px;
+    }
+
+    .metric-value {
+      font-family: var(--mono);
+      font-weight: 700;
+      font-size: 1.5rem;
+      line-height: 1.1;
+      color: var(--text-1);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .metric-unit {
+      font-family: var(--mono);
+      font-size: 0.62rem;
+      font-weight: 500;
+      color: var(--text-3);
+    }
+
+    .metric-sub {
+      font-family: var(--mono);
+      font-size: 0.58rem;
+      color: var(--text-3);
+      margin-top: 1px;
+    }
+
+    .metric-label {
+      font-family: var(--sans);
+      font-size: 0.52rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--text-3);
+      margin-top: 3px;
+    }
+
+    #metric-alt {
+      border-color: rgba(0, 212, 255, 0.12);
+    }
+
+    #metric-alt .metric-value {
+      color: var(--cyan);
+      font-size: 1.75rem;
+      text-shadow: 0 0 16px rgba(0, 212, 255, 0.3);
+    }
+
+    .stability-badge {
+      display: inline-block;
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      padding: 2px 10px;
+      border-radius: 4px;
+      margin-top: 2px;
+      background: rgba(71, 85, 105, 0.25);
+      color: var(--text-3);
+      transition: background 0.4s, color 0.3s;
+    }
+
+    /* ═══════════════════════════════════════════════════════════
+       CENTER — 3D ROCKET + SPARKLINES
+       ═══════════════════════════════════════════════════════════ */
+    #charts-panel {
+      display: grid;
+      grid-template-rows: 1fr 135px 22px;
+      gap: var(--gap);
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    /* 3D Rocket card */
+    #rocket-card {
+      position: relative;
+      background: #000;
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      overflow: hidden;
+      min-height: 0;
+    }
+
+    #rocket-canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    /* HUD overlay — positioned over the Three.js canvas */
+    #rocket-hud {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      pointer-events: none;
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .hud-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+    }
+
+    .hud-bottom {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+    }
+
+    .hud-label {
+      font-family: var(--mono);
+      font-size: 0.5rem;
+      color: rgba(71, 85, 105, 0.9);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .hud-val {
+      font-family: var(--mono);
+      font-size: 0.9rem;
+      font-weight: 700;
+      color: rgba(255, 255, 255, 0.9);
+      text-shadow: 0 0 8px rgba(0, 0, 0, 0.8);
+    }
+
+    .hud-group {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+    }
+
+    .hud-group.right {
+      align-items: flex-end;
+    }
+
+    #hud-phase-ring {
+      font-family: var(--mono);
+      font-size: 0.55rem;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      padding: 3px 12px;
+      border-radius: 20px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: rgba(0, 0, 0, 0.55);
+      color: #fff;
+      backdrop-filter: blur(4px);
+    }
+
+    /* Altitude progress bar on right edge of 3D view */
+    #alt-bar-track {
+      position: absolute;
+      right: 8px;
+      top: 12px;
+      bottom: 12px;
+      width: 5px;
+      background: rgba(0, 212, 255, 0.12);
+      border-radius: 6px;
+      z-index: 4;
+      pointer-events: none;
+    }
+
+    #alt-bar-fill {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: var(--cyan);
+      border-radius: 6px;
+      box-shadow: 0 0 10px rgba(0, 212, 255, 0.75);
+      transition: height 0.8s ease;
+    }
+
+    /* Crosshair lines for aerospace feel */
+    .crosshair {
+      position: absolute;
+      pointer-events: none;
+      border: 1px solid rgba(0, 212, 255, 0.06);
+    }
+
+    .crosshair-v {
+      left: 50%;
+      top: 0;
+      bottom: 0;
+      width: 1px;
+      transform: translateX(-50%);
+    }
+
+    .crosshair-h {
+      top: 50%;
+      left: 0;
+      right: 0;
+      height: 1px;
+      transform: translateY(-50%);
+    }
+
+    /* 4-sparkline grid */
+    #sparklines-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: 1fr 1fr;
+      gap: var(--gap);
+      min-height: 0;
+    }
+
+    .sparkline-card {
+      display: flex;
+      flex-direction: column;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      overflow: hidden;
+      min-height: 0;
+    }
+
+    .sparkline-header {
+      flex-shrink: 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 4px 8px 0;
+    }
+
+    .sparkline-label {
+      font-family: var(--sans);
+      font-size: 0.47rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--text-3);
+    }
+
+    .sparkline-cur {
+      font-family: var(--mono);
+      font-size: 0.55rem;
+      font-weight: 600;
+      color: var(--text-2);
+    }
+
+    .sparkline-wrapper {
+      flex: 1;
+      min-height: 0;
+      position: relative;
+      padding: 2px 4px 3px;
+    }
+
+    .sparkline-wrapper canvas {
+      width: 100% !important;
+      height: 100% !important;
+    }
+
+    /* Stats bar */
+    #stats-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      padding: 3px 12px;
+      font-family: var(--mono);
+      font-size: 0.58rem;
+      color: var(--text-3);
+    }
+
+    #stats-bar strong {
+      color: var(--text-2);
+      font-weight: 600;
+    }
+
+    .stat-badge {
+      font-weight: 700;
+      letter-spacing: 0.08em;
+    }
+
+    /* ═══════════════════════════════════════════════════════════
+       RIGHT — MAP, EVENTS, ACTIONS
+       ═══════════════════════════════════════════════════════════ */
+    #info-panel {
+      display: grid;
+      grid-template-rows: 1fr 1fr auto;
+      gap: var(--gap);
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    /* Map */
+    #map-container {
+      position: relative;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      overflow: hidden;
+    }
+
+    #map {
+      height: 100%;
+      width: 100%;
+    }
+
+    #map-coords {
+      position: absolute;
+      bottom: 6px;
+      left: 6px;
+      font-family: var(--mono);
+      font-size: 0.52rem;
+      color: var(--text-2);
+      background: rgba(0, 0, 0, 0.82);
+      padding: 2px 7px;
+      border-radius: 3px;
+      z-index: 1000;
+      backdrop-filter: blur(4px);
+      line-height: 1.6;
+    }
+
+    /* Events */
+    #events-container {
+      display: flex;
+      flex-direction: column;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      overflow: hidden;
+      min-height: 0;
+    }
+
+    .panel-header {
+      flex-shrink: 0;
+      font-family: var(--sans);
+      font-size: 0.52rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--text-3);
+      padding: 6px 10px 4px;
+    }
+
+    #events-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 0 10px 6px;
+      min-height: 0;
+    }
+
+    #events-list::-webkit-scrollbar {
+      width: 3px;
+    }
+
+    #events-list::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    #events-list::-webkit-scrollbar-thumb {
+      background: var(--text-4);
+      border-radius: 3px;
+    }
+
+    .event-row {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 2.5px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+    }
+
+    .event-row:last-child {
+      border-bottom: none;
+    }
+
+    .event-dot {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .event-time {
+      font-family: var(--mono);
+      color: var(--text-3);
+      font-size: 0.52rem;
+      flex-shrink: 0;
+    }
+
+    .event-type {
+      font-family: var(--mono);
+      font-weight: 600;
+      color: var(--text-2);
+      font-size: 0.57rem;
+    }
+
+    .event-alt {
+      margin-left: auto;
+      font-family: var(--mono);
+      color: var(--text-3);
+      font-size: 0.52rem;
+    }
+
+    /* Actions */
+    #actions-bar {
+      display: flex;
+      gap: var(--gap);
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      padding: 6px 10px;
+    }
+
+    .action-btn {
+      flex: 1;
+      font-family: var(--mono);
+      font-size: 0.55rem;
+      font-weight: 600;
+      padding: 5px 0;
+      background: #000;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      color: var(--text-3);
+      cursor: pointer;
+      transition: all 0.15s;
+      letter-spacing: 0.04em;
+      text-align: center;
+    }
+
+    .action-btn:hover {
+      border-color: var(--border-hi);
+      color: var(--text-2);
+    }
+
+    /* ═══════════════════════════════════════════════════════════
+       LEAFLET OVERRIDES
+       ═══════════════════════════════════════════════════════════ */
+    .leaflet-control-zoom a {
+      background: #111 !important;
+      color: var(--text-2) !important;
+      border-color: var(--border) !important;
+      width: 22px !important;
+      height: 22px !important;
+      line-height: 22px !important;
+      font-size: 11px !important;
+    }
+
+    .leaflet-control-zoom {
+      border: none !important;
+    }
+
+    /* ═══════════════════════════════════════════════════════════
+       RESPONSIVE
+       ═══════════════════════════════════════════════════════════ */
+    @media (max-width: 1280px) {
+      #dashboard {
+        grid-template-columns: 142px 1fr 248px;
+      }
+
+      .metric-value {
+        font-size: 1.3rem;
+      }
+
+      #metric-alt .metric-value {
+        font-size: 1.55rem;
+      }
+    }
+
+    @media (max-width: 1024px) {
+      #dashboard {
+        grid-template-columns: 128px 1fr 220px;
+      }
+
+      .metric-value {
+        font-size: 1.15rem;
+      }
+
+      #metric-alt .metric-value {
+        font-size: 1.35rem;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div id="app">
+
+    <!-- ══════════════════════ HEADER ══════════════════════ -->
+    <header id="header">
+      <div class="header-left">
+        <span id="logo">◆ INVICTUS II</span>
+        <div class="source-tabs">
+          <button class="source-tab active" id="btn-cansat" onclick="switchSource('CANSAT')">CANSAT</button>
+          <button class="source-tab" id="btn-nrc" onclick="switchSource('NRC')">NRC</button>
+        </div>
+      </div>
+      <div class="header-center">
+        <div class="phase-badge" id="phase-badge">IDLE</div>
+      </div>
+      <div class="header-right">
+        <div class="signals">
+          <div class="signal-item"><span class="signal-dot" id="signal-cansat"></span><span
+              class="signal-label">CAN</span></div>
+          <div class="signal-item"><span class="signal-dot" id="signal-nrc"></span><span class="signal-label">NRC</span>
+          </div>
+        </div>
+        <span class="mission-timer" id="mission-timer">T+00:00:00</span>
+      </div>
+    </header>
+
+    <!-- ══════════════════════ DASHBOARD ══════════════════════ -->
+    <main id="dashboard">
+
+      <!-- LEFT — Metric sidebar -->
+      <aside id="metrics-panel">
+        <div class="metric-card" id="metric-alt">
+          <div class="metric-value-row">
+            <span class="metric-value" id="val-alt">0.0</span>
+            <span class="metric-unit">m</span>
+          </div>
+          <div class="metric-sub" id="val-apogee">APOGEE —</div>
+          <div class="metric-label">Live Altitude</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-value-row">
+            <span class="metric-value" id="val-vvel">—</span>
+            <span class="metric-unit">m/s</span>
+          </div>
+          <div class="metric-label">Vertical Velocity</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-value-row">
+            <span class="metric-value" id="val-accel">—</span>
+            <span class="metric-unit">m/s²</span>
+          </div>
+          <div class="metric-label">Vertical Accel</div>
+        </div>
+        <div class="metric-card">
+          <div class="stability-badge" id="val-stability">—</div>
+          <div class="metric-label" style="margin-top:5px">Stability</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-value-row">
+            <span class="metric-value" id="val-press">—</span>
+            <span class="metric-unit">hPa</span>
+          </div>
+          <div class="metric-label">Pressure</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-value-row">
+            <span class="metric-value" id="val-temp">—</span>
+            <span class="metric-unit">°C</span>
+          </div>
+          <div class="metric-label">Temperature</div>
+        </div>
+        <div class="metric-card" style="flex:0.7">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div>
+              <div class="metric-value-row">
+                <span class="metric-value" style="font-size:1.05rem" id="val-rssi">—</span>
+                <span class="metric-unit">dBm</span>
+              </div>
+              <div class="metric-label">RSSI</div>
+            </div>
+            <div style="text-align:right">
+              <div class="metric-value-row" style="justify-content:flex-end">
+                <span class="metric-value" style="font-size:1.05rem" id="val-pkts">0</span>
+              </div>
+              <div class="metric-label">PKTS</div>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- CENTER — 3D Rocket + Sparklines -->
+      <section id="charts-panel">
+
+        <!-- Three.js rocket viewer -->
+        <div id="rocket-card">
+          <canvas id="rocket-canvas"></canvas>
+          <!-- Crosshair guides -->
+          <div class="crosshair crosshair-v"></div>
+          <div class="crosshair crosshair-h"></div>
+          <!-- Altitude progress bar -->
+          <div id="alt-bar-track">
+            <div id="alt-bar-fill" style="height:0%"></div>
+          </div>
+          <!-- HUD overlay -->
+          <div id="rocket-hud">
+            <div class="hud-top">
+              <div class="hud-group">
+                <div class="hud-label">Altitude</div>
+                <div class="hud-val" id="hud-alt">0.0 m</div>
+              </div>
+              <div class="hud-group right">
+                <div class="hud-label">V-Velocity</div>
+                <div class="hud-val" id="hud-vvel">— m/s</div>
+              </div>
+            </div>
+            <div class="hud-bottom">
+              <div class="hud-group">
+                <div class="hud-label">Roll Rate</div>
+                <div class="hud-val" id="hud-gyro">— °/s</div>
+              </div>
+              <div class="hud-group right">
+                <div class="hud-label">Accel</div>
+                <div class="hud-val" id="hud-accel">— m/s²</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2×2 Sparklines -->
+        <div id="sparklines-grid">
+          <div class="sparkline-card">
+            <div class="sparkline-header">
+              <span class="sparkline-label">Altitude</span>
+              <span class="sparkline-cur" id="cur-alt">—</span>
+            </div>
+            <div class="sparkline-wrapper"><canvas id="spark-alt"></canvas></div>
+          </div>
+          <div class="sparkline-card">
+            <div class="sparkline-header">
+              <span class="sparkline-label">Temperature</span>
+              <span class="sparkline-cur" id="cur-temp">—</span>
+            </div>
+            <div class="sparkline-wrapper"><canvas id="spark-temp"></canvas></div>
+          </div>
+          <div class="sparkline-card">
+            <div class="sparkline-header">
+              <span class="sparkline-label">Pressure</span>
+              <span class="sparkline-cur" id="cur-press">—</span>
+            </div>
+            <div class="sparkline-wrapper"><canvas id="spark-press"></canvas></div>
+          </div>
+          <div class="sparkline-card">
+            <div class="sparkline-header">
+              <span class="sparkline-label">V-Velocity</span>
+              <span class="sparkline-cur" id="cur-vvel">—</span>
+            </div>
+            <div class="sparkline-wrapper"><canvas id="spark-vvel"></canvas></div>
+          </div>
+        </div>
+
+        <!-- Stats bar -->
+        <div id="stats-bar">
+          <span>APOGEE <strong id="stat-max-alt">0.0</strong> m</span>
+          <span>PKT <strong id="stat-pkts">0</strong></span>
+          <span class="stat-badge" id="stat-mode">—</span>
+        </div>
+      </section>
+
+      <!-- RIGHT — Map, Events, Actions -->
+      <aside id="info-panel">
+        <div id="map-container">
+          <div id="map"></div>
+          <div id="map-coords">
+            <div id="coord-lat">—</div>
+            <div id="coord-lon">—</div>
+          </div>
+        </div>
+        <div id="events-container">
+          <div class="panel-header">Mission Events</div>
+          <div id="events-list"></div>
+        </div>
+        <div id="actions-bar">
+          <button class="action-btn" id="btn-upload" onclick="uploadSD()">↑ UPLOAD SD</button>
+          <button class="action-btn" id="btn-export" onclick="exportCSV()">↓ EXPORT CSV</button>
+          <input type="file" id="file-sd" accept=".csv" hidden>
+        </div>
+      </aside>
+
+    </main>
+  </div>
+
+  <!-- ══════════════════════ SCRIPTS ══════════════════════ -->
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js/dist/chart.umd.js"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="http://localhost:3000/vendor/three.min.js"></script>
+
+  <script>
+    (() => {
+      'use strict';
+
+      const $ = id => document.getElementById(id);
+
+      // ═══════════════════════════════════════════════════════════════════
+      // STATE
+      // ═══════════════════════════════════════════════════════════════════
+      let source = 'CANSAT';
+      let maxAlt = { CANSAT: 0, NRC: 0 };
+      let pktCount = { CANSAT: 0, NRC: 0 };
+      let firstReceivedAt = null;
+      let currentPhase = { CANSAT: 'IDLE', NRC: 'IDLE' };
+
+      let prevAlt = null, prevReceivedAt = null;
+      let lastVvel = 0;
+      const gyroHistory = [];
+
+      const phaseColors = {
+        IDLE: '#475569', LAUNCHED: '#f59e0b', ASCENDING: '#00d4ff',
+        APOGEE: '#22c55e', DESCENDING: '#f59e0b', LANDED: '#22c55e',
+        SIGNAL_LOST: '#ef4444', SIGNAL_RECOVERED: '#22c55e'
+      };
+
+      // ═══════════════════════════════════════════════════════════════════
+      // CHART.JS — SPARKLINES
+      // ═══════════════════════════════════════════════════════════════════
+      const SPARK_WIN = 80;
+
+      function mkSpark(id, color) {
+        return new Chart($(id).getContext('2d'), {
+          type: 'line',
+          data: { labels: [], datasets: [{ data: [], borderColor: color, borderWidth: 1.5, pointRadius: 0, tension: 0.35, fill: false }] },
+          options: {
+            responsive: true, maintainAspectRatio: false, animation: { duration: 0 },
+            plugins: { legend: { display: false }, tooltip: { enabled: false } },
+            scales: { x: { display: false }, y: { display: false } }
+          }
+        });
+      }
+
+      const sparkAlt = mkSpark('spark-alt', '#00d4ff');
+      const sparkTemp = mkSpark('spark-temp', '#f59e0b');
+      const sparkPress = mkSpark('spark-press', '#2dd4bf');
+      const sparkVvel = mkSpark('spark-vvel', '#22c55e');
+      const allSparks = [sparkAlt, sparkTemp, sparkPress, sparkVvel];
+
+      function pushSpark(chart, val) {
+        chart.data.labels.push('');
+        chart.data.datasets[0].data.push(val);
+        if (chart.data.labels.length > SPARK_WIN) { chart.data.labels.shift(); chart.data.datasets[0].data.shift(); }
+      }
+      function updateSparks() { allSparks.forEach(c => c.update('none')); }
+
+      // ═══════════════════════════════════════════════════════════════════
+      // LEAFLET MAP
+      // ═══════════════════════════════════════════════════════════════════
+      const map = L.map('map', { zoomControl: false, attributionControl: false }).setView([52.5, -1.9], 14);
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19 }).addTo(map);
+      L.control.zoom({ position: 'topright' }).addTo(map);
+
+      let mapMarker = null;
+      const trail = L.polyline([], { color: '#00d4ff', weight: 2, opacity: 0.5 }).addTo(map);
+
+      function updateMap(lat, lon) {
+        if (!lat || !lon || (lat === 0 && lon === 0)) return;
+        const pos = [lat, lon];
+        if (mapMarker) mapMarker.setLatLng(pos);
+        else mapMarker = L.circleMarker(pos, { radius: 5, color: '#00d4ff', fillColor: '#00d4ff', fillOpacity: 0.9, weight: 2 }).addTo(map);
+        trail.addLatLng(pos);
+        map.panTo(pos);
+        $('coord-lat').textContent = lat.toFixed(5) + '° N';
+        $('coord-lon').textContent = lon.toFixed(5) + '° E';
+      }
+
+      // ═══════════════════════════════════════════════════════════════════
+      // THREE.JS — 3D ROCKET SCENE
+      // ═══════════════════════════════════════════════════════════════════
+      const rktCard = $('rocket-card');
+      const rktCanvas = $('rocket-canvas');
+      let rktRollRate = 0;    // deg/s from gyro_x
+      let rktRollAngle = 0;    // integrated roll, radians
+      let rktPitchTarget = 0;   // target pitch offset from vertical, radians
+      let rktPitchCurrent = 0;  // current pitch (smoothed)
+      let rktAltTarget = 0;    // target Y in scene
+      let rktAltCurrent = 0;    // current Y (lerped)
+      let rktFlameTarget = 0;   // 0–1 flame intensity
+      let rktPhaseName = 'IDLE';
+      let rktMaxAlt = 1;    // for normalization (at least 1m to avoid div/0)
+      let rktUpdateFromPacket = () => { };
+      let rktSetPhase = () => { };
+
+      if (typeof window.THREE === 'undefined' || !rktCard || !rktCanvas) {
+        console.warn('[INVICTUS] THREE.js unavailable; running telemetry UI without 3D rocket renderer.');
+        if (rktCanvas) rktCanvas.style.display = 'none';
+      } else {
+        const rktScene = new THREE.Scene();
+        const rktCamera = new THREE.PerspectiveCamera(50, 1, 0.1, 500);
+        const rktRenderer = new THREE.WebGLRenderer({ canvas: rktCanvas, antialias: true, alpha: true });
+        rktRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        rktRenderer.toneMapping = THREE.ACESFilmicToneMapping;
+        rktRenderer.toneMappingExposure = 1.1;
+
+        function resizeRkt() {
+          const w = rktCard.clientWidth, h = rktCard.clientHeight;
+          rktCamera.aspect = w / h;
+          rktCamera.updateProjectionMatrix();
+          rktRenderer.setSize(w, h);
+        }
+        resizeRkt();
+
+        // ── Lighting ──────────────────────────────────────────────────────
+        rktScene.add(new THREE.AmbientLight(0x0a0a0a, 3));
+        const sunLight = new THREE.DirectionalLight(0xffffff, 4);
+        sunLight.position.set(6, 10, 4);
+        rktScene.add(sunLight);
+        const rimLight = new THREE.DirectionalLight(0x00d4ff, 2);
+        rimLight.position.set(-5, 3, -3);
+        rktScene.add(rimLight);
+        const engineGlow = new THREE.PointLight(0xff6600, 0, 8);
+        rktScene.add(engineGlow);
+
+        // ── Starfield ─────────────────────────────────────────────────────
+        const starPositions = [];
+        for (let i = 0; i < 1200; i++) {
+          const r = 60 + Math.random() * 80;
+          const theta = Math.random() * Math.PI * 2;
+          const phi = Math.acos(2 * Math.random() - 1);
+          starPositions.push(r * Math.sin(phi) * Math.cos(theta), r * Math.sin(phi) * Math.sin(theta), r * Math.cos(phi));
+        }
+        const starGeo = new THREE.BufferGeometry();
+        starGeo.setAttribute('position', new THREE.Float32BufferAttribute(starPositions, 3));
+        rktScene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 0.12, transparent: true, opacity: 0.55 })));
+
+        // ── Materials ─────────────────────────────────────────────────────
+        const matBody = new THREE.MeshStandardMaterial({ color: 0xe8ecf0, metalness: 0.35, roughness: 0.35 });
+        const matNose = new THREE.MeshStandardMaterial({ color: 0x111111, metalness: 0.85, roughness: 0.1 });
+        const matFin = new THREE.MeshStandardMaterial({ color: 0x00d4ff, metalness: 0.7, roughness: 0.2, emissive: 0x003344, emissiveIntensity: 0.4 });
+        const matNozzle = new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.9, roughness: 0.15 });
+        const matStripe = new THREE.MeshStandardMaterial({ color: 0x00d4ff, metalness: 0.5, roughness: 0.3, emissive: 0x001a22, emissiveIntensity: 0.3 });
+
+        // ── Rocket group ──────────────────────────────────────────────────
+        const rocketGroup = new THREE.Group();
+
+        // Body — main tube
+        rocketGroup.add(Object.assign(new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 2.4, 28), matBody), {}));
+
+        // Nose cone — ogive approximation with cone
+        const noseMesh = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.72, 28), matNose);
+        noseMesh.position.y = 1.56;
+        rocketGroup.add(noseMesh);
+
+        // Boat-tail transition (body → nozzle)
+        const boatTail = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.18, 0.28, 24), matNozzle);
+        boatTail.position.y = -1.34;
+        rocketGroup.add(boatTail);
+
+        // Nozzle bell (flared outward at bottom)
+        const nozzle = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.2, 0.32, 24), matNozzle);
+        nozzle.position.y = -1.62;
+        rocketGroup.add(nozzle);
+
+        // Accent stripes
+        const stripe1 = new THREE.Mesh(new THREE.CylinderGeometry(0.185, 0.185, 0.065, 28), matStripe);
+        stripe1.position.y = 0.65;
+        rocketGroup.add(stripe1);
+        const stripe2 = new THREE.Mesh(new THREE.CylinderGeometry(0.185, 0.185, 0.065, 28), matStripe);
+        stripe2.position.y = -0.5;
+        rocketGroup.add(stripe2);
+        const stripeNose = new THREE.Mesh(new THREE.CylinderGeometry(0.182, 0.182, 0.04, 28), matStripe);
+        stripeNose.position.y = 1.22;
+        rocketGroup.add(stripeNose);
+
+        // ── Fins (trapezoid via ExtrudeGeometry) ──────────────────────────
+        function makeFin() {
+          const shape = new THREE.Shape();
+          shape.moveTo(0, 0);
+          shape.lineTo(0, 0.44);
+          shape.lineTo(0.38, 0.30);
+          shape.lineTo(0.46, 0);
+          shape.closePath();
+          return new THREE.ExtrudeGeometry(shape, { depth: 0.022, bevelEnabled: false });
+        }
+        const finGeo = makeFin();
+        for (let i = 0; i < 4; i++) {
+          const fg = new THREE.Group();
+          const fin = new THREE.Mesh(finGeo, matFin);
+          fin.position.z = -0.011;
+          fg.add(fin);
+          fg.position.y = -1.2;
+          fg.rotation.y = (i / 4) * Math.PI * 2;
+          rocketGroup.add(fg);
+        }
+
+        rktScene.add(rocketGroup);
+
+        // ── Flame (engine exhaust) ─────────────────────────────────────────
+        const flameGroup = new THREE.Group();
+
+        const matFlameOuter = new THREE.MeshBasicMaterial({ color: 0xff5500, transparent: true, opacity: 0.75, blending: THREE.AdditiveBlending, depthWrite: false });
+        const matFlameMid = new THREE.MeshBasicMaterial({ color: 0xff9900, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false });
+        const matFlameCore = new THREE.MeshBasicMaterial({ color: 0xffffcc, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false });
+
+        const flameOuter = new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.9, 14), matFlameOuter);
+        const flameMid = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.75, 12), matFlameMid);
+        const flameCore = new THREE.Mesh(new THREE.ConeGeometry(0.04, 0.5, 10), matFlameCore);
+        [flameOuter, flameMid, flameCore].forEach(f => { f.rotation.x = Math.PI; flameGroup.add(f); });
+        flameGroup.position.y = -1.78;
+        flameGroup.visible = false;
+        rocketGroup.add(flameGroup);
+
+        // ── Parachute ─────────────────────────────────────────────────────
+        const chuteGroup = new THREE.Group();
+        const matChute = new THREE.MeshStandardMaterial({
+          color: 0xff4400, metalness: 0, roughness: 1, transparent: true, opacity: 0.82, side: THREE.DoubleSide
+        });
+        const chuteCanopy = new THREE.Mesh(new THREE.SphereGeometry(0.7, 16, 8, 0, Math.PI * 2, 0, Math.PI * 0.55), matChute);
+        chuteCanopy.position.y = 0.5;
+        chuteGroup.add(chuteCanopy);
+        // Shroud lines
+        for (let i = 0; i < 8; i++) {
+          const lineGeo = new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(0, 0, 0),
+            new THREE.Vector3(Math.sin((i / 8) * Math.PI * 2) * 0.65, 0.5, Math.cos((i / 8) * Math.PI * 2) * 0.65)
+          ]);
+          chuteGroup.add(new THREE.Line(lineGeo, new THREE.LineBasicMaterial({ color: 0x888888, transparent: true, opacity: 0.5 })));
+        }
+        chuteGroup.position.y = 1.3;
+        chuteGroup.visible = false;
+        rocketGroup.add(chuteGroup);
+
+        // ── Camera & orbit ────────────────────────────────────────────────
+        const ORBIT_RADIUS = 7;
+        rktCamera.position.set(0, 2, ORBIT_RADIUS);
+        let orbitTheta = 0;
+
+        // ── Rocket telemetry state (live update from packets) ─────────────
+        rktUpdateFromPacket = function (pkt) {
+          rktRollRate = pkt.gyro_x || 0;
+
+          // Flame active during launch & ascent, size ∝ accel above 1g
+          const thrustG = Math.max(0, (pkt.accel_z || 0) - 1.0);
+          rktFlameTarget = (rktPhaseName === 'LAUNCHED' || rktPhaseName === 'ASCENDING')
+            ? Math.min(1, thrustG / 2.5 + 0.35)
+            : 0;
+
+          // Pitch: upright during ascent, slight tumble during descent
+          if (rktPhaseName === 'DESCENDING' || rktPhaseName === 'APOGEE') {
+            rktPitchTarget = 0.18 + Math.abs(pkt.gyro_x || 0) * 0.002;
+          } else if (rktPhaseName === 'LANDED') {
+            rktPitchTarget = Math.PI * 0.5; // on its side
+          } else {
+            rktPitchTarget = Math.min(0.12, Math.abs(pkt.gyro_x || 0) * 0.001);
+          }
+
+          // Altitude in scene: scale so max sim alt (670m) → 5 scene units
+          rktAltTarget = (pkt.altitude_m / Math.max(rktMaxAlt, 10)) * 5;
+        };
+
+        rktSetPhase = function (phase) {
+          rktPhaseName = phase;
+          flameGroup.visible = (phase === 'LAUNCHED' || phase === 'ASCENDING');
+          chuteGroup.visible = (phase === 'DESCENDING');
+        };
+
+        // ── Rocket animation loop ─────────────────────────────────────────
+        const rktClock = new THREE.Clock();
+        let rktPrevTime = 0;
+
+        function animateRocket() {
+          requestAnimationFrame(animateRocket);
+          const now = rktClock.getElapsedTime();
+          const dt = Math.min(now - rktPrevTime, 0.1);
+          rktPrevTime = now;
+
+          // Integrate roll from live gyro reading (deg/s → rad)
+          rktRollAngle += rktRollRate * dt * (Math.PI / 180);
+
+          // Smooth pitch
+          rktPitchCurrent += (rktPitchTarget - rktPitchCurrent) * Math.min(1, dt * 3);
+
+          // Smooth altitude position
+          rktAltCurrent += (rktAltTarget - rktAltCurrent) * Math.min(1, dt * 1.5);
+          rocketGroup.position.y = rktAltCurrent;
+
+          // Apply rotations — rocket nose always points +Y in local space
+          // rotation.x = 0 → nose up (default)
+          rocketGroup.rotation.z = rktRollAngle;
+          rocketGroup.rotation.x = rktPitchCurrent;
+
+          // Idle animation — gentle sway when no real data
+          if (rktPhaseName === 'IDLE') {
+            rocketGroup.rotation.x = Math.sin(now * 0.38) * 0.025;
+            rocketGroup.rotation.z = Math.sin(now * 0.27) * 0.015;
+          }
+
+          // Flame animation — flicker + intensity lerp
+          if (flameGroup.visible) {
+            const fl = Math.min(1, flameGroup._intensity !== undefined
+              ? flameGroup._intensity + (rktFlameTarget - flameGroup._intensity) * 0.15
+              : rktFlameTarget);
+            flameGroup._intensity = fl;
+            const flicker = 0.88 + 0.12 * Math.sin(now * 28) * Math.sin(now * 19.3);
+            const sy = fl * flicker;
+            flameOuter.scale.set(flicker, sy, flicker);
+            flameMid.scale.set(flicker * 0.85, sy * 1.05, flicker * 0.85);
+            flameCore.scale.set(flicker * 0.6, sy * 0.85, flicker * 0.6);
+            matFlameOuter.opacity = 0.55 + fl * 0.2;
+            matFlameMid.opacity = 0.7 + fl * 0.15;
+            matFlameCore.opacity = 0.85 + fl * 0.1;
+            engineGlow.intensity = fl * 3;
+            engineGlow.position.copy(rocketGroup.position).y += rktAltCurrent - 1.8;
+          } else {
+            engineGlow.intensity = 0;
+            flameGroup._intensity = 0;
+          }
+
+          // Parachute sway
+          if (chuteGroup.visible) {
+            chuteGroup.rotation.z = Math.sin(now * 1.2) * 0.08;
+          }
+
+          // Camera orbit — slow rotation, follow altitude
+          orbitTheta += 0.004;
+          const camY = rktAltCurrent + 1.8 + rktAltCurrent * 0.25;
+          rktCamera.position.x = Math.sin(orbitTheta) * ORBIT_RADIUS;
+          rktCamera.position.z = Math.cos(orbitTheta) * ORBIT_RADIUS;
+          rktCamera.position.y += (camY - rktCamera.position.y) * 0.04;
+          rktCamera.lookAt(0, rktAltCurrent, 0);
+
+          rktRenderer.render(rktScene, rktCamera);
+        }
+        animateRocket();
+
+        // Resize observer for the rocket canvas
+        const rktObserver = new ResizeObserver(() => resizeRkt());
+        rktObserver.observe(rktCard);
+      }
+
+      // ═══════════════════════════════════════════════════════════════════
+      // DATA PROCESSING
+      // ═══════════════════════════════════════════════════════════════════
+      function updateMetrics(pkt) {
+        const src = pkt.source || source;
+
+        // Altitude
+        $('val-alt').textContent = pkt.altitude_m.toFixed(1);
+        $('hud-alt').textContent = pkt.altitude_m.toFixed(1) + ' m';
+        $('cur-alt').textContent = pkt.altitude_m.toFixed(1) + ' m';
+
+        // Apogee
+        if (pkt.altitude_m > maxAlt[src]) {
+          maxAlt[src] = pkt.altitude_m;
+          rktMaxAlt = Math.max(rktMaxAlt, pkt.altitude_m);
+        }
+        $('val-apogee').textContent = 'APOGEE ' + maxAlt[src].toFixed(1) + ' m';
+        $('stat-max-alt').textContent = maxAlt[src].toFixed(1);
+
+        // Altitude bar (right edge of 3D view, 0–max)
+        const altPct = Math.min(100, (pkt.altitude_m / Math.max(maxAlt[src], 1)) * 100);
+        const visibleAltPct = pkt.altitude_m > 0 ? Math.max(0.8, altPct) : 0; // keep bar visible at low positive altitude
+        $('alt-bar-fill').style.height = visibleAltPct + '%';
+
+        // Temperature
+        $('val-temp').textContent = pkt.temp_c.toFixed(1);
+        $('cur-temp').textContent = pkt.temp_c.toFixed(1) + ' °C';
+
+        // Pressure
+        $('val-press').textContent = pkt.pressure_hpa.toFixed(1);
+        $('cur-press').textContent = pkt.pressure_hpa.toFixed(1) + ' hPa';
+
+        // Vertical acceleration (subtract 1g gravity, convert to m/s²)
+        const accelMs2 = (pkt.accel_z - 1.0) * 9.81;
+        $('val-accel').textContent = accelMs2.toFixed(1);
+        $('hud-accel').textContent = accelMs2.toFixed(1) + ' m/s²';
+
+        // RSSI
+        $('val-rssi').textContent = Math.round(pkt.rssi_dbm);
+
+        // Pkt count
+        if (pkt.pkt_id != null) pktCount[src] = Math.max(pktCount[src], pkt.pkt_id);
+        $('val-pkts').textContent = pktCount[src];
+        $('stat-pkts').textContent = pktCount[src];
+
+        // Gyro
+        $('hud-gyro').textContent = (pkt.gyro_x || 0).toFixed(1) + ' °/s';
+
+        // Vertical velocity (Δalt / Δt)
+        const now = pkt.received_at || Date.now();
+        if (prevAlt !== null && prevReceivedAt !== null) {
+          const dt = (now - prevReceivedAt) / 1000;
+          if (dt > 0) {
+            const vvel = (pkt.altitude_m - prevAlt) / dt;
+            lastVvel = vvel;
+            const sign = vvel >= 0 ? '+' : '';
+            const vvelStr = sign + vvel.toFixed(1);
+            $('val-vvel').textContent = vvelStr;
+            $('val-vvel').style.color = vvel > 0.5 ? '#00d4ff' : vvel < -0.5 ? '#f59e0b' : '#e2e8f0';
+            $('hud-vvel').textContent = vvelStr + ' m/s';
+            $('cur-vvel').textContent = vvelStr + ' m/s';
+            pushSpark(sparkVvel, vvel);
+          }
+        }
+        prevAlt = pkt.altitude_m;
+        prevReceivedAt = now;
+
+        // Stability from gyro_x rolling RMS
+        gyroHistory.push(Math.abs(pkt.gyro_x || 0));
+        if (gyroHistory.length > 8) gyroHistory.shift();
+        const rms = Math.sqrt(gyroHistory.reduce((a, v) => a + v * v, 0) / gyroHistory.length);
+        const badge = $('val-stability');
+        if (rms < 15) { badge.textContent = 'STABLE'; badge.style.background = 'rgba(34,197,94,0.15)'; badge.style.color = '#22c55e'; }
+        else if (rms < 45) { badge.textContent = 'NOMINAL'; badge.style.background = 'rgba(245,158,11,0.15)'; badge.style.color = '#f59e0b'; }
+        else { badge.textContent = 'UNSTABLE'; badge.style.background = 'rgba(239,68,68,0.15)'; badge.style.color = '#ef4444'; }
+
+        // GPS coords
+        if (pkt.lat && pkt.lon && !(pkt.lat === 0 && pkt.lon === 0)) {
+          $('coord-lat').textContent = pkt.lat.toFixed(5) + '° N';
+          $('coord-lon').textContent = pkt.lon.toFixed(5) + '° E';
+        }
+
+        // 3D rocket telemetry
+        rktUpdateFromPacket(pkt);
+      }
+
+      function pushAllSparks(pkt) {
+        pushSpark(sparkAlt, pkt.altitude_m);
+        pushSpark(sparkTemp, pkt.temp_c);
+        pushSpark(sparkPress, pkt.pressure_hpa);
+      }
+
+      function processPacket(pkt) {
+        if (!pkt || isNaN(pkt.altitude_m)) return;
+        updateMetrics(pkt);
+        pushAllSparks(pkt);
+        updateSparks();
+        updateMap(pkt.lat, pkt.lon);
+        if (!firstReceivedAt) firstReceivedAt = pkt.received_at || Date.now();
+      }
+
+      function clearAll() {
+        allSparks.forEach(c => { c.data.labels = []; c.data.datasets[0].data = []; c.update('none'); });
+        if (mapMarker) { map.removeLayer(mapMarker); mapMarker = null; }
+        trail.setLatLngs([]);
+        $('coord-lat').textContent = '—';
+        $('coord-lon').textContent = '—';
+        prevAlt = null; prevReceivedAt = null;
+        gyroHistory.length = 0;
+        rktRollAngle = 0; rktAltTarget = 0; rktAltCurrent = 0; rktFlameTarget = 0;
+        $('alt-bar-fill').style.height = '0%';
+      }
+
+      function loadHistory(packets) {
+        if (!packets || !packets.length) return;
+        clearAll();
+        const src = packets[0].source || source;
+        packets.forEach(pkt => {
+          if (pkt.altitude_m > maxAlt[src]) maxAlt[src] = pkt.altitude_m;
+          if (pkt.pkt_id != null) pktCount[src] = Math.max(pktCount[src], pkt.pkt_id);
+          pushAllSparks(pkt);
+          if (pkt.lat && pkt.lon && !(pkt.lat === 0 && pkt.lon === 0)) trail.addLatLng([pkt.lat, pkt.lon]);
+        });
+        updateSparks();
+        const last = packets[packets.length - 1];
+        updateMetrics(last);
+        updateMap(last.lat, last.lon);
+        if (!firstReceivedAt) firstReceivedAt = packets[0].received_at;
+        rktMaxAlt = Math.max(rktMaxAlt, maxAlt[src]);
+        rktAltTarget = (last.altitude_m / Math.max(rktMaxAlt, 10)) * 5;
+        rktAltCurrent = rktAltTarget;
+      }
+
+      // ═══════════════════════════════════════════════════════════════════
+      // EVENTS LOG
+      // ═══════════════════════════════════════════════════════════════════
+      function addEvent(evt) {
+        const list = $('events-list');
+        const row = document.createElement('div');
+        row.className = 'event-row';
+        const ts = new Date(evt.received_at || Date.now());
+        const time = ts.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        const color = phaseColors[evt.event_type] || '#475569';
+        row.innerHTML =
+          '<span class="event-dot" style="background:' + color + '"></span>' +
+          '<span class="event-time">' + time + '</span>' +
+          '<span class="event-type">' + (evt.event_type || '') + '</span>' +
+          '<span class="event-alt">' + (evt.altitude_m || 0).toFixed(1) + 'm</span>';
+        list.insertBefore(row, list.firstChild);
+      }
+
+      function updatePhase(phase, src) {
+        if (src) currentPhase[src] = phase;
+        if (src && src !== source) return;
+        const badge = $('phase-badge');
+        badge.textContent = phase;
+        const col = phaseColors[phase] || '#475569';
+        badge.style.backgroundColor = col;
+        badge.style.color = phase === 'IDLE' ? '#94a3b8' : '#fff';
+        rktSetPhase(phase);
+      }
+
+      // ═══════════════════════════════════════════════════════════════════
+      // SIGNAL INDICATORS
+      // ═══════════════════════════════════════════════════════════════════
+      function setSignal(src, state) {
+        const dot = $('signal-' + src.toLowerCase());
+        if (dot) dot.className = 'signal-dot ' + state;
+      }
+
+      // ═══════════════════════════════════════════════════════════════════
+      // MISSION TIMER
+      // ═══════════════════════════════════════════════════════════════════
+      setInterval(() => {
+        if (!firstReceivedAt) return;
+        const el = Math.floor((Date.now() - firstReceivedAt) / 1000);
+        const h = String(Math.floor(el / 3600)).padStart(2, '0');
+        const m = String(Math.floor((el % 3600) / 60)).padStart(2, '0');
+        const s = String(el % 60).padStart(2, '0');
+        $('mission-timer').textContent = 'T+' + h + ':' + m + ':' + s;
+      }, 1000);
+
+      // ═══════════════════════════════════════════════════════════════════
+      // SOURCE SWITCHING
+      // ═══════════════════════════════════════════════════════════════════
+      window.switchSource = function (src) {
+        source = src;
+        $('btn-cansat').classList.toggle('active', src === 'CANSAT');
+        $('btn-nrc').classList.toggle('active', src === 'NRC');
+        updatePhase(currentPhase[src] || 'IDLE');
+        if (socket && socket.connected) {
+          socket.emit('subscribe_source', { source: src });
+          socket.emit('request_history', { source: src, limit: 200 });
+        }
+        requestHistoryHttp();
+      };
+
+      // ═══════════════════════════════════════════════════════════════════
+      // SOCKET.IO
+      // ═══════════════════════════════════════════════════════════════════
+      const backendOrigin = (() => {
+        const isHttp = window.location.protocol === 'http:' || window.location.protocol === 'https:';
+        if (!isHttp) return 'http://localhost:3000';
+        // If dashboard is served from static dev server :5500, point API/socket to backend :3000.
+        if (window.location.port === '5500') {
+          return window.location.protocol + '//' + (window.location.hostname || 'localhost') + ':3000';
+        }
+        return window.location.origin;
+      })();
+      const apiUrl = (path) => backendOrigin + path;
+      let socket = null;
+      const lastFallbackReceivedAt = { CANSAT: 0, NRC: 0 };
+
+      function setModeBadge(text, color) {
+        $('stat-mode').textContent = text;
+        $('stat-mode').style.color = color;
+      }
+
+      function handleHistoryPayload(data) {
+        if (!data) return;
+        if (data.cansat || data.nrc) {
+          const pkts = source === 'CANSAT' ? data.cansat : data.nrc;
+          if (pkts && pkts.length) loadHistory(pkts);
+          if (data.events && data.events.length) {
+            $('events-list').innerHTML = '';
+            data.events.forEach(e => addEvent(e));
+            const srcEvts = data.events.filter(e => e.source === source);
+            if (srcEvts.length) updatePhase(srcEvts[srcEvts.length - 1].event_type, source);
+          }
+        } else if (data.packets) {
+          loadHistory(data.packets);
+        }
+      }
+
+      function attachSocketHandlers(s) {
+        s.on('connect', () => {
+          setModeBadge('CONNECTED', '#22c55e');
+          s.emit('subscribe_source', { source });
+          s.emit('request_history', { source, limit: 200 });
+        });
+
+        s.on('disconnect', () => {
+          setModeBadge('OFFLINE', '#ef4444');
+        });
+
+        s.on('history', data => {
+          try {
+            handleHistoryPayload(data);
+          } catch (err) {
+            const el = document.createElement('div');
+            el.style = "position:absolute;top:50px;left:50px;background:red;color:white;z-index:9999;padding:20px;font-family:monospace;";
+            el.textContent = "Error in history handler: " + err.stack;
+            document.body.appendChild(el);
+          }
+        });
+
+        s.on('packet', payload => {
+          try {
+            const pkt = payload && payload.data ? payload.data : payload;
+            if (!pkt || isNaN(pkt.altitude_m)) return;
+            setSignal(pkt.source || source, 'live');
+            if ((pkt.source || source) === source) processPacket(pkt);
+          } catch (err) {
+            const el = document.createElement('div');
+            el.style = "position:absolute;top:150px;left:50px;background:red;color:white;z-index:9999;padding:20px;font-family:monospace;";
+            el.textContent = "Error in packet handler: " + err.stack;
+            document.body.appendChild(el);
+          }
+        });
+
+        s.on('mission_event', evt => {
+          addEvent(evt);
+          updatePhase(evt.event_type, evt.source);
+        });
+
+        s.on('signal_lost', data => setSignal(data.source, 'lost'));
+        s.on('signal_recovered', data => setSignal(data.source, 'live'));
+        s.on('sd_upload_complete', () => addEvent({ event_type: 'SD_UPLOAD', altitude_m: 0, received_at: Date.now() }));
+      }
+
+      function initSocket() {
+        if (typeof window.io !== 'function') return;
+        socket = io(backendOrigin, { transports: ['websocket', 'polling'] });
+        attachSocketHandlers(socket);
+      }
+
+      function ensureSocketClientLoaded() {
+        if (typeof window.io === 'function') {
+          initSocket();
+          return;
+        }
+        const script = document.createElement('script');
+        script.src = backendOrigin + '/socket.io/socket.io.js';
+        script.onload = () => initSocket();
+        script.onerror = () => setModeBadge('HTTP', '#f59e0b');
+        document.head.appendChild(script);
+      }
+
+      async function requestHistoryHttp() {
+        try {
+          const [hRes, sRes] = await Promise.all([
+            fetch(apiUrl('/api/packets?source=' + source + '&limit=200')),
+            fetch(apiUrl('/api/stats'))
+          ]);
+          if (hRes.ok) {
+            const hData = await hRes.json();
+            if (hData && hData.packets) handleHistoryPayload({ packets: hData.packets });
+          }
+          if (sRes.ok) {
+            const sData = await sRes.json();
+            if (sData && sData.events) {
+              $('events-list').innerHTML = '';
+              sData.events.forEach(e => addEvent(e));
+              const srcEvts = sData.events.filter(e => e.source === source);
+              if (srcEvts.length) updatePhase(srcEvts[srcEvts.length - 1].event_type, source);
+            }
+          }
+        } catch (_) { }
+      }
+
+      async function pollLatestHttp() {
+        try {
+          const res = await fetch(apiUrl('/api/packets?source=' + source + '&limit=1'));
+          if (!res.ok) return;
+          const data = await res.json();
+          if (!data || !data.packets || !data.packets.length) return;
+          const pkt = data.packets[0];
+          const src = pkt.source || source;
+          const ts = pkt.received_at || 0;
+          if (ts <= (lastFallbackReceivedAt[src] || 0)) return;
+          lastFallbackReceivedAt[src] = ts;
+          setSignal(src, 'live');
+          processPacket(pkt);
+          if (!socket || !socket.connected) setModeBadge('HTTP', '#f59e0b');
+        } catch (_) { }
+      }
+
+      ensureSocketClientLoaded();
+      requestHistoryHttp();
+      setInterval(pollLatestHttp, 1000);
+      setTimeout(pollLatestHttp, 400);
+
+      // ═══════════════════════════════════════════════════════════════════
+      // SD UPLOAD & CSV EXPORT
+      // ═══════════════════════════════════════════════════════════════════
+      window.uploadSD = () => $('file-sd').click();
+
+      $('file-sd').addEventListener('change', e => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const fd = new FormData();
+        fd.append('file', file);
+        $('btn-upload').textContent = '...';
+        fetch(apiUrl('/api/upload-sd'), { method: 'POST', body: fd })
+          .then(() => { $('btn-upload').textContent = '↑ UPLOAD SD'; })
+          .catch(() => { $('btn-upload').textContent = '↑ UPLOAD SD'; });
+        e.target.value = '';
+      });
+
+      window.exportCSV = () => window.open(apiUrl('/api/export?source=' + source), '_blank');
+
+      // ═══════════════════════════════════════════════════════════════════
+      // HEALTH POLL
+      // ═══════════════════════════════════════════════════════════════════
+      function pollHealth() {
+        fetch(apiUrl('/api/health')).then(r => r.json()).then(data => {
+          if (data.sim_mode) { $('stat-mode').textContent = 'SIM'; $('stat-mode').style.color = '#f59e0b'; }
+        }).catch(() => { });
+      }
+      setInterval(pollHealth, 5000);
+      setTimeout(pollHealth, 800);
+
+      // ═══════════════════════════════════════════════════════════════════
+      // MAP / WINDOW RESIZE
+      // ═══════════════════════════════════════════════════════════════════
+      setTimeout(() => map.invalidateSize(), 400);
+      setTimeout(() => map.invalidateSize(), 1200);
+      window.addEventListener('resize', () => { map.invalidateSize(); resizeRkt(); });
+
+    })();
+  </script>
+</body>
+
+</html>
