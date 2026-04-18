@@ -3,160 +3,134 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>INVICTUS II — GROUND STATION [OVERDRIVE]</title>
+  <title>INVICTUS II — MISSION CONTROL</title>
   <meta name="description" content="MACH-26 UKSEDS NRC 2025-26 real-time rocket telemetry ground station">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <style>
     /* ═══════════════════════════════════════════════════════════
-       BRUTALIST AEROSPACE HUD / MILITARY-GRADE OVERDRIVE
+       SPACEX / DRAGON-STYLE MISSION CONTROL
        ═══════════════════════════════════════════════════════════ */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg-deep: #030303;
-      --bg-panel: #060606;
+      --bg-deep: #000000;
+      --bg-panel: #090909;
       --bg-header: #000000;
       
-      --border: rgba(0, 212, 255, 0.15);
-      --border-hi: #00d4ff;
-      --border-alert: #ffb000;
-
-      --cyan: #00d4ff;
-      --cyan-dim: rgba(0, 212, 255, 0.3);
-      --green: #00ff66;
-      --amber: #ffb000;
-      --red: #ff3333;
+      --border: #1f1f1f;
+      --border-hi: #333333;
+      
+      --spx-blue: #005288;
+      --spx-blue-light: #0076c0;
+      --nominal: #00ff00;
+      --warning: #ffb000;
+      --critical: #ff0000;
       
       --text-1: #ffffff;
-      --text-2: #a0a0a0;
-      --text-3: #555555;
+      --text-2: #cccccc;
+      --text-3: #666666;
       
       --sans: 'Inter', system-ui, sans-serif;
       --mono: 'JetBrains Mono', 'Fira Code', monospace;
       
-      --gap: 8px;
+      --gap: 12px;
+      --r: 6px;
     }
 
-    /* Mathematical Grid Background & Scanlines */
     html, body {
       height: 100%;
       overflow: hidden;
       font-family: var(--sans);
       background-color: var(--bg-deep);
-      background-image: 
-        linear-gradient(rgba(0, 212, 255, 0.03) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(0, 212, 255, 0.03) 1px, transparent 1px);
-      background-size: 20px 20px;
       color: var(--text-1);
       -webkit-font-smoothing: antialiased;
       text-transform: uppercase;
-    }
-
-    body::after {
-      content: " ";
-      display: block;
-      position: absolute;
-      top: 0; left: 0; bottom: 0; right: 0;
-      background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
-      z-index: 9999;
-      background-size: 100% 2px, 3px 100%;
-      pointer-events: none;
+      user-select: none;
     }
 
     #app {
       display: grid;
-      grid-template-rows: 40px 1fr;
+      grid-template-rows: 50px 1fr;
       height: 100vh;
       width: 100vw;
-      position: relative;
-      z-index: 10;
     }
 
     /* ═══════════════════════════════════════════════════════════
-       HEADER - SHARP & UTILITARIAN
+       HEADER - MINIMALIST
        ═══════════════════════════════════════════════════════════ */
     #header {
       display: grid;
       grid-template-columns: 1fr auto 1fr;
       align-items: center;
-      padding: 0 16px;
+      padding: 0 20px;
       background: var(--bg-header);
-      border-bottom: 1px solid var(--border-hi);
-      font-family: var(--mono);
+      border-bottom: 1px solid var(--border);
     }
 
-    .header-left, .header-right { display: flex; align-items: center; gap: 16px; }
+    .header-left, .header-right { display: flex; align-items: center; gap: 20px; }
     .header-right { justify-self: end; }
 
     #logo {
-      font-weight: 800;
-      font-size: 0.9rem;
+      font-weight: 600;
+      font-size: 1rem;
+      letter-spacing: 0.15em;
       color: var(--text-1);
-      letter-spacing: 0.1em;
-      position: relative;
-    }
-    #logo::before {
-      content: '■';
-      color: var(--cyan);
-      margin-right: 8px;
     }
 
-    .source-tabs { display: flex; gap: 0; border: 1px solid var(--border); }
+    .source-tabs { display: flex; gap: 4px; }
     .source-tab {
-      font-family: var(--mono);
+      font-family: var(--sans);
       font-size: 0.65rem;
-      font-weight: 700;
-      padding: 4px 12px;
-      border: none;
-      border-radius: 0;
+      font-weight: 600;
+      padding: 6px 14px;
+      border: 1px solid var(--border);
+      border-radius: var(--r);
       cursor: pointer;
       background: transparent;
       color: var(--text-3);
-      transition: all 0.1s;
+      transition: all 0.2s;
       letter-spacing: 0.1em;
     }
-    .source-tab.active { background: var(--cyan); color: #000; }
+    .source-tab.active { background: var(--text-1); color: #000; border-color: var(--text-1); }
 
     .phase-badge {
-      font-family: var(--mono);
-      font-size: 0.75rem;
-      font-weight: 800;
-      padding: 2px 24px;
+      font-family: var(--sans);
+      font-size: 0.8rem;
+      font-weight: 600;
+      padding: 4px 20px;
       letter-spacing: 0.2em;
-      border: 1px solid var(--border-hi);
-      background: rgba(0, 212, 255, 0.1);
-      color: var(--cyan);
-      box-shadow: inset 0 0 10px rgba(0, 212, 255, 0.2);
+      border: 1px solid var(--text-3);
+      color: var(--text-2);
+      border-radius: var(--r);
     }
-    .phase-badge.launched { border-color: var(--amber); color: var(--amber); background: rgba(255, 176, 0, 0.1); box-shadow: inset 0 0 10px rgba(255, 176, 0, 0.2); }
-    .phase-badge.apogee { border-color: var(--green); color: var(--green); background: rgba(0, 255, 102, 0.1); box-shadow: inset 0 0 10px rgba(0, 255, 102, 0.2); }
+    .phase-badge.launched { border-color: var(--warning); color: var(--warning); }
+    .phase-badge.apogee { border-color: var(--spx-blue-light); color: var(--spx-blue-light); }
 
     .signals { display: flex; gap: 16px; }
     .signal-item { display: flex; align-items: center; gap: 6px; }
-    .signal-label { font-size: 0.6rem; color: var(--text-2); font-weight: 700; letter-spacing: 0.1em; }
-    .signal-dot { width: 8px; height: 8px; background: var(--text-3); border-radius: 0; border: 1px solid #000; }
-    .signal-dot.live { background: var(--green); box-shadow: 0 0 8px var(--green); }
-    .signal-dot.lost { background: var(--red); box-shadow: 0 0 8px var(--red); animation: blink 0.5s infinite; }
-
-    @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
+    .signal-label { font-size: 0.6rem; color: var(--text-3); font-weight: 600; letter-spacing: 0.1em; }
+    .signal-dot { width: 6px; height: 6px; background: var(--text-3); border-radius: 50%; }
+    .signal-dot.live { background: var(--nominal); box-shadow: 0 0 6px rgba(0, 255, 0, 0.4); }
+    .signal-dot.lost { background: var(--critical); box-shadow: 0 0 6px rgba(255, 0, 0, 0.4); }
 
     .mission-timer {
-      font-size: 0.85rem;
-      font-weight: 700;
-      color: var(--cyan);
-      letter-spacing: 0.1em;
+      font-family: var(--mono);
+      font-size: 1.1rem;
+      font-weight: 500;
+      color: var(--text-1);
+      letter-spacing: 0.05em;
       font-variant-numeric: tabular-nums;
     }
 
     /* ═══════════════════════════════════════════════════════════
-       DASHBOARD GRID & PANELS - SHARP, NO ROUNDED CORNERS
+       DASHBOARD GRID
        ═══════════════════════════════════════════════════════════ */
     #dashboard {
       display: grid;
-      grid-template-columns: 200px 1fr 320px;
+      grid-template-columns: 240px 1fr 340px;
       gap: var(--gap);
       padding: var(--gap);
       min-height: 0;
@@ -165,17 +139,13 @@
     .panel {
       background: var(--bg-panel);
       border: 1px solid var(--border);
+      border-radius: var(--r);
       position: relative;
+      overflow: hidden;
     }
-    /* Corner crosshairs for technical feel */
-    .panel::before, .panel::after {
-      content: ''; position: absolute; width: 6px; height: 6px; border: 1px solid var(--cyan); pointer-events: none;
-    }
-    .panel::before { top: -1px; left: -1px; border-right: none; border-bottom: none; }
-    .panel::after { bottom: -1px; right: -1px; border-left: none; border-top: none; }
 
     /* ═══════════════════════════════════════════════════════════
-       LEFT — METRIC SIDEBAR
+       LEFT — METRIC SIDEBAR (SPACEX STYLE)
        ═══════════════════════════════════════════════════════════ */
     #metrics-panel { display: flex; flex-direction: column; gap: var(--gap); min-height: 0; }
     
@@ -184,44 +154,51 @@
       display: flex;
       flex-direction: column;
       justify-content: center;
-      padding: 10px 16px;
-      border-left: 2px solid var(--border-hi);
+      padding: 12px 16px;
     }
-    .metric-card.alert { border-left-color: var(--amber); }
+
+    .metric-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 6px;
+    }
 
     .metric-label {
-      font-family: var(--mono);
-      font-size: 0.55rem;
-      font-weight: 700;
-      letter-spacing: 0.15em;
-      color: var(--text-2);
-      margin-bottom: 4px;
+      font-family: var(--sans);
+      font-size: 0.6rem;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      color: var(--text-3);
     }
 
-    .metric-value-row { display: flex; align-items: baseline; gap: 6px; }
+    .metric-unit { 
+      font-family: var(--mono); 
+      font-size: 0.6rem; 
+      color: var(--text-3); 
+    }
+
     .metric-value {
       font-family: var(--mono);
-      font-weight: 800;
+      font-weight: 500;
       font-size: 1.8rem;
       line-height: 1;
       color: var(--text-1);
       font-variant-numeric: tabular-nums;
+      text-align: right;
     }
-    .metric-unit { font-family: var(--mono); font-size: 0.7rem; color: var(--cyan); }
 
-    #metric-alt { background: rgba(0, 212, 255, 0.05); border-left: 4px solid var(--cyan); }
-    #metric-alt .metric-value { font-size: 2.5rem; color: var(--cyan); }
+    #metric-alt .metric-value { font-size: 2.2rem; color: var(--text-1); }
+    #metric-alt .metric-label { color: var(--spx-blue-light); }
 
     .stability-badge {
       display: inline-block;
-      font-family: var(--mono);
-      font-size: 0.75rem;
-      font-weight: 800;
-      letter-spacing: 0.15em;
-      padding: 4px 12px;
-      border: 1px solid var(--text-3);
-      color: var(--text-2);
-      margin-top: 4px;
+      font-family: var(--sans);
+      font-size: 0.7rem;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      color: var(--text-1);
+      text-align: right;
     }
 
     /* ═══════════════════════════════════════════════════════════
@@ -229,100 +206,123 @@
        ═══════════════════════════════════════════════════════════ */
     #charts-panel {
       display: grid;
-      grid-template-rows: 1fr 180px 28px;
+      grid-template-rows: 1fr 200px 36px;
       gap: var(--gap);
       min-height: 0;
     }
 
-    /* 3D Rocket Wireframe View */
     #rocket-card {
-      background: #000;
-      border: 1px solid var(--cyan-dim);
-      overflow: hidden;
-      position: relative;
-      background-image: 
-        radial-gradient(circle at center, rgba(0, 212, 255, 0.1) 0%, transparent 70%),
-        repeating-linear-gradient(0deg, transparent, transparent 40px, rgba(0, 212, 255, 0.05) 40px, rgba(0, 212, 255, 0.05) 41px),
-        repeating-linear-gradient(90deg, transparent, transparent 40px, rgba(0, 212, 255, 0.05) 40px, rgba(0, 212, 255, 0.05) 41px);
+      background: radial-gradient(circle at 50% 50%, #0a0a0a 0%, #000000 100%);
     }
-    #rocket-canvas { width: 100%; height: 100%; display: block; mix-blend-mode: screen; }
+    #rocket-canvas { width: 100%; height: 100%; display: block; }
 
     #rocket-hud {
       position: absolute; top: 0; left: 0; right: 0; bottom: 0; pointer-events: none;
-      padding: 16px; display: flex; flex-direction: column; justify-content: space-between;
+      padding: 20px; display: flex; flex-direction: column; justify-content: space-between;
     }
     .hud-top, .hud-bottom { display: flex; justify-content: space-between; }
     .hud-group { display: flex; flex-direction: column; }
     .hud-group.right { align-items: flex-end; }
-    .hud-label { font-family: var(--mono); font-size: 0.55rem; color: var(--cyan); letter-spacing: 0.2em; }
-    .hud-val { font-family: var(--mono); font-size: 1.2rem; font-weight: 800; color: var(--text-1); font-variant-numeric: tabular-nums; }
+    .hud-label { font-family: var(--sans); font-size: 0.55rem; color: var(--text-3); letter-spacing: 0.1em; }
+    .hud-val { font-family: var(--mono); font-size: 1.1rem; font-weight: 500; color: var(--text-1); font-variant-numeric: tabular-nums; margin-top: 2px;}
 
-    /* Crosshairs */
-    .ch { position: absolute; background: var(--cyan-dim); }
-    .ch-v { left: 50%; top: 0; bottom: 0; width: 1px; transform: translateX(-50%); }
-    .ch-h { top: 50%; left: 0; right: 0; height: 1px; transform: translateY(-50%); }
-    .ch-center { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 20px; height: 20px; border: 1px solid var(--cyan); border-radius: 50%; }
-
-    /* Altitude Bar */
     #alt-bar-track {
-      position: absolute; right: 16px; top: 16px; bottom: 16px; width: 4px; background: rgba(255, 255, 255, 0.1);
+      position: absolute; right: 16px; top: 20px; bottom: 20px; width: 2px; background: var(--border-hi);
     }
     #alt-bar-fill {
-      position: absolute; bottom: 0; left: 0; right: 0; background: var(--cyan); transition: height 0.1s linear;
-      box-shadow: 0 0 10px var(--cyan);
+      position: absolute; bottom: 0; left: -1px; right: -1px; background: var(--text-1); transition: height 0.1s linear;
     }
 
     /* Sparklines */
     #sparklines-grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: var(--gap); }
-    .sparkline-card { display: flex; flex-direction: column; border: 1px solid var(--border); background: var(--bg-panel); position: relative; }
-    .sparkline-header { display: flex; justify-content: space-between; padding: 6px 10px; border-bottom: 1px solid rgba(255,255,255,0.05); }
-    .sparkline-label { font-family: var(--mono); font-size: 0.55rem; font-weight: 700; color: var(--text-2); letter-spacing: 0.1em; }
-    .sparkline-cur { font-family: var(--mono); font-size: 0.7rem; font-weight: 800; color: var(--cyan); font-variant-numeric: tabular-nums; }
-    .sparkline-wrapper { flex: 1; position: relative; padding: 4px; }
+    .sparkline-card { display: flex; flex-direction: column; padding: 8px 12px; }
+    .sparkline-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+    .sparkline-label { font-family: var(--sans); font-size: 0.55rem; font-weight: 600; color: var(--text-3); letter-spacing: 0.1em; }
+    .sparkline-cur { font-family: var(--mono); font-size: 0.75rem; font-weight: 500; color: var(--text-2); font-variant-numeric: tabular-nums; }
+    .sparkline-wrapper { flex: 1; position: relative; }
     .sparkline-wrapper canvas { width: 100% !important; height: 100% !important; }
 
     /* Stats Bar */
     #stats-bar {
       display: flex; align-items: center; justify-content: space-between;
-      background: var(--cyan); color: #000; padding: 0 16px;
-      font-family: var(--mono); font-size: 0.65rem; font-weight: 800; letter-spacing: 0.1em;
+      padding: 0 16px;
+      font-family: var(--sans); font-size: 0.65rem; font-weight: 600; letter-spacing: 0.1em;
+      color: var(--text-3);
     }
+    #stats-bar span strong { color: var(--text-1); font-family: var(--mono); font-weight: 500; }
 
     /* ═══════════════════════════════════════════════════════════
-       RIGHT — MAP, EVENTS, ACTIONS
+       RIGHT — CAMERA, MAP, EVENTS, ACTIONS
        ═══════════════════════════════════════════════════════════ */
-    #info-panel { display: grid; grid-template-rows: 1fr 1fr auto; gap: var(--gap); min-height: 0; }
+    #info-panel { display: grid; grid-template-rows: 200px 1fr 1.2fr auto; gap: var(--gap); min-height: 0; }
+
+    /* Camera Block (SpaceX Feed Style) */
+    #camera-container {
+      display: flex; flex-direction: column;
+    }
+    .panel-header { font-family: var(--sans); font-size: 0.55rem; font-weight: 600; color: var(--text-3); padding: 8px 12px; border-bottom: 1px solid var(--border); letter-spacing: 0.15em; }
+    #cam-feed {
+      flex: 1; background: #050505; position: relative; display: flex; justify-content: center; align-items: center;
+      overflow: hidden;
+    }
+    .cam-noise {
+      position: absolute; inset: 0; pointer-events: none; opacity: 0.08;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+    }
+    .cam-scanline {
+      position: absolute; inset: 0; pointer-events: none; opacity: 0.1;
+      background: linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,0) 50%, rgba(0,0,0,0.2) 50%, rgba(0,0,0,0.2));
+      background-size: 100% 4px;
+    }
+    .cam-overlay { position: absolute; font-family: var(--mono); font-size: 0.55rem; color: var(--text-1); z-index: 10; display: flex; flex-direction: column; gap: 2px; }
+    .cam-overlay span { display: block; opacity: 0.8; }
+    .cam-overlay strong { font-weight: 600; color: var(--spx-blue-light); }
+    .cam-overlay.top-left { top: 12px; left: 12px; }
+    .cam-overlay.top-right { top: 12px; right: 12px; align-items: flex-end; }
+    .cam-overlay.bottom-left { bottom: 12px; left: 12px; opacity: 0.6; }
+    .cam-overlay.bottom-right { bottom: 12px; right: 12px; text-align: right; }
+    
+    .cam-overlay.rec { color: var(--critical); display: flex; flex-direction: row; align-items: center; gap: 6px; font-weight: 600; opacity: 1; }
+    .cam-overlay.rec::before { content: ''; width: 6px; height: 6px; background: var(--critical); border-radius: 50%; animation: blink 1.5s infinite; }
+    
+    .cam-reticle { position: absolute; inset: 0; pointer-events: none; opacity: 0.15; display: flex; justify-content: center; align-items: center; }
+    .reticle-h { position: absolute; width: 60%; height: 1px; background: #fff; }
+    .reticle-v { position: absolute; width: 1px; height: 60%; background: #fff; }
+    .reticle-circle { position: absolute; width: 30px; height: 30px; border: 1px solid #fff; border-radius: 50%; }
+
+    .no-signal-text { font-family: var(--mono); font-size: 0.75rem; letter-spacing: 0.15em; color: var(--text-3); z-index: 5; animation: blink 2s infinite;}
+    
+    .live-video { position:absolute; top:0; left:0; width: 100%; height: 100%; object-fit: cover; opacity: 0.8; filter: grayscale(30%) contrast(1.1); z-index: 2; }
 
     /* Map */
-    #map-container { border: 1px solid var(--border); position: relative; filter: grayscale(100%) contrast(1.2); }
+    #map-container { position: relative; filter: grayscale(100%) contrast(1.1) brightness(0.7); }
     #map { height: 100%; width: 100%; background: #000; }
     #map-coords {
-      position: absolute; bottom: 8px; left: 8px; z-index: 1000;
-      font-family: var(--mono); font-size: 0.6rem; color: #000; background: var(--cyan); padding: 4px 8px; font-weight: 700;
+      position: absolute; bottom: 8px; right: 8px; z-index: 1000;
+      font-family: var(--mono); font-size: 0.6rem; color: var(--text-1); background: rgba(0,0,0,0.8); padding: 4px 8px;
     }
 
     /* Events */
-    #events-container { display: flex; flex-direction: column; border: 1px solid var(--border); background: var(--bg-panel); }
-    .panel-header { font-family: var(--mono); font-size: 0.6rem; font-weight: 700; color: var(--cyan); padding: 8px 12px; border-bottom: 1px solid var(--border); letter-spacing: 0.15em; background: rgba(0, 212, 255, 0.05); }
+    #events-container { display: flex; flex-direction: column; }
     #events-list { flex: 1; overflow-y: auto; padding: 8px 12px; font-family: var(--mono); }
-    #events-list::-webkit-scrollbar { width: 2px; }
-    #events-list::-webkit-scrollbar-thumb { background: var(--cyan); }
-    .event-row { display: flex; gap: 12px; padding: 6px 0; border-bottom: 1px dashed rgba(255,255,255,0.1); font-size: 0.65rem; }
+    #events-list::-webkit-scrollbar { width: 4px; }
+    #events-list::-webkit-scrollbar-thumb { background: var(--border-hi); border-radius: 4px; }
+    .event-row { display: flex; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 0.65rem; }
     .event-time { color: var(--text-3); font-variant-numeric: tabular-nums; }
-    .event-type { color: var(--text-1); font-weight: 700; flex: 1; }
-    .event-alt { color: var(--cyan); font-variant-numeric: tabular-nums; }
+    .event-type { color: var(--text-1); font-weight: 500; flex: 1; }
+    .event-alt { color: var(--text-2); font-variant-numeric: tabular-nums; }
 
     /* Actions */
     #actions-bar { display: flex; gap: var(--gap); }
     .action-btn {
-      flex: 1; font-family: var(--mono); font-size: 0.65rem; font-weight: 800; padding: 10px 0;
-      background: transparent; border: 1px solid var(--cyan); color: var(--cyan);
-      cursor: pointer; transition: all 0.1s; letter-spacing: 0.1em;
+      flex: 1; font-family: var(--sans); font-size: 0.65rem; font-weight: 600; padding: 12px 0;
+      background: transparent; border: 1px solid var(--text-3); color: var(--text-2);
+      cursor: pointer; transition: all 0.2s; letter-spacing: 0.1em; border-radius: var(--r);
     }
-    .action-btn:hover, .action-btn:active { background: var(--cyan); color: #000; }
+    .action-btn:hover, .action-btn:active { background: var(--text-1); color: #000; border-color: var(--text-1); }
 
     /* Leaflet overrides */
-    .leaflet-control-zoom a { background: #000 !important; color: var(--cyan) !important; border: 1px solid var(--cyan) !important; border-radius: 0 !important; }
+    .leaflet-control-zoom a { background: #111 !important; color: var(--text-1) !important; border: 1px solid var(--border) !important; border-radius: var(--r) !important; }
     .leaflet-control-zoom { border: none !important; }
 
   </style>
@@ -332,80 +332,57 @@
   <div id="app">
     <header id="header">
       <div class="header-left">
+        <span id="logo">INVICTUS II</span>
         <div class="source-tabs">
           <button class="source-tab active" id="btn-cansat" onclick="switchSource('CANSAT')">CANSAT</button>
+          <button class="source-tab" id="btn-nrc" onclick="switchSource('NRC')">NRC</button>
         </div>
       </div>
       <div class="header-center">
-        <div class="phase-badge" id="phase-badge">SYS.IDLE</div>
+        <div class="phase-badge" id="phase-badge">SYSTEM IDLE</div>
       </div>
       <div class="header-right">
         <div class="signals">
-          <div class="signal-item"><span class="signal-dot" id="signal-cansat"></span><span class="signal-label">CAN</span></div>
+          <div class="signal-item"><span class="signal-dot" id="signal-cansat"></span><span class="signal-label">CANSAT</span></div>
           <div class="signal-item"><span class="signal-dot" id="signal-nrc"></span><span class="signal-label">NRC</span></div>
         </div>
-        <span class="mission-timer" id="mission-timer">T+00:00:00</span>
+        <span class="mission-timer" id="mission-timer">00:00:00</span>
       </div>
     </header>
 
     <main id="dashboard">
       <aside id="metrics-panel">
         <div class="metric-card panel" id="metric-alt">
-          <div class="metric-label">LIVE ALTITUDE</div>
-          <div class="metric-value-row">
-            <span class="metric-value" id="val-alt">0000.0</span>
-            <span class="metric-unit">M</span>
-          </div>
-          <div class="metric-label" style="margin-top: 8px; color: var(--cyan);">APOGEE: <span id="val-apogee" style="color: #fff;">0000.0</span></div>
+          <div class="metric-header"><span class="metric-label">ALTITUDE</span><span class="metric-unit">M</span></div>
+          <div class="metric-value" id="val-alt">0000.0</div>
+          <div class="metric-header" style="margin-top: 12px; margin-bottom: 0;"><span class="metric-label">APOGEE</span><span class="metric-unit">M</span></div>
+          <div class="metric-value" id="val-apogee" style="font-size: 1.2rem; color: var(--text-2);">0000.0</div>
         </div>
         <div class="metric-card panel">
-          <div class="metric-label">VERTICAL VELOCITY</div>
-          <div class="metric-value-row">
-            <span class="metric-value" id="val-vvel">+00.0</span>
-            <span class="metric-unit">M/S</span>
-          </div>
+          <div class="metric-header"><span class="metric-label">VELOCITY</span><span class="metric-unit">M/S</span></div>
+          <div class="metric-value" id="val-vvel">+00.0</div>
         </div>
         <div class="metric-card panel">
-          <div class="metric-label">VERTICAL ACCEL</div>
-          <div class="metric-value-row">
-            <span class="metric-value" id="val-accel">+00.0</span>
-            <span class="metric-unit">M/S²</span>
-          </div>
+          <div class="metric-header"><span class="metric-label">ACCELERATION</span><span class="metric-unit">M/S²</span></div>
+          <div class="metric-value" id="val-accel">+00.0</div>
         </div>
         <div class="metric-card panel">
-          <div class="metric-label">STABILITY INDEX</div>
+          <div class="metric-header"><span class="metric-label">STABILITY</span></div>
           <div class="stability-badge" id="val-stability">CALCULATING</div>
         </div>
         <div class="metric-card panel">
-          <div class="metric-label">ATMOSPHERIC PRESSURE</div>
-          <div class="metric-value-row">
-            <span class="metric-value" id="val-press">1013.2</span>
-            <span class="metric-unit">HPA</span>
-          </div>
+          <div class="metric-header"><span class="metric-label">PRESSURE</span><span class="metric-unit">HPA</span></div>
+          <div class="metric-value" id="val-press">1013.2</div>
         </div>
         <div class="metric-card panel">
-          <div class="metric-label">EXTERNAL TEMP</div>
-          <div class="metric-value-row">
-            <span class="metric-value" id="val-temp">00.0</span>
-            <span class="metric-unit">°C</span>
-          </div>
-        </div>
-        <div class="metric-card panel" style="flex-direction: row; justify-content: space-between; align-items: center;">
-          <div>
-            <div class="metric-label">LINK RSSI</div>
-            <div class="metric-value-row"><span class="metric-value" style="font-size: 1.4rem" id="val-rssi">-00</span><span class="metric-unit">DBM</span></div>
-          </div>
-          <div style="text-align: right">
-            <div class="metric-label">PACKETS</div>
-            <div class="metric-value-row"><span class="metric-value" style="font-size: 1.4rem" id="val-pkts">0000</span></div>
-          </div>
+          <div class="metric-header"><span class="metric-label">TEMPERATURE</span><span class="metric-unit">°C</span></div>
+          <div class="metric-value" id="val-temp">00.0</div>
         </div>
       </aside>
 
       <section id="charts-panel">
         <div id="rocket-card" class="panel">
           <canvas id="rocket-canvas"></canvas>
-          <div class="ch ch-v"></div><div class="ch ch-h"></div><div class="ch-center"></div>
           <div id="alt-bar-track"><div id="alt-bar-fill" style="height:0%"></div></div>
           <div id="rocket-hud">
             <div class="hud-top">
@@ -413,7 +390,7 @@
               <div class="hud-group right"><div class="hud-label">ROLL RATE</div><div class="hud-val" id="hud-gyro">0.00°/S</div></div>
             </div>
             <div class="hud-bottom">
-              <div class="hud-group"><div class="hud-label">TARGET TGT</div><div class="hud-val" style="color:var(--text-3)">2200 FT</div></div>
+              <div class="hud-group"><div class="hud-label">RSSI</div><div class="hud-val" id="val-rssi" style="color:var(--text-2)">-00 DBM</div></div>
               <div class="hud-group right"><div class="hud-label">G-FORCE</div><div class="hud-val" id="hud-gforce">1.00 G</div></div>
             </div>
           </div>
@@ -421,42 +398,69 @@
 
         <div id="sparklines-grid">
           <div class="sparkline-card panel">
-            <div class="sparkline-header"><span class="sparkline-label">ALTITUDE [M]</span><span class="sparkline-cur" id="cur-alt">0000.0</span></div>
+            <div class="sparkline-header"><span class="sparkline-label">ALTITUDE</span><span class="sparkline-cur" id="cur-alt">0000.0</span></div>
             <div class="sparkline-wrapper"><canvas id="spark-alt"></canvas></div>
           </div>
           <div class="sparkline-card panel">
-            <div class="sparkline-header"><span class="sparkline-label">TEMP [°C]</span><span class="sparkline-cur" id="cur-temp">00.0</span></div>
+            <div class="sparkline-header"><span class="sparkline-label">TEMPERATURE</span><span class="sparkline-cur" id="cur-temp">00.0</span></div>
             <div class="sparkline-wrapper"><canvas id="spark-temp"></canvas></div>
           </div>
           <div class="sparkline-card panel">
-            <div class="sparkline-header"><span class="sparkline-label">PRESSURE [HPA]</span><span class="sparkline-cur" id="cur-press">0000.0</span></div>
+            <div class="sparkline-header"><span class="sparkline-label">PRESSURE</span><span class="sparkline-cur" id="cur-press">0000.0</span></div>
             <div class="sparkline-wrapper"><canvas id="spark-press"></canvas></div>
           </div>
           <div class="sparkline-card panel">
-            <div class="sparkline-header"><span class="sparkline-label">VELOCITY [M/S]</span><span class="sparkline-cur" id="cur-vvel">00.0</span></div>
+            <div class="sparkline-header"><span class="sparkline-label">VELOCITY</span><span class="sparkline-cur" id="cur-vvel">00.0</span></div>
             <div class="sparkline-wrapper"><canvas id="spark-vvel"></canvas></div>
           </div>
         </div>
 
         <div id="stats-bar" class="panel">
-          <span>MAX_ALT: <span id="stat-max-alt">0000.0</span>M</span>
-          <span>TOTAL_PKT: <span id="stat-pkts">0000</span></span>
-          <span id="stat-mode">SYSTEM ONLINE</span>
+          <span>MAX ALTITUDE: <strong id="stat-max-alt">0000.0</strong></span>
+          <span>PACKETS RECEIVED: <strong id="stat-pkts">0000</strong></span>
+          <span id="stat-mode" style="color: var(--text-2);">SYSTEM ONLINE</span>
         </div>
       </section>
 
       <aside id="info-panel">
+        <div id="camera-container" class="panel">
+          <div class="panel-header" style="display:flex; justify-content:space-between; align-items:center;">
+            <span>CAM 01 // ORT ROVER</span>
+            <span style="color:var(--text-3); font-family:var(--mono);">1080P 60FPS</span>
+          </div>
+          <div id="cam-feed">
+            <div class="cam-scanline"></div>
+            <div class="cam-overlay top-left">
+              <span>LAT: <strong id="cam-lat">52.5000</strong></span>
+              <span>LON: <strong id="cam-lon">-1.9000</strong></span>
+            </div>
+            <div class="cam-overlay top-right rec">REC</div>
+            <div class="cam-overlay bottom-left">SYS.NOMINAL</div>
+            <div class="cam-overlay bottom-right">
+              <span>ALT: <strong id="cam-alt">0.0M</strong></span>
+            </div>
+            <div class="cam-reticle">
+              <div class="reticle-h"></div>
+              <div class="reticle-v"></div>
+              <div class="reticle-circle"></div>
+            </div>
+            <div class="cam-noise"></div>
+            <span class="no-signal-text">LOS: ACQUIRING SIGNAL...</span>
+            <!-- Live rover stream (uncomment to activate) -->
+            <!-- <img src="http://192.168.4.1:5000/video" class="live-video" /> -->
+          </div>
+        </div>
         <div id="map-container" class="panel">
           <div id="map"></div>
-          <div id="map-coords"><span id="coord-lat">00.00000</span> / <span id="coord-lon">00.00000</span></div>
+          <div id="map-coords"><span id="coord-lat">00.00000</span>, <span id="coord-lon">00.00000</span></div>
         </div>
         <div id="events-container" class="panel">
-          <div class="panel-header">MISSION LOG // EVENT STREAM</div>
+          <div class="panel-header">MISSION LOG</div>
           <div id="events-list"></div>
         </div>
         <div id="actions-bar">
-          <button class="action-btn panel" id="btn-upload" onclick="uploadSD()">[ UPLOAD SD ]</button>
-          <button class="action-btn panel" id="btn-export" onclick="exportCSV()">[ EXPORT CSV ]</button>
+          <button class="action-btn" id="btn-upload" onclick="uploadSD()">UPLOAD SD</button>
+          <button class="action-btn" id="btn-export" onclick="exportCSV()">EXPORT CSV</button>
           <input type="file" id="file-sd" accept=".csv" hidden>
         </div>
       </aside>
@@ -466,7 +470,6 @@
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js/dist/chart.umd.js"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <!-- Using a reliable CDN for Three.js so it actually renders -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 
   <script>
@@ -474,7 +477,6 @@
       'use strict';
       const $ = id => document.getElementById(id);
 
-      // Pad numbers for that strict military HUD feel
       const pad = (num, length, decimals = 1) => {
         if(isNaN(num)) return "----.-";
         let str = parseFloat(num).toFixed(decimals);
@@ -492,13 +494,12 @@
       let prevAlt = null, prevReceivedAt = null;
       const gyroHistory = [];
 
-      // Brutalist Chart.js
-      Chart.defaults.color = '#555';
+      Chart.defaults.color = '#666';
       Chart.defaults.font.family = "'JetBrains Mono', monospace";
       function mkSpark(id, color) {
         return new Chart($(id).getContext('2d'), {
           type: 'line',
-          data: { labels: [], datasets: [{ data: [], borderColor: color, borderWidth: 1.5, pointRadius: 0, tension: 0, fill: false, stepped: 'middle' }] },
+          data: { labels: [], datasets: [{ data: [], borderColor: color, borderWidth: 1.5, pointRadius: 0, tension: 0.1, fill: false }] },
           options: {
             responsive: true, maintainAspectRatio: false, animation: false,
             plugins: { legend: { display: false }, tooltip: { enabled: false } },
@@ -508,9 +509,9 @@
         });
       }
 
-      const sparkAlt = mkSpark('spark-alt', '#00d4ff');
-      const sparkTemp = mkSpark('spark-temp', '#ffb000');
-      const sparkPress = mkSpark('spark-press', '#00ff66');
+      const sparkAlt = mkSpark('spark-alt', '#ffffff');
+      const sparkTemp = mkSpark('spark-temp', '#cccccc');
+      const sparkPress = mkSpark('spark-press', '#cccccc');
       const sparkVvel = mkSpark('spark-vvel', '#ffffff');
       const allSparks = [sparkAlt, sparkTemp, sparkPress, sparkVvel];
 
@@ -523,19 +524,21 @@
       const map = L.map('map', { zoomControl: false, attributionControl: false }).setView([52.5, -1.9], 14);
       L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19 }).addTo(map);
       let mapMarker = null;
-      const trail = L.polyline([], { color: '#00d4ff', weight: 1.5, opacity: 1 }).addTo(map);
+      const trail = L.polyline([], { color: '#ffffff', weight: 2, opacity: 0.8 }).addTo(map);
 
       function updateMap(lat, lon) {
         if (!lat || !lon) return;
         const pos = [lat, lon];
         if (mapMarker) mapMarker.setLatLng(pos);
-        else mapMarker = L.circleMarker(pos, { radius: 3, color: '#00d4ff', fillColor: '#00d4ff', fillOpacity: 1, weight: 1 }).addTo(map);
+        else mapMarker = L.circleMarker(pos, { radius: 3, color: '#fff', fillColor: '#fff', fillOpacity: 1, weight: 1 }).addTo(map);
         trail.addLatLng(pos); map.panTo(pos);
         $('coord-lat').textContent = lat.toFixed(5);
         $('coord-lon').textContent = lon.toFixed(5);
+        if($('cam-lat')) $('cam-lat').textContent = lat.toFixed(5);
+        if($('cam-lon')) $('cam-lon').textContent = lon.toFixed(5);
       }
 
-      // THREE.JS AWARD-WINNING ENVIRONMENT
+      // THREE.JS AWARD-WINNING ENVIRONMENT (SpaceX Sleek)
       const rktCard = $('rocket-card');
       const rktCanvas = $('rocket-canvas');
       let rktRollRate = 0, rktPitchTarget = 0, rktPitchCurrent = 0;
@@ -543,7 +546,7 @@
       
       if (typeof window.THREE !== 'undefined' && rktCard && rktCanvas) {
         const scene = new THREE.Scene();
-        scene.fog = new THREE.FogExp2(0x000000, 0.08);
+        scene.fog = new THREE.FogExp2(0x000000, 0.05);
 
         const camera = new THREE.PerspectiveCamera(40, rktCard.clientWidth / rktCard.clientHeight, 0.1, 100);
         const renderer = new THREE.WebGLRenderer({ canvas: rktCanvas, alpha: true, antialias: true, powerPreference: 'high-performance' });
@@ -552,24 +555,23 @@
         const resize = () => { camera.aspect = rktCard.clientWidth / rktCard.clientHeight; camera.updateProjectionMatrix(); renderer.setSize(rktCard.clientWidth, rktCard.clientHeight); };
         window.addEventListener('resize', resize); resize();
 
-        // 1. Solid Core + Wireframe Shell
         const rocketGroup = new THREE.Group();
-        const coreMat = new THREE.MeshPhongMaterial({ color: 0x020608, specular: 0x00d4ff, shininess: 50 });
-        const wireMat = new THREE.MeshBasicMaterial({ color: 0x00d4ff, wireframe: true, transparent: true, opacity: 0.65 });
+        const coreMat = new THREE.MeshPhongMaterial({ color: 0x111111, specular: 0x555555, shininess: 30 });
+        const wireMat = new THREE.MeshBasicMaterial({ color: 0xffffff, wireframe: true, transparent: true, opacity: 0.15 });
         
         const buildPart = (geo, y) => {
           const core = new THREE.Mesh(geo, coreMat);
           const wire = new THREE.Mesh(geo, wireMat);
-          wire.scale.set(1.02, 1.02, 1.02);
+          wire.scale.set(1.01, 1.01, 1.01);
           const part = new THREE.Group();
           part.add(core); part.add(wire);
           part.position.y = y;
           return part;
         };
 
-        rocketGroup.add(buildPart(new THREE.CylinderGeometry(0.2, 0.2, 3, 12, 4), 0));
-        rocketGroup.add(buildPart(new THREE.ConeGeometry(0.2, 0.8, 12, 3), 1.9));
-        rocketGroup.add(buildPart(new THREE.CylinderGeometry(0.15, 0.2, 0.4, 12, 2), -1.7));
+        rocketGroup.add(buildPart(new THREE.CylinderGeometry(0.2, 0.2, 3, 16, 4), 0));
+        rocketGroup.add(buildPart(new THREE.ConeGeometry(0.2, 0.8, 16, 3), 1.9));
+        rocketGroup.add(buildPart(new THREE.CylinderGeometry(0.15, 0.2, 0.4, 16, 2), -1.7));
         
         for(let i=0; i<4; i++) {
           const fin = buildPart(new THREE.BoxGeometry(0.04, 0.6, 0.5), 0);
@@ -579,44 +581,16 @@
         }
         scene.add(rocketGroup);
 
-        // 2. Holographic Targeting Rings
-        const rings = new THREE.Group();
-        const ringMat = new THREE.MeshBasicMaterial({ color: 0x00d4ff, transparent: true, opacity: 0.25, side: THREE.DoubleSide });
-        for(let i=0; i<3; i++) {
-           const r = new THREE.Mesh(new THREE.TorusGeometry(0.8 - (i*0.1), 0.005, 4, 64), ringMat);
-           r.position.y = -0.5 + (i * 0.8);
-           r.rotation.x = Math.PI / 2;
-           rings.add(r);
-        }
-        scene.add(rings);
-
-        // 3. Dynamic Environment Floor
-        const gridHelper = new THREE.GridHelper(30, 30, 0x00d4ff, 0x003355);
+        const gridHelper = new THREE.GridHelper(40, 40, 0x333333, 0x111111);
         gridHelper.position.y = -3;
-        gridHelper.material.transparent = true;
-        gridHelper.material.opacity = 0.4;
         scene.add(gridHelper);
 
-        // 4. Data Streams / Engine Particles
-        const partGeo = new THREE.BufferGeometry();
-        const partCount = 400;
-        const posArray = new Float32Array(partCount * 3);
-        for(let i=0; i<partCount*3; i++) posArray[i] = (Math.random() - 0.5) * 8;
-        partGeo.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
-        const partMat = new THREE.PointsMaterial({ color: 0x00d4ff, size: 0.03, transparent: true, opacity: 0.8 });
-        const particles = new THREE.Points(partGeo, partMat);
-        scene.add(particles);
-
-        // Lighting
-        scene.add(new THREE.AmbientLight(0x001122, 2.0));
-        const dirLight = new THREE.DirectionalLight(0x00d4ff, 3);
+        scene.add(new THREE.AmbientLight(0x222222, 2.0));
+        const dirLight = new THREE.DirectionalLight(0xffffff, 2);
         dirLight.position.set(5, 5, 5);
         scene.add(dirLight);
-        const alertLight = new THREE.DirectionalLight(0xffb000, 0.5);
-        alertLight.position.set(-5, -2, -5);
-        scene.add(alertLight);
 
-        camera.position.set(2, 1, 5.5);
+        camera.position.set(2.5, 1, 6);
         camera.lookAt(0, 0, 0);
         const clock = new THREE.Clock();
 
@@ -629,44 +603,20 @@
 
           rocketGroup.rotation.x = rktPitchCurrent;
           rocketGroup.rotation.z += rktRollRate * 0.015;
-          rocketGroup.position.y = Math.sin(time * 1.5) * 0.08; // Suspended float
+          rocketGroup.position.y = Math.sin(time * 1.5) * 0.08;
 
-          // Rings align with rocket but rotate independently
-          rings.position.copy(rocketGroup.position);
-          rings.rotation.x = rktPitchCurrent;
-          rings.children[0].rotation.z = time * 0.4;
-          rings.children[1].rotation.z = -time * 0.6;
-          rings.children[2].rotation.z = time * 0.8;
-
-          // Simulating flight speed
-          const speed = Math.max(0.02, rktAccelCurrent * 0.15);
+          const speed = Math.max(0.01, rktAccelCurrent * 0.1);
           gridHelper.position.z += speed;
           if (gridHelper.position.z > 1) gridHelper.position.z -= 1;
 
-          // Particles rushing past
-          const pPos = particles.geometry.attributes.position.array;
-          for(let i=1; i<partCount*3; i+=3) {
-            pPos[i] -= speed * 4;
-            if(pPos[i] < -4) {
-               pPos[i] = 4;
-               pPos[i-1] = (Math.random() - 0.5) * 5;
-               pPos[i+1] = (Math.random() - 0.5) * 5;
-            }
-          }
-          particles.geometry.attributes.position.needsUpdate = true;
-
-          // Camera shake based on G-Force
           if (rktAccelCurrent > 1.2) {
-             const shake = Math.min((rktAccelCurrent - 1.2) * 0.015, 0.05);
-             camera.position.x = 2 + (Math.random() - 0.5) * shake;
+             const shake = Math.min((rktAccelCurrent - 1.2) * 0.01, 0.03);
+             camera.position.x = 2.5 + (Math.random() - 0.5) * shake;
              camera.position.y = 1 + (Math.random() - 0.5) * shake;
           } else {
-             camera.position.x += (2 - camera.position.x) * 0.1;
+             camera.position.x += (2.5 - camera.position.x) * 0.1;
              camera.position.y += (1 - camera.position.y) * 0.1;
           }
-
-          // Dynamic lighting color shift on high acceleration
-          alertLight.intensity = Math.min(Math.max(0, (rktAccelCurrent - 1.5) * 2), 5);
 
           renderer.render(scene, camera);
         };
@@ -681,10 +631,10 @@
         window.update3D = () => {};
       }
 
-      // DATA PROCESSING
       function updateMetrics(pkt) {
         const src = pkt.source || source;
         $('val-alt').textContent = pad(pkt.altitude_m, 4);
+        if($('cam-alt')) $('cam-alt').textContent = parseFloat(pkt.altitude_m).toFixed(1) + 'M';
         if (pkt.altitude_m > maxAlt[src]) maxAlt[src] = pkt.altitude_m;
         $('val-apogee').textContent = pad(maxAlt[src], 4);
         $('stat-max-alt').textContent = pad(maxAlt[src], 4);
@@ -699,9 +649,8 @@
         $('val-accel').textContent = pad(accel, 2);
         $('hud-gforce').textContent = parseFloat(pkt.accel_z || 1).toFixed(2) + ' G';
         
-        $('val-rssi').textContent = pkt.rssi_dbm || '-00';
+        $('val-rssi').textContent = (pkt.rssi_dbm || '-00') + ' DBM';
         if(pkt.pkt_id) pktCount[src] = Math.max(pktCount[src], pkt.pkt_id);
-        $('val-pkts').textContent = String(pktCount[src]).padStart(4, '0');
         $('stat-pkts').textContent = String(pktCount[src]).padStart(4, '0');
         
         $('hud-gyro').textContent = pad(pkt.gyro_x, 2) + '°/S';
@@ -713,8 +662,6 @@
             const vvel = (pkt.altitude_m - prevAlt) / dt;
             $('val-vvel').textContent = pad(vvel, 2);
             $('cur-vvel').textContent = pad(vvel, 2);
-            const c = vvel > 1 ? 'var(--cyan)' : vvel < -1 ? 'var(--amber)' : '#fff';
-            $('val-vvel').style.color = c;
             pushSpark(sparkVvel, vvel);
           }
         }
@@ -727,8 +674,8 @@
         gyroHistory.push(Math.abs(pkt.gyro_x || 0)); if (gyroHistory.length > 10) gyroHistory.shift();
         const rms = Math.sqrt(gyroHistory.reduce((a, v) => a + v * v, 0) / gyroHistory.length);
         const sb = $('val-stability');
-        if (rms < 10) { sb.textContent = 'NOMINAL'; sb.style.color = 'var(--green)'; sb.style.borderColor = 'var(--green)'; }
-        else { sb.textContent = 'WARN_ROT'; sb.style.color = 'var(--amber)'; sb.style.borderColor = 'var(--amber)'; }
+        if (rms < 10) { sb.textContent = 'NOMINAL'; sb.style.color = 'var(--text-1)'; }
+        else { sb.textContent = 'WARNING'; sb.style.color = 'var(--warning)'; }
 
         window.update3D(pkt);
       }
@@ -754,15 +701,14 @@
         if(src) currentPhase[src] = phase;
         if(src && src !== source) return;
         const b = $('phase-badge');
-        b.textContent = `SYS.${phase}`;
+        b.textContent = `${phase}`;
         b.className = 'phase-badge ' + phase.toLowerCase();
       }
 
-      // TIMER
       setInterval(() => {
         if (!firstReceivedAt) return;
         const e = Math.floor((Date.now() - firstReceivedAt) / 1000);
-        $('mission-timer').textContent = `T+${String(Math.floor(e/3600)).padStart(2,'0')}:${String(Math.floor((e%3600)/60)).padStart(2,'0')}:${String(e%60).padStart(2,'0')}`;
+        $('mission-timer').textContent = `${String(Math.floor(e/3600)).padStart(2,'0')}:${String(Math.floor((e%3600)/60)).padStart(2,'0')}:${String(e%60).padStart(2,'0')}`;
       }, 1000);
 
       window.switchSource = (src) => {
@@ -774,13 +720,10 @@
         allSparks.forEach(c => { c.data.labels=[]; c.data.datasets[0].data=[]; });
       };
 
-      // SOCKET.IO & CONNECTION LOGIC
       const backendOrigin = (() => {
         const isHttp = window.location.protocol === 'http:' || window.location.protocol === 'https:';
         if (!isHttp) return 'http://localhost:3000';
-        if (window.location.port === '5500') {
-          return window.location.protocol + '//' + (window.location.hostname || 'localhost') + ':3000';
-        }
+        if (window.location.port === '5500') return window.location.protocol + '//' + (window.location.hostname || 'localhost') + ':3000';
         return window.location.origin;
       })();
       const apiUrl = (path) => backendOrigin + path;
@@ -793,14 +736,12 @@
 
       function attachSocketHandlers(s) {
         s.on('connect', () => {
-          setModeBadge('SYSTEM ONLINE', 'var(--green)');
+          setModeBadge('SYSTEM ONLINE', 'var(--text-1)');
           s.emit('subscribe_source', { source });
           s.emit('request_history', { source, limit: 200 });
         });
 
-        s.on('disconnect', () => {
-          setModeBadge('OFFLINE', 'var(--red)');
-        });
+        s.on('disconnect', () => setModeBadge('OFFLINE', 'var(--critical)'));
 
         s.on('history', data => {
           if (!data) return;
@@ -813,9 +754,8 @@
                const srcEvts = data.events.filter(e => e.source === source);
                if (srcEvts.length) updatePhase(srcEvts[srcEvts.length - 1].event_type, source);
              }
-          } else if (data.packets) {
-             pkts = data.packets;
-          }
+          } else if (data.packets) pkts = data.packets;
+          
           if (pkts && pkts.length) {
              allSparks.forEach(c => { c.data.labels=[]; c.data.datasets[0].data=[]; });
              pkts.forEach(p => {
@@ -844,33 +784,31 @@
         socket = io(backendOrigin, { transports: ['websocket', 'polling'] });
         attachSocketHandlers(socket);
       } else {
-        setModeBadge('NO SOCKET', 'var(--amber)');
+        setModeBadge('NO SOCKET', 'var(--warning)');
       }
 
-      // SD UPLOAD & EXPORT
       window.uploadSD = () => $('file-sd').click();
       $('file-sd').addEventListener('change', e => {
         const file = e.target.files[0];
         if (!file) return;
         const fd = new FormData();
         fd.append('file', file);
-        $('btn-upload').textContent = '[ UPLOADING ]';
+        $('btn-upload').textContent = 'UPLOADING...';
         fetch(apiUrl('/api/upload-sd'), { method: 'POST', body: fd })
-          .then(() => { $('btn-upload').textContent = '[ UPLOAD SD ]'; })
-          .catch(() => { $('btn-upload').textContent = '[ UPLOAD SD ]'; });
+          .then(() => { $('btn-upload').textContent = 'UPLOAD SD'; })
+          .catch(() => { $('btn-upload').textContent = 'UPLOAD SD'; });
         e.target.value = '';
       });
       window.exportCSV = () => window.open(apiUrl('/api/export?source=' + source), '_blank');
 
       function pollHealth() {
         fetch(apiUrl('/api/health')).then(r => r.json()).then(data => {
-          if (data.sim_mode) { $('stat-mode').textContent = 'SIM MODE'; $('stat-mode').style.color = 'var(--amber)'; }
+          if (data.sim_mode) { $('stat-mode').textContent = 'SIMULATION'; $('stat-mode').style.color = 'var(--warning)'; }
         }).catch(() => { });
       }
       setInterval(pollHealth, 5000);
       setTimeout(pollHealth, 800);
 
-      // MOCK DATA FOR LOCAL VIEWING WITHOUT BACKEND
       if (!window.io) {
         console.warn("Socket.io not found, running pure frontend simulation");
         let simAlt = 0, tick = 0;
