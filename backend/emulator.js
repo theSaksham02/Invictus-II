@@ -43,7 +43,10 @@ function startEmulator() {
     let flags = 0;
     if (tick >= 30) flags |= 0x01; // launched
     if (tick >= 90) flags |= 0x02; // apogee
-    flags |= 0x04; // gps fix
+    if (tick >= 10) flags |= 0x04; // gps fix (takes 10s to acquire)
+    if (tick >= 2) flags |= 0x08; // bmp_ok
+    if (tick >= 4) flags |= 0x10; // mpu_ok
+    if (tick >= 6) flags |= 0x20; // sd_ok
 
     // ═══════════════════════════════════════════════════════════
     // 1. CANSAT BINARY INGESTION (37 bytes, little-endian)
