@@ -4,12 +4,14 @@
 #include <Adafruit_BMP3XX.h>
 #include <Adafruit_MPU6050.h>
 #include <TinyGPSPlus.h>
+#include <SD.h>
 #include "telemetry.h"
 
 #define RFM69_CS PA4
 #define RFM69_INT PA3
 #define RFM69_RST PA2
 #define RF69_FREQ 433.0
+#define SD_CS PA11
 
 RH_RF69 rf69(RFM69_CS, RFM69_INT);
 
@@ -17,6 +19,7 @@ Adafruit_BMP3XX bmp;
 Adafruit_MPU6050 mpu;
 TinyGPSPlus gps;
 HardwareSerial SerialGPS(USART2); // PA3 (RX), PA2 (TX) // Check pinouts
+File logFile;
 
 float baseline_pressure = 1013.25;
 
@@ -66,6 +69,22 @@ void loop() {
         pkt.checksum = 0;
         for(int i = 0; i < 36; i++) {
             pkt.checksum ^= ptr[i];
+        }
+
+        if ((pkt.flags & 0x20) && logFile) {
+            logFile.print(pkt.pkt_id); logFile.print(",");
+            logFile.print(pkt.timestamp_ms); logFile.print(",");
+            logFile.print(pkt.altitude_m, 2); logFile.print(",");
+            logFile.print(pkt.temp_c, 2); logFile.print(",");
+            logFile.print(pkt.pressure_hpa, 2); logFile.print(",");
+            logFile.print(pkt.accel_z, 2); logFile.print(",");
+            logFile.print(pkt.gyro_x, 2); logFile.print(",");
+            logFile.print(pkt.lat, 5); logFile.print(",");
+            logFile.print(pkt.lon, 5); logFile.print(",");
+            logFile.println(pkt.flags);
+            
+            // Flush every 10 packets (1 second) to prevent data loss on impact
+            if (pkt.pkt_id % 10 == 0) logFile.flush();
         }
         
         // Transmit
