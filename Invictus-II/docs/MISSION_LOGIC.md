@@ -34,7 +34,7 @@ The FSM runs **two independent state machines in parallel** — one per source:
 
 | Source | Hardware | Packet Format | Accel Available | Flags Available |
 |---|---|---|---|---|
-| `CANSAT` | STM32 Bluepill + RFM69HCW 433MHz | 37-byte binary struct | ✅ `accel_z` (float) | ✅ `flags` byte |
+| `CANSAT` | STM32 Bluepill + RFM69HCW 868MHz | 37-byte binary struct | ✅ `accel_z` (float) | ✅ `flags` byte |
 | `NRC` | Heltec LoRa v3 (ESP32-S3) 868MHz | ASCII CSV `NRC:...` | ❌ hardcoded `0.0` | ❌ hardcoded `0` |
 
 > **Important:** NRC source cannot use flag-based or accel-based transitions. It relies entirely on altitude delta logic.
