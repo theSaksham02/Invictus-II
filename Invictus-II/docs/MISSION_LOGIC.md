@@ -1,8 +1,142 @@
-# INVICTUS II — Mission Logic
+# UOBRPL Avionics — Project Overview & Mission Logic
 
-**Document:** MISSION_LOGIC.md
+**Organisation:** University of Birmingham Rocketry & Propulsion Lab (UOBRPL)
+**Dashboard:** UOBRPL Avionics
+**Last updated:** April 2026
+
+---
+
+## PROJECT OVERVIEW
+
+### Three Competitions. Four Vehicles. One Platform.
+
+UOBRPL competes in three simultaneous national and international competitions, all managed under the **UOBRPL Avionics** ground station platform.
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        UOBRPL AVIONICS                                  │
+│                  University of Birmingham Dubai                          │
+├──────────────────┬──────────────────┬──────────────────────────────────┤
+│  AVIONICS TAB    │  CANSAT TAB      │  ROVER TAB                       │
+│                  │                  │                                   │
+│  INVICTUS II     │  SUGAR           │  NOVARIUM II                     │
+│  (NRC Rocket)    │  (MachX CanSat)  │  (ORT Rover)                     │
+│                  │                  │                                   │
+│  MATCHA          │                  │                                   │
+│  (MachX Rocket)  │                  │                                   │
+└──────────────────┴──────────────────┴──────────────────────────────────┘
+```
+
+---
+
+### PROJECT 1 — UKSEDS National Rocketry Championship (NRC)
+
+**Competition:** [UKSEDS NRC](https://ukseds.org/ignition/competitions/national-rocketry-championship/)
+**Vehicle:** INVICTUS II
+**Type:** Mid-power competition rocket + CanSat payload
+**Dashboard section:** Avionics tab
+
+| Parameter | Value |
+|---|---|
+| Target Altitude | 2,200 ft (670 m) |
+| Telemetry | 1 Hz, 868 MHz RFM69HCW |
+| Packet Format | 37-byte binary struct (CANSAT source) |
+| NRC Satellite | Heltec LoRa v3 868 MHz (NRC source) |
+| Ground Station | `npm start` — Node.js + Socket.io |
+| Rulebook | UKSEDS NRC 2025–26 |
+
+**Source identifiers in backend:**
+- `CANSAT` — INVICTUS II CanSat payload (STM32 + RFM69HCW)
+- `NRC` — NRC satellite (Heltec LoRa v3, ASCII CSV)
+
+---
+
+### PROJECT 2 — UKSEDS Olympus Rover Trials (ORT)
+
+**Competition:** [UKSEDS ORT](https://ukseds.org/ignition/competitions/olympus-rover-trials/)
+**Vehicle:** NOVARIUM II
+**Type:** Planetary surface simulation rover
+**Dashboard section:** Rover tab
+
+| Parameter | Value |
+|---|---|
+| Platform | Raspberry Pi 4B |
+| Drive | BTS7960 × 2 · 6 motors |
+| Comms | WiFi HTTP (Flask) |
+| Camera | Camera Module 3 (MJPEG stream) |
+| Control | WASD keyboard + gamepad via dashboard |
+| Proxy | `rover-proxy.js` → RPi Flask |
+
+**Source identifier in backend:**
+- `ROVER` — NOVARIUM II (HTTP, not Socket.io telemetry)
+
+---
+
+### PROJECT 3 — EuRoC / Mach-X (EXO Events)
+
+**Competition:** [EXO Events / Mach-X](https://www.exo.events/about)
+**Vehicles:** MATCHA (rocket) + SUGAR (CanSat payload)
+**Type:** European Rocketry Challenge — high-power rocket + CanSat
+**Dashboard section:** Avionics tab (MATCHA) + CanSat tab (SUGAR)
+
+| Parameter | Value |
+|---|---|
+| Rocket | MATCHA |
+| CanSat | SUGAR |
+| Packet format | TBD — likely same 37-byte binary struct as INVICTUS II |
+| Radio | TBD — 868 MHz |
+| Launch site | Machrihanish Airbase, Scotland (via EXO Events) |
+
+**Source identifiers in backend (reserved):**
+- `MACHX` — MATCHA rocket avionics
+- `SUGAR` — SUGAR CanSat payload
+
+> ⚠️ **Status:** MATCHA and SUGAR firmware/packet spec TBD. Sources registered in `phase-tracker.js` but inactive until hardware is confirmed.
+
+---
+
+### Vehicle Registry
+
+| Vehicle | Project | Competition | Dashboard Tab | Backend Source | Status |
+|---|---|---|---|---|---|
+| **INVICTUS II** | NRC Rocket | UKSEDS NRC | Avionics | `CANSAT` + `NRC` | ✅ Active |
+| **NOVARIUM II** | ORT Rover | UKSEDS ORT | Rover | `ROVER` | ✅ Active |
+| **MATCHA** | MachX Rocket | EuRoC/Mach-X | Avionics | `MACHX` | 🔜 TBD |
+| **SUGAR** | MachX CanSat | EuRoC/Mach-X | CanSat | `SUGAR` | 🔜 TBD |
+
+---
+
+### Repository Structure (updated)
+
+```
+Invictus-II/
+├── backend/
+│   ├── server.js           ← UOBRPL Avionics — Express + Socket.io
+│   ├── phase-tracker.js    ← FSM for CANSAT, NRC, MACHX, SUGAR
+│   ├── parser.js           ← Binary (CANSAT/MACHX/SUGAR) + ASCII (NRC)
+│   ├── serial.js           ← Multi-port serial (CANSAT + NRC)
+│   ├── rover-proxy.js      ← NOVARIUM II HTTP proxy
+│   ├── db.js               ← SQLite — all sources
+│   └── emulator.js         ← Dev simulation (all sources)
+├── dashboard/
+│   └── ground-station.html ← UOBRPL Avionics UI
+│       ├── Avionics tab    ← INVICTUS II + MATCHA
+│       ├── CanSat tab      ← SUGAR
+│       └── Rover tab       ← NOVARIUM II
+└── Invictus-II/
+    └── docs/
+        ├── MISSION_LOGIC.md    ← this file
+        └── HARDWARE_SETUP.md
+```
+
+---
+
+---
+
+# Mission Logic — Flight State Machine
+
 **System:** Ground Station Flight State Machine
-**Applies to:** CANSAT (STM32 + RFM69HCW) · NRC Satellite (Heltec LoRa v3)
+**Applies to:** All rocket/CanSat sources — CANSAT · NRC · MACHX · SUGAR
 **File:** `backend/phase-tracker.js`
 
 ---
@@ -30,14 +164,16 @@ Telemetry Packet (1 Hz)
 
 ## 2. Mission Sources
 
-The FSM runs **two independent state machines in parallel** — one per source:
+The FSM runs **one independent state machine per source**:
 
-| Source | Hardware | Packet Format | Accel Available | Flags Available |
-|---|---|---|---|---|
-| `CANSAT` | STM32 Bluepill + RFM69HCW 868MHz | 37-byte binary struct | ✅ `accel_z` (float) | ✅ `flags` byte |
-| `NRC` | Heltec LoRa v3 (ESP32-S3) 868MHz | ASCII CSV `NRC:...` | ❌ hardcoded `0.0` | ❌ hardcoded `0` |
+| Source | Vehicle | Hardware | Packet Format | Accel | Flags |
+|---|---|---|---|---|---|
+| `CANSAT` | INVICTUS II | STM32 + RFM69HCW 868MHz | 37-byte binary | ✅ | ✅ |
+| `NRC` | INVICTUS II | Heltec LoRa v3 868MHz | ASCII CSV `NRC:...` | ❌ | ❌ |
+| `MACHX` | MATCHA | TBD | TBD (likely 37-byte binary) | 🔜 | 🔜 |
+| `SUGAR` | SUGAR CanSat | TBD | TBD | 🔜 | 🔜 |
 
-> **Important:** NRC source cannot use flag-based or accel-based transitions. It relies entirely on altitude delta logic.
+> **Note:** ROVER (NOVARIUM II) does not use the FSM — it is controlled via HTTP, not telemetry.
 
 ---
 
@@ -71,71 +207,69 @@ The FSM runs **two independent state machines in parallel** — one per source:
 #### IDLE → LAUNCHED
 
 ```
-CANSAT:  (pkt.flags & 0x01) !== 0
-         └─ Bit 0 of flags byte set by STM32 firmware
-            when accel_z > 2.5g for 3 consecutive reads (SMN-001)
+CANSAT / MACHX / SUGAR:
+  (pkt.flags & 0x01) !== 0
+  └─ Bit 0 of flags byte set by STM32 firmware
+     when accel_z > 2.5g for 3 consecutive reads (SMN-001)
 
-NRC:     flags hardcoded to 0 → this transition NEVER fires for NRC
-         └─ NRC enters LAUNCHED via manual override or skip to ASCENDING
+NRC:
+  flags hardcoded to 0 → this transition NEVER fires
+  └─ NRC skips to ASCENDING via altitude delta
 ```
 
-**Timing constraint:** Must occur within 120 s of `npm start` in live mode, else signal watchdog triggers.
+**Timing constraint:** Must occur within 120 s of `npm start` in live mode.
 
 ---
 
 #### LAUNCHED → ASCENDING
 
 ```
-CANSAT & NRC:
+All sources:
   alt_history.length >= 2
   AND pkt.altitude_m > alt_history[last - 1]
   └─ At least 2 consecutive packets showing altitude gain
 ```
 
-**Edge case:** If two identical altitude readings arrive (GPS jitter), this transition stalls. Firmware should report BMP388 barometric altitude, not GPS altitude, for primary altitude field.
+**Edge case:** GPS jitter can stall this. Use BMP388 barometric altitude as primary.
 
 ---
 
 #### ASCENDING → APOGEE
 
 ```
-CANSAT:  (pkt.flags & 0x02) !== 0         ← Bit 1 set by firmware (preferred)
-         OR (max_alt - pkt.altitude_m) > 5  ← 5m drop from peak (fallback)
+CANSAT / MACHX / SUGAR:
+  (pkt.flags & 0x02) !== 0          ← firmware flag (preferred)
+  OR (max_alt - pkt.altitude_m) > 5 ← 5m drop fallback
 
-NRC:     (max_alt - pkt.altitude_m) > 5   ← altitude drop fallback only
-         (flags always 0)
+NRC:
+  (max_alt - pkt.altitude_m) > 5    ← altitude drop only
 ```
 
-**Timing:** `apogee_time` is recorded in ms since firmware boot. Used for descent duration calculations.
-
-**Risk:** The 5m threshold is tight at low altitudes. If target apogee is 670m, a 5m drop is ~0.75%. Acceptable. At lower altitudes (e.g. test flights < 100m) this may trigger prematurely — raise threshold to 10m for low-altitude tests.
+**Risk:** 5m threshold may trigger prematurely on low-altitude test flights. Raise to 10m for tests below 100m.
 
 ---
 
 #### APOGEE → DESCENDING
 
 ```
-CANSAT & NRC:
+All sources:
   alt_history.length >= 3
   AND alt_history[last] < alt_history[last - 1]
   └─ Single packet showing altitude decrease
 ```
-
-**Note:** This is intentionally aggressive (1 packet = transition). Under parachute at 1 Hz, descent is ~5 m/s so any decrease is real.
 
 ---
 
 #### DESCENDING → LANDED
 
 ```
-CANSAT & NRC:
-  alt_history.length === 10   ← full 10-packet window
+All sources:
+  alt_history.length === 10
   AND (max(alt_history) - min(alt_history)) <= 1.0m
-  └─ Altitude variance < 1 metre over last 10 seconds
-     = vehicle is stationary on ground
+  └─ Altitude variance < 1m over last 10 seconds = stationary
 ```
 
-**Risk:** GPS altitude noise can exceed 1m even when stationary. If this transition never fires, increase threshold to `<= 3.0` for GPS-primary sources. BMP388-based altitude is more stable.
+**Risk:** GPS noise can exceed 1m. Increase to 3.0m or use BMP388 altitude.
 
 ---
 
@@ -143,12 +277,12 @@ CANSAT & NRC:
 
 ```javascript
 {
-  phase:           'IDLE',   // current FSM state
-  max_alt:         0,        // metres — rolling max since boot
-  launch_time:     0,        // ms — timestamp of LAUNCHED transition
-  apogee_time:     0,        // ms — timestamp of APOGEE transition
+  phase:            'IDLE',  // current FSM state
+  max_alt:          0,       // metres — rolling max since boot
+  launch_time:      0,       // ms — timestamp of LAUNCHED transition
+  apogee_time:      0,       // ms — timestamp of APOGEE transition
   last_packet_time: 0,       // ms — used by signal watchdog
-  alt_history:     []        // last 10 altitude readings (sliding window)
+  alt_history:      []       // last 10 altitude readings (sliding window)
 }
 ```
 
@@ -156,13 +290,11 @@ CANSAT & NRC:
 
 ## 5. Events Emitted
 
-Every state transition fires two actions simultaneously:
-
-### 5.1 Persisted to SQLite (`db.js`)
+### 5.1 Persisted to SQLite
 
 ```javascript
 {
-  source:       'CANSAT' | 'NRC',
+  source:       'CANSAT' | 'NRC' | 'MACHX' | 'SUGAR',
   event_type:   'LAUNCHED' | 'ASCENDING' | 'APOGEE' | 'DESCENDING' | 'LANDED',
   altitude_m:   float,
   timestamp_ms: uint32,
@@ -173,63 +305,54 @@ Every state transition fires two actions simultaneously:
 ### 5.2 Broadcast via Socket.io
 
 ```
-Event name: 'mission_event'
-Payload:    same object as above
+Event: 'mission_event'  →  same payload as above
 ```
 
-Dashboard receives this and updates:
-- Phase banner colour
-- Mission clock (T+ timer starts at LAUNCHED)
-- Apogee altitude KPI card
-- Event log timeline
+Dashboard updates: phase banner · T+ mission clock · apogee KPI card · event log
 
 ---
 
-## 6. Signal Watchdog (separate from FSM)
+## 6. Signal Watchdog
 
-Runs in `serial.js` / `server.js` — not in `phase-tracker.js`.
+Runs in `serial.js` / `server.js` independently of FSM.
 
 ```
-If no packet received for > 5,000 ms:
-  emit('signal_lost', { source, last_seen_ms })
-
-If packet received after signal_lost:
-  emit('signal_recovered', { source, gap_ms })
+No packet for > 5,000 ms  →  emit('signal_lost')
+Packet resumes            →  emit('signal_recovered')
 ```
-
-This is **independent of flight phase** — signal can be lost during any phase.
 
 ---
 
-## 7. Known Limitations & Improvement Targets
+## 7. Known Limitations
 
 | # | Issue | Impact | Fix |
 |---|---|---|---|
-| 1 | NRC can't detect LAUNCHED (no flags, no accel) | NRC FSM starts at IDLE until altitude rises | Add accel to NRC firmware or use altitude-rate threshold |
-| 2 | LANDED threshold (1.0m) may fail with GPS altitude | Vehicle shows DESCENDING forever | Increase to 3.0m or switch to BMP388 altitude for landing detection |
-| 3 | ASCENDING transition requires only 1 positive delta | False trigger possible on GPS jitter | Require 3 consecutive increasing readings |
-| 4 | No timeout guards on state transitions | Vehicle stuck in LAUNCHED if firmware never sets bit 0 | Add 30s timeout: if LAUNCHED and no ASCENDING, force transition |
-| 5 | No phase RESET mechanism | Post-landing, FSM stays at LANDED — can't re-arm without restart | Add `resetState(source)` API endpoint for pre-launch re-arming |
+| 1 | NRC can't detect LAUNCHED (no flags/accel) | NRC starts at IDLE until altitude rises | Add accel to NRC firmware or altitude-rate threshold |
+| 2 | LANDED threshold (1.0m) may fail with GPS | Vehicle stuck in DESCENDING | Increase to 3.0m or use BMP388 |
+| 3 | ASCENDING needs only 1 positive delta | False trigger on GPS jitter | Require 3 consecutive increases |
+| 4 | No timeout on state transitions | Stuck in LAUNCHED if firmware never sets bit 0 | Add 30s timeout |
+| 5 | No RESET mechanism | Can't re-arm after LANDED without restart | Add `resetState(source)` API |
+| 6 | MACHX + SUGAR packet spec undefined | Sources registered but inactive | Confirm hardware, update parser.js |
 
 ---
 
 ## 8. Recommended Improvements (V2)
 
 ```javascript
-// 1. Timeout guard — LAUNCHED → ASCENDING if 30s elapsed and altitude rising
+// Timeout: LAUNCHED → ASCENDING after 30s if altitude rising
 if (s.phase === 'LAUNCHED' && (Date.now() - s.launch_time) > 30000) {
   if (pkt.altitude_m > 10) newPhase = 'ASCENDING';
 }
 
-// 2. Stricter ASCENDING — require 3 consecutive increases
+// Stricter ASCENDING: 3 consecutive increases
 const last3 = s.alt_history.slice(-3);
 const strictlyAscending = last3.length === 3 &&
   last3[2] > last3[1] && last3[1] > last3[0];
 
-// 3. LANDED with wider GPS tolerance
+// LANDED with GPS tolerance
 if (maxH - minH <= 3.0) newPhase = 'LANDED';
 
-// 4. Reset endpoint in server.js
+// Reset endpoint
 app.post('/api/reset/:source', (req, res) => {
   resetState(req.params.source);
   res.json({ ok: true });
@@ -240,16 +363,22 @@ app.post('/api/reset/:source', (req, res) => {
 
 ## 9. Integration Checklist
 
-Before live launch day:
+**INVICTUS II (NRC) — before launch day:**
+- [ ] STM32 sets `flags |= 0x01` when `accel_z > 2.5g × 3`
+- [ ] STM32 sets `flags |= 0x02` at detected apogee
+- [ ] `npm run sim` fires all 6 states in sequence
+- [ ] SQLite events table shows 6 rows per source after sim
+- [ ] Dashboard phase banner updates on each transition
+- [ ] `signal_lost` fires on USB unplug mid-sim
+- [ ] LANDED fires within 10 packets of sim touchdown
 
-- [ ] Confirm STM32 firmware sets `flags |= 0x01` when `accel_z > 2.5g × 3`
-- [ ] Confirm STM32 firmware sets `flags |= 0x02` at detected apogee
-- [ ] Run simulation (`npm run sim`) and verify all 6 states fire in sequence
-- [ ] Check SQLite events table after sim run — 6 rows per source expected
-- [ ] Verify dashboard mission_event banner updates on each transition
-- [ ] Test signal_lost by unplugging USB dongle mid-sim
-- [ ] Verify LANDED fires within 10 packets of sim touchdown
+**MATCHA + SUGAR (EuRoC) — TBD:**
+- [ ] Confirm packet spec (37-byte binary or new struct)
+- [ ] Update `parser.js` with MACHX + SUGAR parsers
+- [ ] Confirm radio frequency and baud rate
+- [ ] Add serial port config to `.env.example`
 
 ---
 
-*Last updated: April 2026 — INVICTUS II · University of Birmingham Dubai · UKSEDS NRC 2025–26*
+*Last updated: April 2026 — UOBRPL · University of Birmingham Dubai*
+*Competitions: UKSEDS NRC · UKSEDS ORT · EuRoC Mach-X (EXO Events)*
