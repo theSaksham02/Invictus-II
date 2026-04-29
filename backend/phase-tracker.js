@@ -6,12 +6,16 @@ const states = {
 };
 
 function processPacket(pkt, emitFn) {
-  const s = states[pkt.source];
-  if (!s) return;
+  if (!pkt || !states[pkt.source]) return;
+  if (!Number.isFinite(pkt.altitude_m) || !Number.isFinite(pkt.timestamp_ms)) return;
 
-  s.last_packet_time = pkt.timestamp_ms;
+  const s = states[pkt.source];
+  const packetTs = Math.trunc(pkt.timestamp_ms);
+  if (s.last_packet_time && packetTs < s.last_packet_time) return;
+
+  s.last_packet_time = packetTs;
   if (pkt.altitude_m > s.max_alt) s.max_alt = pkt.altitude_m;
-  
+
   s.alt_history.push(pkt.altitude_m);
   if (s.alt_history.length > 10) s.alt_history.shift();
 
@@ -51,11 +55,15 @@ function processPacket(pkt, emitFn) {
       source: pkt.source,
       event_type: newPhase,
       altitude_m: pkt.altitude_m,
-      timestamp_ms: pkt.timestamp_ms,
+      timestamp_ms: packetTs,
       received_at: pkt.received_at
     };
-    insertEvent(ev);
-    try { emitFn('mission_event', ev); } catch (e) {}
+    try {
+      insertEvent(ev);
+      emitFn('mission_event', ev);
+    } catch (error) {
+      console.error('[PHASE] event publish failed:', error.message);
+    }
   }
 }
 
