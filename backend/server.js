@@ -99,9 +99,27 @@ serial.initSerial(emitToAll, () => {
 
 // ── ROUTES ────────────────────────────────────────────────────────────────────
 app.get('/', (req, res) => {
-  const dashPath = path.resolve(__dirname, process.env.DASHBOARD_PATH || '../dashboard/ground-station.html');
+  const dashPath = path.resolve(__dirname, process.env.DASHBOARD_PATH || '../dashboard/index.html');
   if (fs.existsSync(dashPath)) res.sendFile(dashPath);
-  else res.send('<h1 style="font-family:monospace;color:#00d4ff;background:#020817;padding:2rem">INVICTUS II Ground Station — backend running, dashboard not yet deployed.</h1>');
+  else res.send('<h1 style="font-family:monospace;color:#00d4ff;background:#020817;padding:2rem">INVICTUS II Ground Station — backend running, index not found.</h1>');
+});
+
+app.get('/nrc', (req, res) => {
+  const dashPath = path.resolve(__dirname, '../dashboard/nrc.html');
+  if (fs.existsSync(dashPath)) res.sendFile(dashPath);
+  else res.status(404).send('NRC Dashboard missing');
+});
+
+app.get('/ort', (req, res) => {
+  const dashPath = path.resolve(__dirname, '../dashboard/ort.html');
+  if (fs.existsSync(dashPath)) res.sendFile(dashPath);
+  else res.status(404).send('ORT Dashboard missing');
+});
+
+app.get('/mach-x', (req, res) => {
+  const dashPath = path.resolve(__dirname, '../dashboard/mach-x.html');
+  if (fs.existsSync(dashPath)) res.sendFile(dashPath);
+  else res.status(404).send('Mach-X Dashboard missing');
 });
 
 app.get('/api/health', (req, res) => {

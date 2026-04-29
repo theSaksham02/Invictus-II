@@ -1,10 +1,16 @@
 const Database = require('better-sqlite3');
-const path = require('path');
 
 const dbFile = process.env.DB_FILE || './flight.db';
 const db = new Database(dbFile);
 
-// Create tables
+const DEFAULT_HISTORY_LIMIT = 200;
+const MAX_HISTORY_LIMIT = 1000;
+
+db.pragma('journal_mode = WAL');
+db.pragma('synchronous = NORMAL');
+db.pragma('busy_timeout = 5000');
+db.pragma('foreign_keys = ON');
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS packets (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -23,10 +29,10 @@ db.exec(`
     raw TEXT,
     received_at INTEGER NOT NULL
   );
-  
+
   CREATE INDEX IF NOT EXISTS idx_source_time ON packets(source, received_at);
   CREATE INDEX IF NOT EXISTS idx_source_pktid ON packets(source, pkt_id);
-  
+
   CREATE TABLE IF NOT EXISTS mission_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     source TEXT NOT NULL,
@@ -35,7 +41,7 @@ db.exec(`
     timestamp_ms INTEGER,
     received_at INTEGER NOT NULL
   );
-  
+
   CREATE TABLE IF NOT EXISTS sd_uploads (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     filename TEXT,
@@ -58,13 +64,13 @@ const statements = {
     VALUES (@filename, @rows_inserted, @uploaded_at)
   `),
   getRecentPackets: db.prepare(`
-    SELECT * FROM packets 
+    SELECT * FROM packets
     WHERE source = ? AND (? = 0 OR received_at > ?)
-    ORDER BY received_at DESC 
+    ORDER BY received_at DESC
     LIMIT ?
   `),
   getPacketStats: db.prepare(`
-    SELECT 
+    SELECT
       COUNT(*) as count,
       MAX(altitude_m) as max_alt_m,
       MIN(temp_c) as min_temp_c,
@@ -73,56 +79,101 @@ const statements = {
     FROM packets WHERE source = ?
   `),
   getEvents: db.prepare(`SELECT * FROM mission_events ORDER BY received_at ASC`),
-  exportPackets: db.prepare(`SELECT id, source, pkt_id, timestamp_ms, altitude_m, temp_c, pressure_hpa, accel_z, gyro_x, lat, lon, rssi_dbm, flags, received_at FROM packets WHERE (? = 'ALL' OR source = ?) ORDER BY received_at ASC`)
+  exportPackets: db.prepare(`
+    SELECT id, source, pkt_id, timestamp_ms, altitude_m, temp_c, pressure_hpa, accel_z, gyro_x, lat, lon, rssi_dbm, flags, received_at
+    FROM packets
+    WHERE (? = 'ALL' OR source = ?)
+    ORDER BY received_at ASC
+  `)
 };
 
-function insertPacket(p) {
-  try { return statements.insertPacket.run(p); } 
-  catch (e) { console.error('[DB] insertPacket error:', e.message); }
-}
+const insertPacketTx = db.transaction((packets) => {
+  for (const packet of packets) {
+    statements.insertPacket.run(packet);
+  }
+});
 
-function insertEvent(e) {
-  try { return statements.insertEvent.run(e); } 
-  catch (err) { console.error('[DB] insertEvent error:', err.message); }
-}
-
-function insertUpload(u) {
-  try { return statements.insertUpload.run(u); } 
-  catch (err) { console.error('[DB] insertUpload error:', err.message); }
-}
-
-function getHistory(source, limit = 200, since = 0) {
+function runOrThrow(operation, fn) {
   try {
-    const rows = statements.getRecentPackets.all(source, since, since, limit);
-    return rows.reverse(); // oldest->newest
-  } catch (err) {
-    console.error('[DB] getHistory error:', err.message);
-    return [];
+    return fn();
+  } catch (error) {
+    error.message = `[DB] ${operation} failed: ${error.message}`;
+    throw error;
   }
 }
 
+function insertPacket(packet) {
+  return runOrThrow('insertPacket', () => statements.insertPacket.run(packet));
+}
+
+function insertPacketsBulk(packets) {
+  if (!Array.isArray(packets)) {
+    throw new TypeError('[DB] insertPacketsBulk requires an array of packets');
+  }
+  if (packets.length === 0) {
+    return { changes: 0 };
+  }
+  return runOrThrow('insertPacketsBulk', () => {
+    insertPacketTx(packets);
+    return { changes: packets.length };
+  });
+}
+
+function insertEvent(event) {
+  return runOrThrow('insertEvent', () => statements.insertEvent.run(event));
+}
+
+function insertUpload(upload) {
+  return runOrThrow('insertUpload', () => statements.insertUpload.run(upload));
+}
+
+function getHistory(source, limit = DEFAULT_HISTORY_LIMIT, since = 0) {
+  const boundedLimit = Math.min(
+    Math.max(Number.parseInt(limit, 10) || DEFAULT_HISTORY_LIMIT, 1),
+    MAX_HISTORY_LIMIT
+  );
+  const sinceTs = Number.parseInt(since, 10) || 0;
+
+  return runOrThrow('getHistory', () => {
+    const rows = statements.getRecentPackets.all(source, sinceTs, sinceTs, boundedLimit);
+    return rows.reverse();
+  });
+}
+
 function getStats(source) {
-  try { return statements.getPacketStats.get(source) || { count: 0 }; } 
-  catch (err) { console.error('[DB] getStats error:', err.message); return { count: 0 }; }
+  return runOrThrow('getStats', () => {
+    return statements.getPacketStats.get(source) || {
+      count: 0,
+      max_alt_m: null,
+      min_temp_c: null,
+      first_packet_at: null,
+      last_packet_at: null
+    };
+  });
 }
 
 function getAllEvents() {
-  try { return statements.getEvents.all(); } 
-  catch (err) { console.error('[DB] getAllEvents error:', err.message); return []; }
+  return runOrThrow('getAllEvents', () => statements.getEvents.all());
 }
 
 function exportCsv(source) {
-  try { return statements.exportPackets.all(source, source); } 
-  catch (err) { console.error('[DB] exportCsv error:', err.message); return []; }
+  return runOrThrow('exportCsv', () => statements.exportPackets.all(source, source));
+}
+
+function close() {
+  return runOrThrow('close', () => db.close());
 }
 
 module.exports = {
   db,
   insertPacket,
+  insertPacketsBulk,
   insertEvent,
   insertUpload,
   getHistory,
   getStats,
   getAllEvents,
-  exportCsv
+  exportCsv,
+  close,
+  MAX_HISTORY_LIMIT
 };

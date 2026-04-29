@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>INVICTUS II — MISSION SELECT</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg-deep: #000000;
+      --bg-panel: #090909;
+      --border: #1f1f1f;
+      --border-hi: #333333;
+      --spx-blue: #005288;
+      --text-1: #ffffff;
+      --text-2: #cccccc;
+      --text-3: #666666;
+      --sans: 'Inter', system-ui, sans-serif;
+      --mono: 'JetBrains Mono', 'Fira Code', monospace;
+    }
+    body {
+      background: var(--bg-deep); color: var(--text-1); font-family: var(--sans);
+      height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      background-image: 
+        linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
+      background-size: 40px 40px;
+    }
+    .header { text-align: center; margin-bottom: 3rem; }
+    h1 { font-family: var(--mono); font-size: 2rem; font-weight: 700; letter-spacing: 0.2em; margin-bottom: 0.5rem; }
+    p { color: var(--text-3); font-size: 0.8rem; letter-spacing: 0.1em; font-family: var(--sans); }
+    
+    .grid { display: grid; grid-template-columns: repeat(3, 300px); gap: 2rem; }
+    .card {
+      background: var(--bg-panel); border: 1px solid var(--border); border-radius: 6px;
+      padding: 2rem; display: flex; flex-direction: column; cursor: pointer; text-decoration: none;
+      transition: all 0.2s ease; position: relative; overflow: hidden;
+    }
+    .card:hover { border-color: var(--text-1); transform: translateY(-4px); }
+    .card:hover .tag { background: var(--text-1); color: #000; }
+    .tag { font-family: var(--mono); font-size: 0.6rem; font-weight: 600; letter-spacing: 0.15em; color: var(--text-3); margin-bottom: 1rem; border: 1px solid var(--border); padding: 4px 8px; border-radius: 4px; align-self: flex-start; transition: 0.2s; }
+    h2 { font-size: 1.25rem; font-weight: 600; margin-bottom: 0.5rem; color: var(--text-1); }
+    .desc { font-size: 0.8rem; color: var(--text-2); line-height: 1.5; flex: 1; }
+    
+    .status { margin-top: 1.5rem; font-family: var(--mono); font-size: 0.65rem; color: #00ff00; letter-spacing: 0.1em; display: flex; align-items: center; gap: 6px; }
+    .status::before { content: ''; width: 6px; height: 6px; background: #00ff00; border-radius: 50%; box-shadow: 0 0 6px rgba(0,255,0,0.5); }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>INVICTUS II</h1>
+    <p>SELECT MISSION PROFILE</p>
+  </div>
+  
+  <div class="grid">
+    <a href="/nrc" class="card">
+      <span class="tag">FLIGHT DYNAMICS</span>
+      <h2>NRC Rocketry</h2>
+      <p class="desc">High-density telemetry dashboard. Optimized for rapid atmospheric ascent tracking and sparkline analysis.</p>
+      <div class="status">SYS.ONLINE</div>
+    </a>
+    
+    <a href="/ort" class="card">
+      <span class="tag">ROBOTICS</span>
+      <h2>Olympus Rover (ORT)</h2>
+      <p class="desc">Low-latency video feed. Gamepad API integration. Optimized for ground navigation and manipulation.</p>
+      <div class="status">SYS.ONLINE</div>
+    </a>
+    
+    <a href="/mach-x" class="card">
+      <span class="tag">PAYLOAD & RECOVERY</span>
+      <h2>Mach-X CanSat</h2>
+      <p class="desc">3D orbital orientation. Topographical radar mapping. SD-Card post-flight data ingestion.</p>
+      <div class="status">SYS.ONLINE</div>
+    </a>
+  </div>
+</body>
+</html>
