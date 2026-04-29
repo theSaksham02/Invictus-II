@@ -745,20 +745,7 @@
         $('mission-timer').textContent = `${String(Math.floor(e/3600)).padStart(2,'0')}:${String(Math.floor((e%3600)/60)).padStart(2,'0')}:${String(e%60).padStart(2,'0')}`;
       }, 1000);
 
-      window.switchSource = (src) => {
-        source = src;
-        $('btn-cansat').classList.toggle('active', src === 'CANSAT');
-        $('btn-nrc').classList.toggle('active', src === 'NRC');
-        updatePhase(currentPhase[src] || 'IDLE');
-        $('events-list').innerHTML = '';
-        if(upAlt) { upAlt.setData([[],[]]); upTemp.setData([[],[]]); upPress.setData([[],[]]); upVvel.setData([[],[]]); }
-        $('scrubber').max = Math.max(0, historyDB[source].length - 1);
-        if(!isScrubbing && historyDB[source].length) {
-            scrubIndex = historyDB[source].length - 1;
-            $('scrubber').value = scrubIndex;
-            updateUIState(historyDB[source][scrubIndex]);
-        }
-      };
+      // Removed switchSource as source is hardcoded
 
       // GAMEPAD API
       let gamepadIndex = null;
