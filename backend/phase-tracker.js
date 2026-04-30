@@ -5,7 +5,15 @@
 const { insertEvent } = require('./db');
 
 function makeState() {
-  return { phase: 'IDLE', max_alt: 0, launch_time: 0, apogee_time: 0, last_packet_time: 0, alt_history: [] };
+  return {
+    phase: 'IDLE',
+    baseline_alt: null,
+    max_alt: 0,
+    launch_time: 0,
+    apogee_time: 0,
+    last_packet_time: 0,
+    alt_history: []
+  };
 }
 
 const states = {
@@ -24,6 +32,7 @@ function processPacket(pkt, emitFn) {
   if (s.last_packet_time && packetTs < s.last_packet_time) return;
 
   s.last_packet_time = packetTs;
+  if (s.baseline_alt === null) s.baseline_alt = pkt.altitude_m;
   if (pkt.altitude_m > s.max_alt) s.max_alt = pkt.altitude_m;
 
   s.alt_history.push(pkt.altitude_m);
@@ -31,12 +40,20 @@ function processPacket(pkt, emitFn) {
 
   let newPhase = s.phase;
 
-  // IDLE → LAUNCHED: flags bit 0 set by firmware (accel_z > 2.5g × 3)
-  // NRC: flags always 0, transition never fires — skips to ASCENDING via altitude
+  // IDLE → LAUNCHED: preferred path is firmware launch flag.
+  // Text-only sources such as NRC have no flags, so use altitude delta as fallback.
   if (s.phase === 'IDLE') {
     if ((pkt.flags & 0x01) !== 0) {
       newPhase = 'LAUNCHED';
       s.launch_time = packetTs;
+    } else if (s.alt_history.length >= 3) {
+      const recent = s.alt_history.slice(-3);
+      const altitudeGain = pkt.altitude_m - s.baseline_alt;
+      const trendingUp = recent[2] > recent[1] && recent[1] > recent[0];
+      if (altitudeGain > 10 && trendingUp) {
+        newPhase = 'ASCENDING';
+        s.launch_time = packetTs;
+      }
     }
   }
   // LAUNCHED → ASCENDING: altitude increasing

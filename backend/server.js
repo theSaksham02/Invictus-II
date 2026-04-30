@@ -16,7 +16,26 @@ const { log } = require('./logger');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: '*' } });
+const DEFAULT_ALLOWED_ORIGINS = [
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  'http://localhost:5500',
+  'http://127.0.0.1:5500',
+  'null'
+];
+const allowedOrigins = (process.env.CORS_ORIGINS || DEFAULT_ALLOWED_ORIGINS.join(','))
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+const corsOptions = {
+  origin(origin, cb) {
+    if (!origin || allowedOrigins.includes('*') || allowedOrigins.includes(origin)) return cb(null, true);
+    const error = new Error('Origin not allowed by CORS');
+    error.status = 403;
+    cb(error);
+  }
+};
+const io = new Server(server, { cors: corsOptions });
 
 const SD_UPLOAD_MAX_FILE_BYTES = Math.max(
   Number.parseInt(process.env.SD_UPLOAD_MAX_FILE_BYTES || '5242880', 10) || 5242880,
@@ -42,7 +61,7 @@ const upload = multer({
   }
 });
 
-app.use(cors({ origin: '*' }));
+app.use(cors(corsOptions));
 app.use(express.json({ limit: '1mb' }));
 app.use('/vendor', express.static(path.resolve(__dirname, 'node_modules/three/build')));
 
@@ -98,10 +117,116 @@ function csvEscape(value) {
   return asString;
 }
 
+function parseCsvRecords(content) {
+  const records = [];
+  let row = [];
+  let field = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < content.length; i++) {
+    const ch = content[i];
+    const next = content[i + 1];
+
+    if (ch === '"') {
+      if (inQuotes && next === '"') {
+        field += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (ch === ',' && !inQuotes) {
+      row.push(field.trim());
+      field = '';
+      continue;
+    }
+
+    if ((ch === '\n' || ch === '\r') && !inQuotes) {
+      if (ch === '\r' && next === '\n') i++;
+      row.push(field.trim());
+      if (row.some((value) => value !== '')) records.push(row);
+      row = [];
+      field = '';
+      continue;
+    }
+
+    field += ch;
+  }
+
+  row.push(field.trim());
+  if (row.some((value) => value !== '')) records.push(row);
+  if (inQuotes) throw new HttpError(400, 'CSV contains an unterminated quoted field');
+  return records;
+}
+
+function normalizeHeader(value) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+}
+
+function makeHeaderLookup(headers) {
+  const lookup = new Map();
+  headers.forEach((header, index) => lookup.set(normalizeHeader(header), index));
+  return lookup;
+}
+
+function getCsvValue(row, lookup, names) {
+  for (const name of names) {
+    const index = lookup.get(name);
+    if (index !== undefined) return row[index];
+  }
+  return undefined;
+}
+
+function parseSdPacketRow(row, lookup, raw, receivedAt) {
+  const packet = {
+    source: 'SD_CARD',
+    pkt_id: Number.parseInt(getCsvValue(row, lookup, ['pkt_id', 'packet_id', 'id']), 10),
+    timestamp_ms: Number.parseInt(getCsvValue(row, lookup, ['timestamp_ms', 'time_ms', 'timestamp']), 10),
+    altitude_m: Number.parseFloat(getCsvValue(row, lookup, ['altitude_m', 'alt_m', 'altitude'])),
+    temp_c: Number.parseFloat(getCsvValue(row, lookup, ['temp_c', 'temperature_c', 'temperature'])),
+    pressure_hpa: Number.parseFloat(getCsvValue(row, lookup, ['pressure_hpa', 'pressure'])),
+    accel_z: Number.parseFloat(getCsvValue(row, lookup, ['accel_z', 'acceleration_z'])),
+    gyro_x: Number.parseFloat(getCsvValue(row, lookup, ['gyro_x', 'gyroscope_x'])),
+    lat: Number.parseFloat(getCsvValue(row, lookup, ['lat', 'latitude'])),
+    lon: Number.parseFloat(getCsvValue(row, lookup, ['lon', 'lng', 'longitude'])),
+    flags: Number.parseInt(getCsvValue(row, lookup, ['flags', 'flag']), 10),
+    rssi_dbm: 0,
+    raw,
+    received_at: receivedAt
+  };
+
+  return (
+    Number.isInteger(packet.pkt_id) &&
+    Number.isInteger(packet.timestamp_ms) &&
+    Number.isFinite(packet.altitude_m) &&
+    Number.isFinite(packet.temp_c) &&
+    Number.isFinite(packet.pressure_hpa) &&
+    Number.isFinite(packet.accel_z) &&
+    Number.isFinite(packet.gyro_x) &&
+    Number.isFinite(packet.lat) &&
+    Number.isFinite(packet.lon) &&
+    Number.isInteger(packet.flags)
+  ) ? packet : null;
+}
+
 function asyncRoute(handler) {
   return (req, res, next) => {
     Promise.resolve(handler(req, res, next)).catch(next);
   };
+}
+
+function requireRoverControlAuth(req, res, next) {
+  const expected = process.env.ROVER_CONTROL_TOKEN;
+  if (!expected) return next();
+
+  const headerToken = req.headers['x-rover-token'];
+  const auth = req.headers.authorization || '';
+  const bearer = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+  if (headerToken === expected || bearer === expected) return next();
+
+  throw new HttpError(401, 'Rover control token required');
 }
 
 app.use((req, res, next) => {
@@ -122,20 +247,28 @@ let emitToAll = (event, payload) => {
   io.emit(event, payload);
 };
 
-if (isSimMode) {
-  process.env.SIM_MODE = 'true';
+function startEmulatorOnce() {
+  if (simStarted) return;
   emulator.startEmulator();
   simStarted = true;
 }
 
-serial.initSerial(emitToAll, () => {
+async function enableSimFallback(reason) {
   if (simStarted || isSimMode) return;
-  log('warn', 'Hardware serial unavailable, falling back to emulator');
+  log('warn', 'Hardware serial unavailable, falling back to emulator', { reason });
   isSimMode = true;
   process.env.SIM_MODE = 'true';
-  simStarted = true;
-  emulator.startEmulator();
-});
+  await serial.shutdown();
+  startEmulatorOnce();
+  serial.initSerial(emitToAll);
+}
+
+if (isSimMode) {
+  process.env.SIM_MODE = 'true';
+  startEmulatorOnce();
+}
+
+serial.initSerial(emitToAll, enableSimFallback);
 
 app.get('/', (req, res) => {
   const dashPath = path.resolve(__dirname, '../dashboard/index.html');
@@ -172,7 +305,7 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     uptime_s: Math.floor((Date.now() - uptimeStart) / 1000),
-    serial_connected: !isSimMode,
+    serial_connected: Boolean(signal.CANSAT.connected || signal.NRC.connected),
     db_packet_count: cansatStats.count + nrcStats.count,
     sim_mode: isSimMode,
     signal
@@ -207,47 +340,24 @@ app.post('/api/upload-sd', upload.single('file'), asyncRoute(async (req, res) =>
     await fs.promises.unlink(req.file.path).catch(() => {});
   }
 
-  const lines = content.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  if (lines.length < 2) throw new HttpError(400, 'CSV must include a header and at least one data row');
-  if (lines.length - 1 > SD_UPLOAD_MAX_ROWS) {
+  const records = parseCsvRecords(content);
+  if (records.length < 2) throw new HttpError(400, 'CSV must include a header and at least one data row');
+  if (records.length - 1 > SD_UPLOAD_MAX_ROWS) {
     throw new HttpError(413, 'CSV row count exceeds configured upload limit', { max_rows: SD_UPLOAD_MAX_ROWS });
   }
 
+  const headerLookup = makeHeaderLookup(records[0]);
   const packets = [];
   let skipped = 0;
-  for (let i = 1; i < lines.length; i++) {
-    const parts = lines[i].split(',').map((value) => value.trim());
-    if (parts.length < 10) {
+  for (let i = 1; i < records.length; i++) {
+    const row = records[i];
+    if (row.length < 10) {
       skipped++;
       continue;
     }
 
-    const packet = {
-      source: 'SD_CARD',
-      pkt_id: Number.parseInt(parts[0], 10),
-      timestamp_ms: Number.parseInt(parts[1], 10),
-      altitude_m: Number.parseFloat(parts[2]),
-      temp_c: Number.parseFloat(parts[3]),
-      pressure_hpa: Number.parseFloat(parts[4]),
-      accel_z: Number.parseFloat(parts[5]),
-      gyro_x: Number.parseFloat(parts[6]),
-      lat: Number.parseFloat(parts[7]),
-      lon: Number.parseFloat(parts[8]),
-      flags: Number.parseInt(parts[9], 10),
-      rssi_dbm: 0,
-      raw: lines[i],
-      received_at: now
-    };
-
-    if (
-      !Number.isInteger(packet.pkt_id) ||
-      !Number.isInteger(packet.timestamp_ms) ||
-      !Number.isFinite(packet.altitude_m) ||
-      !Number.isFinite(packet.temp_c) ||
-      !Number.isFinite(packet.pressure_hpa) ||
-      !Number.isFinite(packet.lat) ||
-      !Number.isFinite(packet.lon)
-    ) {
+    const packet = parseSdPacketRow(row, headerLookup, row.map(csvEscape).join(','), now);
+    if (!packet) {
       skipped++;
       continue;
     }
@@ -286,14 +396,14 @@ app.get('/api/export', (req, res) => {
   res.send(csv);
 });
 
-app.post('/api/rover/control', asyncRoute(async (req, res) => {
+app.post('/api/rover/control', requireRoverControlAuth, asyncRoute(async (req, res) => {
   const left = parseRoverInput(req.body?.left, 'left');
   const right = parseRoverInput(req.body?.right, 'right');
   const data = await rover.control(left, right);
   res.json({ ok: true, data });
 }));
 
-app.post('/api/rover/stop', asyncRoute(async (req, res) => {
+app.post('/api/rover/stop', requireRoverControlAuth, asyncRoute(async (req, res) => {
   const data = await rover.stop();
   res.json({ ok: true, data });
 }));

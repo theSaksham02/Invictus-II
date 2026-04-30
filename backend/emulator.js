@@ -108,9 +108,6 @@ function startEmulator() {
     } else {
        if (global.mockNrc && global.mockNrc.isOpen && global.mockNrc.port) {
           global.mockNrc.port.emitData(Buffer.from(nrcStr, 'utf-8'));
-       } else if (cansatPath === nrcPath && global.mockCansat && global.mockCansat.isOpen && global.mockCansat.port) {
-          // If NRC and CANSAT share the same serial port, emit onto CANSAT
-          global.mockCansat.port.emitData(Buffer.from(nrcStr, 'utf-8'));
        }
     }
 

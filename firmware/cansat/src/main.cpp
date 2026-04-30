@@ -5,6 +5,7 @@
 #include <Adafruit_MPU6050.h>
 #include <TinyGPSPlus.h>
 #include <SD.h>
+#include <string.h>
 #include "telemetry.h"
 
 #define RFM69_CS PA4
@@ -25,10 +26,11 @@ float baseline_pressure = 1013.25;
 
 TelemetryPacket pkt;
 uint32_t last_tx = 0;
-const uint32_t TX_INTERVAL = 100; // 10Hz
+const uint32_t TX_INTERVAL = 1000; // 1Hz
 
 void setup() {
     Serial.begin(115200);
+    memset(&pkt, 0, sizeof(pkt));
     pkt.pkt_id = 0;
 }
 
@@ -92,16 +94,5 @@ void loop() {
         rf69.waitPacketSent();
         
         // TODO: SD Write
-    }
-}imestamp_ms = millis();
-        
-        // Checksum calculation (XOR bytes 0-35)
-        uint8_t* ptr = (uint8_t*)&pkt;
-        pkt.checksum = 0;
-        for(int i = 0; i < 36; i++) {
-            pkt.checksum ^= ptr[i];
-        }
-        
-        // TODO: Transmit & SD Write
     }
 }

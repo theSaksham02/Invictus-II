@@ -1,5 +1,5 @@
 const { SerialPort, SerialPortMock } = require('serialport');
-const { ByteLengthParser, ReadlineParser } = require('serialport');
+const { ReadlineParser } = require('serialport');
 const { parseCansat, parseNrc } = require('./parser');
 const { insertPacket, insertEvent } = require('./db');
 const { processPacket } = require('./phase-tracker');
@@ -13,6 +13,8 @@ let cansatPort, nrcPort;
 let shuttingDown = false;
 let fallbackTriggered = false;
 let watchdogInterval = null;
+let activeMode = process.env.SIM_MODE === 'true' ? 'sim' : 'hardware';
+let cansatBuffer = Buffer.alloc(0);
 
 const SIGNAL_TIMEOUT_MS = Math.max(
   Number.parseInt(process.env.SIGNAL_TIMEOUT_MS || '5000', 10) || 5000,
@@ -23,8 +25,8 @@ const RECONNECT_DELAY_MS = Math.max(
   250
 );
 const sourceState = {
-  CANSAT: { lastSeenAt: null, lost: false },
-  NRC: { lastSeenAt: null, lost: false }
+  CANSAT: { lastSeenAt: null, lost: false, connected: false, port: CANSAT_PORT },
+  NRC: { lastSeenAt: null, lost: false, connected: false, port: NRC_PORT }
 };
 
 function safeEmit(emitFn, event, payload) {
@@ -68,13 +70,17 @@ function triggerFallback(enableSimFallback, reason) {
   if (!enableSimFallback || fallbackTriggered) return;
   fallbackTriggered = true;
   console.warn('[SERIAL] enabling simulator fallback:', reason);
-  enableSimFallback();
+  Promise.resolve(enableSimFallback(reason)).catch((error) => {
+    console.error('[SERIAL] simulator fallback failed:', error.message);
+  });
 }
 
 function initSerial(emitFn, enableSimFallback) {
   shuttingDown = false;
   fallbackTriggered = false;
+  cansatBuffer = Buffer.alloc(0);
   const isSimMode = process.env.SIM_MODE === 'true';
+  activeMode = isSimMode ? 'sim' : 'hardware';
   const PortClass = isSimMode ? SerialPortMock : SerialPort;
 
   if (watchdogInterval) clearInterval(watchdogInterval);
@@ -105,22 +111,43 @@ function initSerial(emitFn, enableSimFallback) {
     if (process.env.LOG_PACKETS === 'true') console.log(pkt);
   };
 
+  const handleCansatBytes = (chunk) => {
+    cansatBuffer = Buffer.concat([cansatBuffer, chunk]);
+
+    while (cansatBuffer.length >= 37) {
+      const candidate = cansatBuffer.subarray(0, 37);
+      const parsed = parseCansat(candidate);
+      if (parsed) {
+        handlePacket(parsed);
+        cansatBuffer = cansatBuffer.subarray(37);
+      } else {
+        cansatBuffer = cansatBuffer.subarray(1);
+      }
+    }
+
+    if (cansatBuffer.length > 370) {
+      cansatBuffer = cansatBuffer.subarray(cansatBuffer.length - 36);
+    }
+  };
+
   const connectCansat = () => {
     try {
       cansatPort = new PortClass({ path: CANSAT_PORT, baudRate: CANSAT_BAUD });
       if (isSimMode) global.mockCansat = cansatPort;
-
-      const parser = cansatPort.pipe(new ByteLengthParser({ length: 37 }));
-      parser.on('data', (buf) => {
-        const parsed = parseCansat(buf);
-        if (parsed) handlePacket(parsed);
+      cansatPort.on('open', () => {
+        sourceState.CANSAT.connected = true;
+        sourceState.CANSAT.port = CANSAT_PORT;
       });
 
+      cansatPort.on('data', handleCansatBytes);
+
       cansatPort.on('error', (err) => {
+        sourceState.CANSAT.connected = false;
         console.warn('[SERIAL] CANSAT Error:', err.message);
         if (!isSimMode) triggerFallback(enableSimFallback, err.message);
       });
       cansatPort.on('close', () => {
+        sourceState.CANSAT.connected = false;
         if (shuttingDown) return;
         console.warn('[SERIAL] CANSAT Closed, reconnecting...');
         setTimeout(connectCansat, RECONNECT_DELAY_MS);
@@ -132,18 +159,29 @@ function initSerial(emitFn, enableSimFallback) {
   };
 
   const connectNrc = () => {
-    if (CANSAT_PORT === NRC_PORT) return;
+    if (CANSAT_PORT === NRC_PORT) {
+      console.warn('[SERIAL] NRC disabled because CANSAT and NRC are configured with the same serial port');
+      return;
+    }
     try {
       nrcPort = new PortClass({ path: NRC_PORT, baudRate: NRC_BAUD });
       if (isSimMode) global.mockNrc = nrcPort;
+      nrcPort.on('open', () => {
+        sourceState.NRC.connected = true;
+        sourceState.NRC.port = NRC_PORT;
+      });
       const parser = nrcPort.pipe(new ReadlineParser({ delimiter: '\n' }));
       parser.on('data', (line) => {
         const parsed = parseNrc(line);
         if (parsed) handlePacket(parsed);
       });
 
-      nrcPort.on('error', (err) => console.warn('[SERIAL] NRC Error:', err.message));
+      nrcPort.on('error', (err) => {
+        sourceState.NRC.connected = false;
+        console.warn('[SERIAL] NRC Error:', err.message);
+      });
       nrcPort.on('close', () => {
+        sourceState.NRC.connected = false;
         if (shuttingDown) return;
         console.warn('[SERIAL] NRC Closed, reconnecting...');
         setTimeout(connectNrc, RECONNECT_DELAY_MS);
@@ -159,8 +197,19 @@ function initSerial(emitFn, enableSimFallback) {
 
 function getSignalState() {
   return {
-    CANSAT: { lost: sourceState.CANSAT.lost, last_seen_ms: sourceState.CANSAT.lastSeenAt || 0 },
-    NRC: { lost: sourceState.NRC.lost, last_seen_ms: sourceState.NRC.lastSeenAt || 0 }
+    mode: activeMode,
+    CANSAT: {
+      lost: sourceState.CANSAT.lost,
+      connected: sourceState.CANSAT.connected,
+      port: sourceState.CANSAT.port,
+      last_seen_ms: sourceState.CANSAT.lastSeenAt || 0
+    },
+    NRC: {
+      lost: sourceState.NRC.lost,
+      connected: sourceState.NRC.connected,
+      port: sourceState.NRC.port,
+      last_seen_ms: sourceState.NRC.lastSeenAt || 0
+    }
   };
 }
 
@@ -173,6 +222,8 @@ function closePort(port) {
 
 async function shutdown() {
   shuttingDown = true;
+  sourceState.CANSAT.connected = false;
+  sourceState.NRC.connected = false;
   if (watchdogInterval) {
     clearInterval(watchdogInterval);
     watchdogInterval = null;
