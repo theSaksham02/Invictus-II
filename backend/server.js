@@ -143,13 +143,15 @@ app.get('/', (req, res) => {
     res.sendFile(dashPath);
     return;
   }
-  res.send('<h1 style="font-family:monospace;color:#00d4ff;background:#020817;padding:2rem">INVICTUS II Ground Station — backend running, index not found.</h1>');
+  res.send('<h1 style="font-family:monospace;color:#00d4ff;background:#020817;padding:2rem">MACH-26 Ground Station — backend running, index not found.</h1>');
 });
 
-app.get('/nrc', (req, res) => {
+app.get('/nrc', (req, res) => res.redirect('/avionics'));
+
+app.get('/avionics', (req, res) => {
   const dashPath = path.resolve(__dirname, '../dashboard/nrc.html');
   if (fs.existsSync(dashPath)) res.sendFile(dashPath);
-  else res.status(404).send('NRC Dashboard missing');
+  else res.status(404).send('Avionics Dashboard missing');
 });
 
 app.get('/ort', (req, res) => {
@@ -368,7 +370,7 @@ app.use((error, req, res, next) => {
 
 const PORT = Number.parseInt(process.env.PORT || '3000', 10);
 server.listen(PORT, () => {
-  log('info', 'INVICTUS II Ground Station started', { port: PORT, sim_mode: isSimMode });
+  log('info', 'MACH-26 Ground Station started', { port: PORT, sim_mode: isSimMode });
 });
 
 async function shutdown(signal) {

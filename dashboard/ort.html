@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>INVICTUS II — MISSION CONTROL [STARSHIP EDITION]</title>
+  <title>ORT ROVER — MISSION CONTROL</title>
   <meta name="description" content="MACH-26 UKSEDS NRC 2025-26 real-time rocket telemetry ground station">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -139,7 +139,7 @@
     /* ═══════════════════════════════════════════════════════════
        CENTER — 3D ROCKET + UPLOT SPARKLINES
        ═══════════════════════════════════════════════════════════ */
-    #charts-panel { display: grid; grid-template-rows: 1fr 200px 36px; gap: var(--gap); min-height: 0; }
+    #charts-panel { display: grid; grid-template-rows: 0.6fr 1.4fr 36px; gap: var(--gap); min-height: 0; }
 
     #rocket-card { background: radial-gradient(circle at 50% 50%, #0a0a0a 0%, #000000 100%); }
     #rocket-canvas { width: 100%; height: 100%; display: block; }
@@ -154,7 +154,7 @@
     #alt-bar-fill { position: absolute; bottom: 0; left: -1px; right: -1px; background: var(--text-1); transition: height 0.1s linear; }
 
     /* Sparklines Grid */
-    #sparklines-grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: var(--gap); }
+    #sparklines-grid { display: grid; grid-template-columns: 1fr 1fr; grid-auto-rows: 1fr; gap: var(--gap); }
     .sparkline-card { display: flex; flex-direction: column; padding: 8px 12px; }
     .sparkline-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
     .sparkline-label { font-family: var(--sans); font-size: 0.55rem; font-weight: 600; color: var(--text-3); letter-spacing: 0.1em; }
@@ -236,7 +236,7 @@
   <div id="app">
     <header id="header">
       <div class="header-left">
-        <span id="logo">INVICTUS II // ORT ROVER</span>
+        <span id="logo">ORT ROVER</span>
       </div>
       <div class="header-center">
         <div class="phase-badge" id="phase-badge">SYSTEM IDLE</div>
@@ -319,6 +319,10 @@
           <div class="sparkline-card panel">
             <div class="sparkline-header"><span class="sparkline-label">VELOCITY</span><span class="sparkline-cur" id="cur-vvel">00.0</span></div>
             <div class="sparkline-wrapper" id="spark-vvel"></div>
+          </div>
+          <div class="sparkline-card panel" style="grid-column: 1 / -1;">
+            <div class="sparkline-header"><span class="sparkline-label">ACCELERATION</span><span class="sparkline-cur" id="cur-accel">+00.0</span></div>
+            <div class="sparkline-wrapper" id="spark-accel"></div>
           </div>
         </div>
 
@@ -455,7 +459,7 @@
       let scrubIndex = 0;
 
       // UPLOT
-      let upAlt, upTemp, upPress, upVvel;
+      let upAlt, upTemp, upPress, upVvel, upAccel;
       function makeUplot(id, color) {
         const el = $(id);
         const opts = {
@@ -470,12 +474,14 @@
         upTemp = makeUplot('spark-temp', '#cccccc');
         upPress = makeUplot('spark-press', '#cccccc');
         upVvel = makeUplot('spark-vvel', '#ffffff');
+        upAccel = makeUplot('spark-accel', '#f5d27a');
       }, 100);
 
       window.addEventListener('resize', () => {
         const resizeUplot = (up, id) => { if(up && $(id)) up.setSize({width: $(id).clientWidth, height: $(id).clientHeight}); };
         resizeUplot(upAlt, 'spark-alt'); resizeUplot(upTemp, 'spark-temp');
         resizeUplot(upPress, 'spark-press'); resizeUplot(upVvel, 'spark-vvel');
+        resizeUplot(upAccel, 'spark-accel');
       });
 
       function syncCharts() {
@@ -495,11 +501,13 @@
           const dt = (p.timestamp_ms - slice[i-1].timestamp_ms)/1000;
           return dt > 0 ? (p.altitude_m - slice[i-1].altitude_m)/dt : 0;
         });
+        const accelData = slice.map(p => ((p.accel_z || 1) - 1) * 9.81);
 
         upAlt.setData([xs, altData]);
         upTemp.setData([xs, tempData]);
         upPress.setData([xs, pressData]);
         upVvel.setData([xs, velData]);
+        if(upAccel) upAccel.setData([xs, accelData]);
       }
 
       // LEAFLET MAP DUAL-LAYER
@@ -640,6 +648,7 @@
         $('val-press').textContent = pad(pkt.pressure_hpa, 4);
         const accel = (pkt.accel_z - 1.0) * 9.81;
         $('val-accel').textContent = pad(accel, 2);
+        if($('cur-accel')) $('cur-accel').textContent = pad(accel, 2);
         $('hud-gforce').textContent = parseFloat(pkt.accel_z || 1).toFixed(2) + ' G';
         $('val-rssi').textContent = (pkt.rssi_dbm || '-00') + ' DBM';
         
