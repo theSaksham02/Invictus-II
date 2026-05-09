@@ -1,3 +1,12 @@
+const {
+  PACKET_LENGTH_BYTES,
+  TELEMETRY_LIMITS,
+  decodeFlags,
+  deriveSensorHealth,
+  packetWarnings,
+  xorChecksum
+} = require('./cansat-hardware');
+
 // CANSAT: 37 bytes struct
 // uint16 pkt_id, uint32 timestamp_ms, float alt, temp, pres, accelz, gyrox, lat, lon, int8 rssi, uint8 flags, uint8 checksum
 
@@ -10,30 +19,47 @@ function inRange(value, min, max) {
 }
 
 function isValidTelemetryShape(packet) {
+  const limits = TELEMETRY_LIMITS;
   return (
     Number.isInteger(packet.pkt_id) &&
-    packet.pkt_id >= 0 &&
+    inRange(packet.pkt_id, limits.pkt_id.min, limits.pkt_id.max) &&
     Number.isInteger(packet.timestamp_ms) &&
-    packet.timestamp_ms >= 0 &&
+    inRange(packet.timestamp_ms, limits.timestamp_ms.min, limits.timestamp_ms.max) &&
     isFiniteNumber(packet.altitude_m) &&
+    inRange(packet.altitude_m, limits.altitude_m.min, limits.altitude_m.max) &&
     isFiniteNumber(packet.temp_c) &&
+    inRange(packet.temp_c, limits.temp_c.min, limits.temp_c.max) &&
     isFiniteNumber(packet.pressure_hpa) &&
+    inRange(packet.pressure_hpa, limits.pressure_hpa.min, limits.pressure_hpa.max) &&
     isFiniteNumber(packet.accel_z) &&
+    inRange(packet.accel_z, limits.accel_z.min, limits.accel_z.max) &&
     isFiniteNumber(packet.gyro_x) &&
+    inRange(packet.gyro_x, limits.gyro_x.min, limits.gyro_x.max) &&
     isFiniteNumber(packet.lat) &&
     isFiniteNumber(packet.lon) &&
-    inRange(packet.lat, -90, 90) &&
-    inRange(packet.lon, -180, 180) &&
+    inRange(packet.lat, limits.lat.min, limits.lat.max) &&
+    inRange(packet.lon, limits.lon.min, limits.lon.max) &&
     Number.isInteger(packet.rssi_dbm) &&
-    Number.isInteger(packet.flags)
+    inRange(packet.rssi_dbm, limits.rssi_dbm.min, limits.rssi_dbm.max) &&
+    Number.isInteger(packet.flags) &&
+    inRange(packet.flags, limits.flags.min, limits.flags.max)
   );
 }
 
-function parseCansat(buffer) {
-  if (!Buffer.isBuffer(buffer) || buffer.length !== 37) return null;
+function enrichPacket(packet) {
+  const flags_decoded = decodeFlags(packet.flags);
+  return {
+    ...packet,
+    flags_decoded,
+    sensor_health: deriveSensorHealth(packet),
+    warnings: packetWarnings(packet)
+  };
+}
 
-  let xor = 0;
-  for (let i = 0; i < 36; i++) xor ^= buffer[i];
+function parseCansat(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length !== PACKET_LENGTH_BYTES) return null;
+
+  const xor = xorChecksum(buffer);
   if (xor !== buffer[36]) return null;
 
   try {
@@ -53,7 +79,7 @@ function parseCansat(buffer) {
       raw: buffer.toString('hex'),
       received_at: Date.now()
     };
-    return isValidTelemetryShape(parsed) ? parsed : null;
+    return isValidTelemetryShape(parsed) ? enrichPacket(parsed) : null;
   } catch {
     return null;
   }
@@ -91,4 +117,4 @@ function parseNrc(line) {
   }
 }
 
-module.exports = { parseCansat, parseNrc };
+module.exports = { isValidTelemetryShape, parseCansat, parseNrc };

@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { parseCansat, parseNrc } = require('../parser');
+const { CansatFrameParser } = require('../cansat-framer');
 
 function makeValidCansatPacket() {
   const buffer = Buffer.alloc(37);
@@ -29,6 +30,8 @@ test('parseCansat parses valid binary packet', () => {
   assert.equal(parsed.pkt_id, 42);
   assert.equal(parsed.timestamp_ms, 123456);
   assert.equal(parsed.flags, 0x03);
+  assert.equal(parsed.flags_decoded.launched, true);
+  assert.equal(parsed.sensor_health.rfm69hcw.ok, true);
 });
 
 test('parseCansat rejects invalid checksum', () => {
@@ -51,4 +54,19 @@ test('parseNrc parses valid line', () => {
 test('parseNrc rejects malformed line', () => {
   const parsed = parseNrc('NRC:7,7000,broken\n');
   assert.equal(parsed, null);
+});
+
+test('CansatFrameParser resynchronizes after noise before a valid frame', async () => {
+  const parser = new CansatFrameParser();
+  const frames = [];
+  parser.on('data', (frame) => frames.push(frame));
+
+  parser.write(Buffer.from([0x99, 0x88, 0x77, 0x66]));
+  parser.write(makeValidCansatPacket());
+  parser.end();
+
+  await new Promise((resolve) => parser.on('finish', resolve));
+  assert.equal(frames.length, 1);
+  assert.equal(parseCansat(frames[0]).pkt_id, 42);
+  assert.equal(parser.getStats().resyncs, 1);
 });

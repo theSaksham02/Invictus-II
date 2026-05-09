@@ -78,6 +78,12 @@ const statements = {
       MAX(received_at) as last_packet_at
     FROM packets WHERE source = ?
   `),
+  getLatestPacket: db.prepare(`
+    SELECT * FROM packets
+    WHERE source = ?
+    ORDER BY received_at DESC
+    LIMIT 1
+  `),
   getEvents: db.prepare(`SELECT * FROM mission_events ORDER BY received_at ASC`),
   exportPackets: db.prepare(`
     SELECT id, source, pkt_id, timestamp_ms, altitude_m, temp_c, pressure_hpa, accel_z, gyro_x, lat, lon, rssi_dbm, flags, received_at
@@ -102,8 +108,27 @@ function runOrThrow(operation, fn) {
   }
 }
 
+function toPacketRow(packet) {
+  return {
+    source: packet.source,
+    pkt_id: packet.pkt_id,
+    timestamp_ms: packet.timestamp_ms,
+    altitude_m: packet.altitude_m,
+    temp_c: packet.temp_c,
+    pressure_hpa: packet.pressure_hpa,
+    accel_z: packet.accel_z,
+    gyro_x: packet.gyro_x,
+    lat: packet.lat,
+    lon: packet.lon,
+    rssi_dbm: packet.rssi_dbm,
+    flags: packet.flags,
+    raw: packet.raw,
+    received_at: packet.received_at
+  };
+}
+
 function insertPacket(packet) {
-  return runOrThrow('insertPacket', () => statements.insertPacket.run(packet));
+  return runOrThrow('insertPacket', () => statements.insertPacket.run(toPacketRow(packet)));
 }
 
 function insertPacketsBulk(packets) {
@@ -114,7 +139,7 @@ function insertPacketsBulk(packets) {
     return { changes: 0 };
   }
   return runOrThrow('insertPacketsBulk', () => {
-    insertPacketTx(packets);
+    insertPacketTx(packets.map(toPacketRow));
     return { changes: packets.length };
   });
 }
@@ -152,6 +177,10 @@ function getStats(source) {
   });
 }
 
+function getLatest(source) {
+  return runOrThrow('getLatest', () => statements.getLatestPacket.get(source) || null);
+}
+
 function getAllEvents() {
   return runOrThrow('getAllEvents', () => statements.getEvents.all());
 }
@@ -171,6 +200,7 @@ module.exports = {
   insertEvent,
   insertUpload,
   getHistory,
+  getLatest,
   getStats,
   getAllEvents,
   exportCsv,

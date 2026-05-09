@@ -13,6 +13,12 @@ const serial = require('./serial');
 const emulator = require('./emulator');
 const rover = require('./rover-proxy');
 const { log } = require('./logger');
+const {
+  CIRCUIT,
+  decodeFlags,
+  deriveSensorHealth,
+  packetWarnings
+} = require('./cansat-hardware');
 
 const app = express();
 const server = http.createServer(app);
@@ -178,6 +184,30 @@ app.get('/api/health', (req, res) => {
     db_packet_count: cansatStats.count + nrcStats.count,
     sim_mode: isSimMode,
     signal
+  });
+});
+
+app.get('/api/cansat/hardware', (req, res) => {
+  res.json({
+    ok: true,
+    circuit: CIRCUIT
+  });
+});
+
+app.get('/api/cansat/status', (req, res) => {
+  const latest = db.getLatest('CANSAT');
+  const signal = serial.getSignalState().CANSAT;
+  res.json({
+    ok: true,
+    signal,
+    latest: latest
+      ? {
+          ...latest,
+          flags_decoded: decodeFlags(latest.flags),
+          sensor_health: deriveSensorHealth(latest),
+          warnings: packetWarnings(latest)
+        }
+      : null
   });
 });
 

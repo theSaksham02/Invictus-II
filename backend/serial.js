@@ -1,6 +1,7 @@
 const { SerialPort, SerialPortMock } = require('serialport');
-const { ByteLengthParser, ReadlineParser } = require('serialport');
+const { ReadlineParser } = require('serialport');
 const { parseCansat, parseNrc } = require('./parser');
+const { CansatFrameParser } = require('./cansat-framer');
 const { insertPacket, insertEvent } = require('./db');
 const { processPacket } = require('./phase-tracker');
 
@@ -9,7 +10,7 @@ const NRC_PORT    = process.env.SERIAL_PORT_NRC    || '/dev/ttyUSB1';
 const CANSAT_BAUD = parseInt(process.env.SERIAL_BAUD_CANSAT || '9600', 10);
 const NRC_BAUD    = parseInt(process.env.SERIAL_BAUD_NRC || '9600', 10);
 
-let cansatPort, nrcPort;
+let cansatPort, nrcPort, cansatFrameParser;
 let shuttingDown = false;
 let fallbackTriggered = false;
 let watchdogInterval = null;
@@ -25,6 +26,10 @@ const RECONNECT_DELAY_MS = Math.max(
 const sourceState = {
   CANSAT: { lastSeenAt: null, lost: false },
   NRC: { lastSeenAt: null, lost: false }
+};
+const diagnostics = {
+  CANSAT: { port: CANSAT_PORT, baud: CANSAT_BAUD, open: false, packets: 0, parse_errors: 0, serial_errors: 0, reconnects: 0, last_error: null },
+  NRC: { port: NRC_PORT, baud: NRC_BAUD, open: false, packets: 0, parse_errors: 0, serial_errors: 0, reconnects: 0, last_error: null }
 };
 
 function safeEmit(emitFn, event, payload) {
@@ -89,6 +94,7 @@ function initSerial(emitFn, enableSimFallback) {
     const now = Date.now();
     markSignalRecovered(pkt.source, emitFn, now);
     sourceState[pkt.source].lastSeenAt = now;
+    diagnostics[pkt.source].packets++;
 
     try {
       insertPacket(pkt);
@@ -110,22 +116,45 @@ function initSerial(emitFn, enableSimFallback) {
       cansatPort = new PortClass({ path: CANSAT_PORT, baudRate: CANSAT_BAUD });
       if (isSimMode) global.mockCansat = cansatPort;
 
-      const parser = cansatPort.pipe(new ByteLengthParser({ length: 37 }));
-      parser.on('data', (buf) => {
-        const parsed = parseCansat(buf);
-        if (parsed) handlePacket(parsed);
+      cansatFrameParser = cansatPort.pipe(new CansatFrameParser());
+      cansatFrameParser.on('error', (err) => {
+        diagnostics.CANSAT.parse_errors++;
+        diagnostics.CANSAT.last_error = err.message;
+        console.warn('[SERIAL] CANSAT parser error:', err.message);
+        safeEmit(emitFn, 'ingest_error', { source: 'CANSAT', error: err.message });
       });
 
+      const parser = cansatFrameParser;
+      parser.on('data', (buf) => {
+        const parsed = parseCansat(buf);
+        if (parsed) {
+          handlePacket(parsed);
+        } else {
+          diagnostics.CANSAT.parse_errors++;
+          safeEmit(emitFn, 'ingest_error', { source: 'CANSAT', error: 'Rejected CANSAT frame after resync' });
+        }
+      });
+
+      cansatPort.on('open', () => {
+        diagnostics.CANSAT.open = true;
+        diagnostics.CANSAT.last_error = null;
+      });
       cansatPort.on('error', (err) => {
+        diagnostics.CANSAT.serial_errors++;
+        diagnostics.CANSAT.last_error = err.message;
         console.warn('[SERIAL] CANSAT Error:', err.message);
         if (!isSimMode) triggerFallback(enableSimFallback, err.message);
       });
       cansatPort.on('close', () => {
+        diagnostics.CANSAT.open = false;
         if (shuttingDown) return;
+        diagnostics.CANSAT.reconnects++;
         console.warn('[SERIAL] CANSAT Closed, reconnecting...');
         setTimeout(connectCansat, RECONNECT_DELAY_MS);
       });
     } catch (e) {
+      diagnostics.CANSAT.serial_errors++;
+      diagnostics.CANSAT.last_error = e.message;
       console.warn('[SERIAL] CANSAT Init Error:', e.message);
       if (!isSimMode) triggerFallback(enableSimFallback, e.message);
     }
@@ -139,16 +168,33 @@ function initSerial(emitFn, enableSimFallback) {
       const parser = nrcPort.pipe(new ReadlineParser({ delimiter: '\n' }));
       parser.on('data', (line) => {
         const parsed = parseNrc(line);
-        if (parsed) handlePacket(parsed);
+        if (parsed) {
+          handlePacket(parsed);
+        } else {
+          diagnostics.NRC.parse_errors++;
+          safeEmit(emitFn, 'ingest_error', { source: 'NRC', error: 'Rejected NRC telemetry line' });
+        }
       });
 
-      nrcPort.on('error', (err) => console.warn('[SERIAL] NRC Error:', err.message));
+      nrcPort.on('open', () => {
+        diagnostics.NRC.open = true;
+        diagnostics.NRC.last_error = null;
+      });
+      nrcPort.on('error', (err) => {
+        diagnostics.NRC.serial_errors++;
+        diagnostics.NRC.last_error = err.message;
+        console.warn('[SERIAL] NRC Error:', err.message);
+      });
       nrcPort.on('close', () => {
+        diagnostics.NRC.open = false;
         if (shuttingDown) return;
+        diagnostics.NRC.reconnects++;
         console.warn('[SERIAL] NRC Closed, reconnecting...');
         setTimeout(connectNrc, RECONNECT_DELAY_MS);
       });
     } catch (e) {
+      diagnostics.NRC.serial_errors++;
+      diagnostics.NRC.last_error = e.message;
       console.warn('[SERIAL] NRC Init Error:', e.message);
     }
   };
@@ -159,8 +205,17 @@ function initSerial(emitFn, enableSimFallback) {
 
 function getSignalState() {
   return {
-    CANSAT: { lost: sourceState.CANSAT.lost, last_seen_ms: sourceState.CANSAT.lastSeenAt || 0 },
-    NRC: { lost: sourceState.NRC.lost, last_seen_ms: sourceState.NRC.lastSeenAt || 0 }
+    CANSAT: {
+      lost: sourceState.CANSAT.lost,
+      last_seen_ms: sourceState.CANSAT.lastSeenAt || 0,
+      diagnostics: {
+        ...diagnostics.CANSAT,
+        framer: cansatFrameParser && typeof cansatFrameParser.getStats === 'function'
+          ? cansatFrameParser.getStats()
+          : null
+      }
+    },
+    NRC: { lost: sourceState.NRC.lost, last_seen_ms: sourceState.NRC.lastSeenAt || 0, diagnostics: { ...diagnostics.NRC } }
   };
 }
 
