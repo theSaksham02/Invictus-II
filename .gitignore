@@ -1,3 +1,28 @@
+# Dependencies
 node_modules/
+.npm/
+
+# Environment
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Database & Logs
+backend/flight.db
+backend/flight.db-journal
+logs/
+*.log
+
+# Uploads
+uploads/
+dashboard/uploads/
+
+# OS
 .DS_Store
-.worktrees/
+Thumbs.db
+
+# PlatformIO
+.pio/
+.vscode/

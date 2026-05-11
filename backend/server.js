@@ -172,6 +172,13 @@ app.get('/mach-x', (req, res) => {
   else res.status(404).send('Mach-X Dashboard missing');
 });
 
+app.get('/gcs', (req, res) => {
+  const dashPath = path.resolve(__dirname, '../dashboard/ground-station.html');
+  if (fs.existsSync(dashPath)) res.sendFile(dashPath);
+  else res.status(404).send('Master GCS Dashboard missing');
+});
+
+
 app.get('/api/health', (req, res) => {
   const signal = serial.getSignalState();
   const cansatStats = db.getStats('CANSAT');

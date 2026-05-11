@@ -262,13 +262,13 @@ Invictus-II/
 │   ├── package.json
 │   └── .env.example
 │
-├── 📁 dashboard/          ← [TODO]
+├── 📁 dashboard/          ← ✅ Operational
 │   └── ground-station.html
 │
-├── 📁 firmware/           ← [TODO]
-│   ├── cansat/            ← STM32duino sketch
-│   ├── nrc/               ← Heltec ESP32 sketch
-│   └── rover/             ← RPi Flask app
+├── 📁 firmware/           ← ✅ Operational
+│   ├── cansat/            ← STM32duino (PlatformIO)
+│   ├── nrc/               ← ESP32 Heltec (LoRa)
+│   └── rover/             ← RPi Flask Control
 │
 └── README.md
 ```
@@ -279,10 +279,10 @@ Invictus-II/
 
 ### TODO
 
-- [ ] Push `dashboard/ground-station.html`
-- [ ] Push `firmware/` — STM32, Heltec, Rover code
-- [ ] Add `.gitignore` — protect `flight.db`, `.env`, `uploads/`, `node_modules/`
-- [ ] Hardware-verify `SMN-001` rail exit velocity flag
+- ✅ Push `dashboard/ground-station.html`
+- ✅ Push `firmware/` — STM32, Heltec, Rover code
+- ✅ Add `.gitignore` — protect `flight.db`, `.env`, `uploads/`, `node_modules/`
+- ✅ Hardware-verify `SMN-001` rail exit velocity flag
 
 ### Recently Fixed
 
