@@ -1,0 +1,50 @@
+CompileFlags:
+  # Suppress all errors from missing Arduino/PlatformIO toolchain headers.
+  # These are resolved at build time by PlatformIO — not the host compiler.
+  Add:
+    - "-ferror-limit=0"
+    - "-Wno-unknown-pragmas"
+    - "-D__cplusplus=201703L"
+    # Stub defines for Arduino pin names used on STM32 (PA15, PB5, etc.)
+    - "-DPA0=0"  
+    - "-DPA1=1"
+    - "-DPA2=2"
+    - "-DPA3=3"
+    - "-DPA4=4"
+    - "-DPA5=5"
+    - "-DPA6=6"
+    - "-DPA7=7"
+    - "-DPA8=8"
+    - "-DPA9=9"
+    - "-DPA10=10"
+    - "-DPA11=11"
+    - "-DPA12=12"
+    - "-DPA13=13"
+    - "-DPA14=14"
+    - "-DPA15=15"
+    - "-DPB0=16"
+    - "-DPB1=17"
+    - "-DPB2=18"
+    - "-DPB3=19"
+    - "-DPB4=20"
+    - "-DPB5=21"
+    - "-DPB6=22"
+    - "-DPB7=23"
+    - "-DPB8=24"
+    - "-DPB9=25"
+    - "-DPB10=26"
+    - "-DPB11=27"
+    - "-DPB12=28"
+    - "-DPB13=29"
+    - "-DPB14=30"
+    - "-DPB15=31"
+  Remove:
+    - "-W*"
+
+Diagnostics:
+  # Suppress diagnostics that are always false-positives in Arduino/PlatformIO
+  Suppress:
+    - "pp_file_not_found"
+    - "undeclared_var_use"
+    - "unknown_type_name"
+    - "identifier_not_found"
