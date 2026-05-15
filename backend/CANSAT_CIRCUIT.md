@@ -11,7 +11,7 @@ if there is no pcb board name explicitly mentioned, for example:
 22 STM32 C13 to *EMPTY*
 39 STM32 GND to *GROUND*
 4 BMP388 SCK to *B6_STM*
-it means that it is an module of its own. EMPTY refers to no connections to the pin. GROUND is grounded.
+EMPTY refers to no connections to the pin. GROUND is grounded.
 ------------------------------------------------------------------------------
 
 
