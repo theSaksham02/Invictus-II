@@ -14,15 +14,24 @@ let lat = 52.5;
 let lon = -1.9;
 
 function startEmulator() {
+  if (interval) return;
   console.log("[HITL EMULATOR] 🚀 Hardware-in-the-loop byte-level emulator starting...");
 
   const cansatPath = process.env.SERIAL_PORT_CANSAT || '/dev/ttyUSB0';
   const nrcPath = process.env.SERIAL_PORT_NRC || '/dev/ttyUSB1';
   
   // Create virtual hardware ports
-  SerialPortMock.binding.createPort(cansatPath, { echo: false, record: false });
+  try {
+    SerialPortMock.binding.createPort(cansatPath, { echo: false, record: false });
+  } catch (error) {
+    if (!/exists|exist|already/i.test(error.message)) throw error;
+  }
   if (cansatPath !== nrcPath) {
-    SerialPortMock.binding.createPort(nrcPath, { echo: false, record: false });
+    try {
+      SerialPortMock.binding.createPort(nrcPath, { echo: false, record: false });
+    } catch (error) {
+      if (!/exists|exist|already/i.test(error.message)) throw error;
+    }
   }
 
   interval = setInterval(() => {
@@ -124,6 +133,7 @@ function startEmulator() {
 
 function stopEmulator() {
   if (interval) clearInterval(interval);
+  interval = null;
 }
 
 module.exports = { startEmulator, stopEmulator };

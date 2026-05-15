@@ -76,6 +76,7 @@ let uptimeStart = Date.now();
 let isSimMode = process.env.SIM_MODE === 'true';
 let simStarted = false;
 let shuttingDown = false;
+let modeSwitchInFlight = Promise.resolve();
 
 class HttpError extends Error {
   constructor(status, message, details = {}) {
@@ -260,6 +261,28 @@ function startEmulatorOnce() {
   simStarted = true;
 }
 
+async function setSimMode(enabled, reason = 'manual') {
+  if (enabled === isSimMode) return;
+
+  isSimMode = enabled;
+  process.env.SIM_MODE = enabled ? 'true' : 'false';
+  await serial.shutdown();
+
+  if (enabled) {
+    startEmulatorOnce();
+    serial.initSerial(emitToAll);
+  } else {
+    if (simStarted) {
+      emulator.stopEmulator();
+      simStarted = false;
+    }
+    serial.initSerial(emitToAll, enableSimFallback);
+  }
+
+  log('info', 'Simulation mode changed', { enabled, reason });
+  emitToAll('sim_mode_changed', { sim_mode: isSimMode, reason });
+}
+
 async function enableSimFallback(reason) {
   if (process.env.ENABLE_SIM_FALLBACK !== 'true') {
     log('error', 'Hardware serial unavailable; simulator fallback disabled', { reason });
@@ -267,11 +290,7 @@ async function enableSimFallback(reason) {
   }
   if (simStarted || isSimMode) return;
   log('warn', 'Hardware serial unavailable, falling back to emulator', { reason });
-  isSimMode = true;
-  process.env.SIM_MODE = 'true';
-  await serial.shutdown();
-  startEmulatorOnce();
-  serial.initSerial(emitToAll);
+  await setSimMode(true, `fallback: ${reason}`);
 }
 
 if (isSimMode) {
@@ -331,6 +350,23 @@ app.get('/api/health', (req, res) => {
     signal
   });
 });
+
+app.post('/api/sim-mode', asyncRoute(async (req, res) => {
+  if (typeof req.body?.enabled !== 'boolean') {
+    throw new HttpError(400, 'enabled must be a boolean');
+  }
+
+  modeSwitchInFlight = modeSwitchInFlight
+    .catch(() => {})
+    .then(() => setSimMode(req.body.enabled, 'frontend'));
+  await modeSwitchInFlight;
+
+  res.json({
+    ok: true,
+    sim_mode: isSimMode,
+    signal: serial.getSignalState()
+  });
+}));
 
 app.get('/api/cansat/hardware', (req, res) => {
   res.json({

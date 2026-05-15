@@ -8,9 +8,11 @@
   <link rel="icon" type="image/png" href="/images/logo_w_tp.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=Rajdhani:wght@600;700&display=swap" rel="stylesheet">
+  <script src="/vendor/three.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    ::selection { background: #e5e5e5; color: #050505; }
     :root {
       --bg-deep: #000000;
       --bg-panel: #090909;
@@ -22,68 +24,241 @@
       --text-3: #666666;
       --sans: 'Inter', system-ui, sans-serif;
       --mono: 'JetBrains Mono', 'Fira Code', monospace;
+      --display: 'Rajdhani', 'Inter', system-ui, sans-serif;
     }
     body {
       background: var(--bg-deep); color: var(--text-1); font-family: var(--sans);
+      position: relative; overflow: hidden;
       height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center;
-      background-image: 
-        linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
-      background-size: 40px 40px;
     }
-    .header { text-align: center; margin-bottom: 3rem; }
-    h1 { font-family: var(--mono); font-size: 2rem; font-weight: 700; letter-spacing: 0.2em; margin-bottom: 0.5rem; }
-    p { color: var(--text-3); font-size: 0.8rem; letter-spacing: 0.1em; font-family: var(--sans); }
-    
-    .grid { display: grid; grid-template-columns: repeat(3, 300px); gap: 2rem; }
+    #dotted-surface { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
+    #dotted-surface canvas { display: block; width: 100%; height: 100%; }
+    .header { position: relative; z-index: 1; display: flex; justify-content: center; align-items: baseline; width: 100%; margin-bottom: 3rem; }
+    h1 { font-family: var(--display); font-size: 2.7rem; font-weight: 700; letter-spacing: 0.12em; margin-bottom: 0.5rem; }
+    .byline { position: absolute; left: calc(50% + 5.35rem); top: 1.55rem; color: var(--text-3); font-size: 0.75rem; font-weight: 600; letter-spacing: 0.08em; white-space: nowrap; }
+    .top-controls {
+      position: fixed; top: 1.25rem; right: 1.25rem; z-index: 2; display: flex; flex-direction: column; align-items: flex-end; gap: 0.75rem;
+    }
+    .control-row {
+      display: flex; align-items: center; gap: 0.75rem;
+      font-family: var(--mono); font-size: 0.7rem; color: var(--text-2); letter-spacing: 0.08em; text-transform: uppercase;
+    }
+    .sim-switch { position: relative; width: 46px; height: 24px; display: inline-flex; align-items: center; cursor: pointer; }
+    .sim-switch input { position: absolute; opacity: 0; pointer-events: none; }
+    .sim-slider {
+      position: absolute; inset: 0; border: 1px solid var(--border-hi); border-radius: 999px; background: #111111;
+      transition: background 0.2s ease, border-color 0.2s ease;
+    }
+    .sim-slider::before {
+      content: ''; position: absolute; width: 16px; height: 16px; left: 3px; top: 3px; border-radius: 50%;
+      background: var(--text-2); transition: transform 0.2s ease, background 0.2s ease;
+    }
+    .sim-switch input:checked + .sim-slider { background: rgba(255, 255, 255, 0.16); border-color: var(--text-1); }
+    .sim-switch input:checked + .sim-slider::before { transform: translateX(22px); background: var(--text-1); }
+    .sim-switch input:focus-visible + .sim-slider { outline: 2px solid var(--text-1); outline-offset: 3px; }
+    #sim-state, #status-voice-state { min-width: 3ch; color: var(--text-3); }
+    .grid { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(4, minmax(180px, 260px)); gap: 1.5rem; }
     .card {
-      background: var(--bg-panel); border: 1px solid var(--border); border-radius: 6px;
-      padding: 2rem; display: flex; flex-direction: column; cursor: pointer; text-decoration: none;
+      background: var(--bg-panel); border: 1px solid var(--border); border-radius: 18px;
+      min-height: 300px; padding: 2rem; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; text-decoration: none;
       transition: all 0.2s ease; position: relative; overflow: hidden;
     }
     .card:hover { border-color: var(--text-1); transform: translateY(-4px); }
-    .card:hover .tag { background: var(--text-1); color: #000; }
-    .tag { font-family: var(--mono); font-size: 0.6rem; font-weight: 600; letter-spacing: 0.15em; color: var(--text-3); margin-bottom: 1rem; border: 1px solid var(--border); padding: 4px 8px; border-radius: 4px; align-self: flex-start; transition: 0.2s; }
-    h2 { font-size: 1.25rem; font-weight: 600; margin-bottom: 0.5rem; color: var(--text-1); }
-    .desc { font-size: 0.8rem; color: var(--text-2); line-height: 1.5; flex: 1; }
-    
-    .status { margin-top: 1.5rem; font-family: var(--mono); font-size: 0.65rem; color: #00ff00; letter-spacing: 0.1em; display: flex; align-items: center; gap: 6px; }
-    .status::before { content: ''; width: 6px; height: 6px; background: #00ff00; border-radius: 50%; box-shadow: 0 0 6px rgba(0,255,0,0.5); }
+    h2 { font-size: 1.25rem; font-weight: 600; color: var(--text-1); text-align: center; margin-bottom: 1rem; }
+    .desc { color: var(--text-2); font-size: 0.85rem; line-height: 1.55; text-align: center; max-width: 20ch; }
   </style>
 </head>
 <body>
+  <div id="dotted-surface" aria-hidden="true"></div>
+
+  <div class="top-controls">
+    <div class="control-row">
+      <span>SIMULATE DATA</span>
+      <label class="sim-switch" for="sim-mode-toggle" title="Toggle backend simulation mode">
+        <input id="sim-mode-toggle" type="checkbox" aria-label="Toggle simulated data">
+        <span class="sim-slider" aria-hidden="true"></span>
+      </label>
+      <span id="sim-state">OFF</span>
+    </div>
+    <div class="control-row">
+      <span>STATUS VOICE</span>
+      <label class="sim-switch" for="status-voice-toggle" title="Toggle spoken status updates">
+        <input id="status-voice-toggle" type="checkbox" aria-label="Toggle status voice">
+        <span class="sim-slider" aria-hidden="true"></span>
+      </label>
+      <span id="status-voice-state">OFF</span>
+    </div>
+  </div>
+
   <div class="header">
     <h1>HELIOS</h1>
+    <span class="byline">by UOBRPL</span>
   </div>
   
-  <div class="grid" style="grid-template-columns: repeat(2, 350px);">
+  <div class="grid">
     <a href="/avionics" class="card">
-      <span class="tag">FLIGHT DYNAMICS</span>
       <h2>Avionics</h2>
-      <p class="desc">High-density telemetry dashboard. Optimized for rapid atmospheric ascent tracking and sparkline analysis.</p>
-      <div class="status">SYS.ONLINE</div>
+      <p class="desc">High-density telemetry dashboard for atmospheric ascent tracking and sparkline analysis.</p>
     </a>
     
     <a href="/ort" class="card">
-      <span class="tag">ROBOTICS</span>
-      <h2>Olympus Rover (ORT)</h2>
-      <p class="desc">Low-latency video feed. Gamepad API integration. Optimized for ground navigation and manipulation.</p>
-      <div class="status">SYS.ONLINE</div>
+      <h2>Olympus Rover Trials</h2>
+      <p class="desc">Low-latency video feed and gamepad control for ground navigation and manipulation.</p>
     </a>
     
     <a href="/mach-x" class="card">
-      <span class="tag">PAYLOAD & RECOVERY</span>
       <h2>Mach-X CanSat</h2>
-      <p class="desc">3D orbital orientation. Topographical radar mapping. SD-Card post-flight data ingestion.</p>
-      <div class="status">SYS.ONLINE</div>
+      <p class="desc">3D orientation, topographical radar mapping, and SD-card post-flight data ingestion.</p>
     </a>
 
     <a href="/gcs" class="card">
-      <span class="tag">COMMAND & CONTROL</span>
       <h2>Master GCS</h2>
-      <p class="desc">Unified mission control center. Switch between all telemetry sources. Multi-source event logging.</p>
-      <div class="status">SYS.ONLINE</div>
+      <p class="desc">Unified mission control for telemetry sources, events, recovery, and flight review.</p>
     </a>
   </div>
+
+  <script>
+    (() => {
+      const toggle = document.getElementById('sim-mode-toggle');
+      const state = document.getElementById('sim-state');
+      if (!toggle || !state) return;
+
+      function render(enabled) {
+        toggle.checked = Boolean(enabled);
+        state.textContent = enabled ? 'ON' : 'OFF';
+      }
+
+      async function syncMode() {
+        try {
+          const res = await fetch('/api/health');
+          if (!res.ok) throw new Error(`health ${res.status}`);
+          const data = await res.json();
+          render(data.sim_mode);
+        } catch (error) {
+          state.textContent = 'ERR';
+        }
+      }
+
+      toggle.addEventListener('change', async () => {
+        const requested = toggle.checked;
+        toggle.disabled = true;
+        state.textContent = '...';
+        try {
+          const res = await fetch('/api/sim-mode', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled: requested })
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || `sim-mode ${res.status}`);
+          render(data.sim_mode);
+        } catch (error) {
+          await syncMode();
+        } finally {
+          toggle.disabled = false;
+        }
+      });
+
+      syncMode();
+    })();
+
+    (() => {
+      const toggle = document.getElementById('status-voice-toggle');
+      const state = document.getElementById('status-voice-state');
+      if (!toggle || !state) return;
+
+      function render(enabled) {
+        toggle.checked = Boolean(enabled);
+        state.textContent = enabled ? 'ON' : 'OFF';
+      }
+
+      render(localStorage.getItem('STATUS_VOICE') === 'true');
+      toggle.addEventListener('change', () => {
+        localStorage.setItem('STATUS_VOICE', toggle.checked ? 'true' : 'false');
+        render(toggle.checked);
+        if (!toggle.checked && 'speechSynthesis' in window) speechSynthesis.cancel();
+      });
+    })();
+
+    (() => {
+      const container = document.getElementById('dotted-surface');
+      if (!container || !window.THREE) return;
+
+      const separation = 150;
+      const amountX = 40;
+      const amountY = 60;
+      const scene = new THREE.Scene();
+      scene.fog = new THREE.Fog(0xffffff, 2000, 10000);
+
+      const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 1, 10000);
+      camera.position.set(0, 355, 1220);
+
+      const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setClearColor(scene.fog.color, 0);
+      container.appendChild(renderer.domElement);
+
+      const geometry = new THREE.BufferGeometry();
+      const positions = [];
+      const colors = [];
+
+      for (let ix = 0; ix < amountX; ix++) {
+        for (let iy = 0; iy < amountY; iy++) {
+          positions.push(
+            ix * separation - (amountX * separation) / 2,
+            0,
+            iy * separation - (amountY * separation) / 2
+          );
+          colors.push(200, 200, 200);
+        }
+      }
+
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+
+      const material = new THREE.PointsMaterial({
+        size: 8,
+        vertexColors: true,
+        transparent: true,
+        opacity: 0.28,
+        sizeAttenuation: true
+      });
+
+      const points = new THREE.Points(geometry, material);
+      scene.add(points);
+
+      let count = 0;
+
+      function animate() {
+        requestAnimationFrame(animate);
+        const positionAttribute = geometry.attributes.position;
+        const particlePositions = positionAttribute.array;
+        let i = 0;
+
+        for (let ix = 0; ix < amountX; ix++) {
+          for (let iy = 0; iy < amountY; iy++) {
+            const index = i * 3;
+            particlePositions[index + 1] =
+              Math.sin((ix + count) * 0.3) * 50 +
+              Math.sin((iy + count) * 0.5) * 50;
+            i++;
+          }
+        }
+
+        positionAttribute.needsUpdate = true;
+        renderer.render(scene, camera);
+        count += 0.025;
+      }
+
+      window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+
+      animate();
+    })();
+  </script>
 </body>
 </html>

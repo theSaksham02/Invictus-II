@@ -17,6 +17,7 @@
        SPACEX / STARSHIP MISSION CONTROL
        ═══════════════════════════════════════════════════════════ */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    ::selection { background: #e5e5e5; color: #050505; }
 
     :root {
       --bg-deep: #000000;
@@ -103,6 +104,14 @@
     .signal-dot.lost { background: var(--critical); box-shadow: 0 0 6px rgba(255, 0, 0, 0.4); }
 
     .mission-timer { font-family: var(--mono); font-size: 1.1rem; font-weight: 500; color: var(--text-1); letter-spacing: 0.05em; font-variant-numeric: tabular-nums; }
+    .status-voice-control { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 0.6rem; color: var(--text-3); letter-spacing: 0.1em; }
+    .status-voice-switch { position: relative; width: 36px; height: 18px; display: inline-flex; cursor: pointer; }
+    .status-voice-switch input { position: absolute; opacity: 0; pointer-events: none; }
+    .status-voice-slider { position: absolute; inset: 0; border: 1px solid var(--border-hi); border-radius: 999px; background: transparent; transition: all 0.2s; }
+    .status-voice-slider::before { content: ''; position: absolute; width: 12px; height: 12px; left: 2px; top: 2px; border-radius: 50%; background: var(--text-3); transition: all 0.2s; }
+    .status-voice-switch input:checked + .status-voice-slider { border-color: var(--text-1); background: rgba(255,255,255,0.14); }
+    .status-voice-switch input:checked + .status-voice-slider::before { transform: translateX(18px); background: var(--text-1); }
+    .status-voice-switch input:focus-visible + .status-voice-slider { outline: 2px solid var(--text-1); outline-offset: 3px; }
 
     /* ═══════════════════════════════════════════════════════════
        DASHBOARD GRID
@@ -250,6 +259,14 @@
         <div class="phase-badge" id="phase-badge">SYSTEM IDLE</div>
       </div>
       <div class="header-right">
+        <div class="status-voice-control">
+          <span>STATUS VOICE</span>
+          <label class="status-voice-switch" for="status-voice-toggle" title="Toggle spoken status updates">
+            <input id="status-voice-toggle" type="checkbox" aria-label="Toggle status voice">
+            <span class="status-voice-slider" aria-hidden="true"></span>
+          </label>
+          <span id="status-voice-state">OFF</span>
+        </div>
         <div class="signals">
           <div class="signal-item"><span class="signal-dot" id="signal-cansat"></span><span class="signal-label">CANSAT</span></div>
           <div class="signal-item"><span class="signal-dot" id="signal-nrc"></span><span class="signal-label">NRC</span></div>
@@ -392,6 +409,28 @@
     (() => {
       'use strict';
       const $ = id => document.getElementById(id);
+      let statusVoiceEnabled = localStorage.getItem('STATUS_VOICE') === 'true';
+
+      function renderStatusVoiceToggle() {
+        const toggle = $('status-voice-toggle');
+        const state = $('status-voice-state');
+        if (!toggle || !state) return;
+        toggle.checked = statusVoiceEnabled;
+        state.textContent = statusVoiceEnabled ? 'ON' : 'OFF';
+      }
+
+      function setupStatusVoiceToggle() {
+        const toggle = $('status-voice-toggle');
+        if (!toggle) return;
+        renderStatusVoiceToggle();
+        toggle.addEventListener('change', () => {
+          statusVoiceEnabled = toggle.checked;
+          localStorage.setItem('STATUS_VOICE', statusVoiceEnabled ? 'true' : 'false');
+          renderStatusVoiceToggle();
+          if (!statusVoiceEnabled && 'speechSynthesis' in window) speechSynthesis.cancel();
+        });
+      }
+      setupStatusVoiceToggle();
 
       // AUDIO & TTS ENGINE
       let actx = null, osc = null, gainNode = null, audioInit = false;
@@ -427,6 +466,7 @@
         o.start(); o.stop(actx.currentTime + 1);
       }
       function speak(text) {
+        if(!statusVoiceEnabled) return;
         if('speechSynthesis' in window) {
            const u = new SpeechSynthesisUtterance(text);
            u.rate = 1.1; u.pitch = 0.9;
