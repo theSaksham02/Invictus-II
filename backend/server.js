@@ -309,12 +309,12 @@ app.get('/', (req, res) => {
   res.send('<h1 style="font-family:monospace;color:#00d4ff;background:#020817;padding:2rem">MACH-26 Ground Station — backend running, index not found.</h1>');
 });
 
-app.get('/nrc', (req, res) => res.redirect('/avionics'));
+app.get('/avionics', (req, res) => res.redirect('/nrc'));
 
-app.get('/avionics', (req, res) => {
+app.get('/nrc', (req, res) => {
   const dashPath = path.resolve(__dirname, '../dashboard/nrc.html');
   if (fs.existsSync(dashPath)) res.sendFile(dashPath);
-  else res.status(404).send('Avionics Dashboard missing');
+  else res.status(404).send('National Rocketry Championship Dashboard missing');
 });
 
 app.get('/ort', (req, res) => {

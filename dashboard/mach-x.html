@@ -96,13 +96,6 @@
     .phase-badge.descending { border-color: var(--spx-blue-light); color: var(--spx-blue-light); }
     .phase-badge.landed { border-color: var(--nominal); color: var(--nominal); }
 
-    .signals { display: flex; gap: 16px; }
-    .signal-item { display: flex; align-items: center; gap: 6px; }
-    .signal-label { font-size: 0.6rem; color: var(--text-3); font-weight: 600; letter-spacing: 0.1em; }
-    .signal-dot { width: 6px; height: 6px; background: var(--text-3); border-radius: 50%; }
-    .signal-dot.live { background: var(--nominal); box-shadow: 0 0 6px rgba(0, 255, 0, 0.4); }
-    .signal-dot.lost { background: var(--critical); box-shadow: 0 0 6px rgba(255, 0, 0, 0.4); }
-
     .mission-timer { font-family: var(--mono); font-size: 1.1rem; font-weight: 500; color: var(--text-1); letter-spacing: 0.05em; font-variant-numeric: tabular-nums; }
     .status-voice-control { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 0.6rem; color: var(--text-3); letter-spacing: 0.1em; }
     .status-voice-switch { position: relative; width: 36px; height: 18px; display: inline-flex; cursor: pointer; }
@@ -260,10 +253,6 @@
             <span class="status-voice-slider" aria-hidden="true"></span>
           </label>
           <span id="status-voice-state">OFF</span>
-        </div>
-        <div class="signals">
-          <div class="signal-item"><span class="signal-dot" id="signal-cansat"></span><span class="signal-label">CANSAT</span></div>
-          <div class="signal-item"><span class="signal-dot" id="signal-nrc"></span><span class="signal-label">NRC</span></div>
         </div>
         <span class="mission-timer" id="mission-timer">00:00:00</span>
       </div>
@@ -487,6 +476,11 @@
       let firstReceivedAt = null;
       let currentPhase = { CANSAT: 'IDLE', NRC: 'IDLE' };
       const gyroHistory = [];
+      let signalState = {
+        mode: 'hardware',
+        CANSAT: { connected: false, lost: true },
+        NRC: { connected: false, lost: true }
+      };
       
       const historyDB = { CANSAT: [], NRC: [] };
       let isScrubbing = false;
@@ -745,11 +739,21 @@
       } else { window.update3D = () => {}; }
 
       // PREFLIGHT CHECKLIST
-      function updatePreflight(flags) {
+      function isTelemetrySourceActive(src) {
+        const state = signalState[src] || {};
+        return signalState.mode === 'sim' || (state.connected && !state.lost);
+      }
+
+      function updatePreflight(pkt) {
+        const flags = pkt?.flags || 0;
+        const active = isTelemetrySourceActive(pkt?.source || source);
         const up = (id, ok) => {
            const el = $(id); el.textContent = ok ? 'OK' : 'FLT'; el.className = 'pf-val ' + (ok ? 'ok' : '');
         };
-        up('pf-bmp', flags & 0x08); up('pf-mpu', flags & 0x10); up('pf-sd', flags & 0x20); up('pf-gps', flags & 0x04);
+        up('pf-bmp', active && (flags & 0x08) && Number.isFinite(pkt?.pressure_hpa) && Number.isFinite(pkt?.altitude_m));
+        up('pf-mpu', active && (flags & 0x10) && Number.isFinite(pkt?.accel_z) && Number.isFinite(pkt?.gyro_x));
+        up('pf-sd', active && (flags & 0x20));
+        up('pf-gps', active && (flags & 0x04) && Number.isFinite(pkt?.lat) && Number.isFinite(pkt?.lon));
       }
 
       // UI UPDATER
@@ -798,7 +802,7 @@
         window.update3D(pkt);
         updateMap(pkt);
         syncCharts();
-        updatePreflight(pkt.flags || 0);
+        updatePreflight(pkt);
 
         if(!isScrubbing) updateEngineHum(pkt.accel_z || 1);
         else silenceHum();
@@ -893,6 +897,23 @@
         return headers;
       };
 
+      async function refreshSignalState() {
+        try {
+          const res = await fetch(apiUrl('/api/health'));
+          if (!res.ok) throw new Error(`health ${res.status}`);
+          const data = await res.json();
+          signalState = data.signal || signalState;
+          const latest = historyDB[source][historyDB[source].length - 1];
+          updatePreflight(latest || null);
+        } catch (error) {
+          signalState = { ...signalState, mode: 'hardware' };
+          updatePreflight(null);
+        }
+      }
+
+      refreshSignalState();
+      setInterval(refreshSignalState, 1000);
+
       function pollGamepad() {
         const pads = navigator.getGamepads ? navigator.getGamepads() : [];
         const padObj = Array.from(pads).find(p => p && p.connected);
@@ -946,8 +967,6 @@
         s.on('packet', payload => {
           const pkt = payload && payload.data ? payload.data : payload;
           if (!pkt || isNaN(pkt.altitude_m)) return;
-          const dot = $('signal-' + (pkt.source || source).toLowerCase());
-          if (dot) { dot.className = 'signal-dot live'; clearTimeout(dot.timer); dot.timer = setTimeout(()=>dot.className='signal-dot', 100); }
           processPacket(pkt);
         });
         s.on('mission_event', evt => { addEvent(evt); updatePhase(evt.event_type, evt.source); });

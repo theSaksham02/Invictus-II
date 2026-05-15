@@ -60,7 +60,7 @@
     .grid { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(4, minmax(180px, 260px)); gap: 1.5rem; }
     .card {
       background: var(--bg-panel); border: 1px solid var(--border); border-radius: 18px;
-      min-height: 300px; padding: 2rem; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; text-decoration: none;
+      min-height: 300px; padding: 6.75rem 2rem 2rem; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; cursor: pointer; text-decoration: none;
       transition: all 0.2s ease; position: relative; overflow: hidden;
     }
     .card:hover { border-color: var(--text-1); transform: translateY(-4px); }
@@ -96,8 +96,8 @@
   </div>
   
   <div class="grid">
-    <a href="/avionics" class="card">
-      <h2>Avionics</h2>
+    <a href="/nrc" class="card">
+      <h2>National Rocketry Championship</h2>
       <p class="desc">High-density telemetry dashboard for atmospheric ascent tracking and sparkline analysis.</p>
     </a>
     
