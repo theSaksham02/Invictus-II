@@ -13,6 +13,8 @@ backend/.env
 # Database & Logs
 backend/flight.db
 backend/flight.db-journal
+backend/flight.db-shm
+backend/flight.db-wal
 logs/
 *.log
 

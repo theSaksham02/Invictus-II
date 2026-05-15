@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>INVICTUS II | MISSION CONTROL</title>
+    <!-- Site-wide transparent logo favicon. -->
+    <link rel="icon" type="image/png" href="../images/logo_w_tp.png">
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/uplot@1.6.24/dist/uPlot.iife.min.js"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.24/dist/uPlot.min.css">
@@ -219,6 +221,21 @@
         let map, marker, path;
         let coords = [52.4508, -1.9305]; // UoB default
 
+        socket.on('connect', () => {
+            socket.emit('subscribe_source', { source: 'ALL' });
+            socket.emit('request_history', { source: 'CANSAT', limit: 200 });
+            log('Backend socket connected.');
+        });
+
+        socket.on('disconnect', () => log('Backend socket disconnected.'));
+        socket.on('signal_lost', (evt) => log(`SIGNAL LOST: ${evt.source} gap ${Math.round(evt.gap_ms / 1000)}s`));
+        socket.on('signal_recovered', (evt) => log(`SIGNAL RECOVERED: ${evt.source}`));
+        socket.on('mission_event', (evt) => {
+            if (!evt || !evt.event_type) return;
+            document.getElementById('val-phase').textContent = evt.event_type;
+            log(`${evt.source} phase: ${evt.event_type}`);
+        });
+
         function initMap() {
             map = L.map('map', { zoomControl: false }).setView(coords, 15);
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -250,7 +267,9 @@
             console.prepend(entry);
         }
 
-        socket.on('telemetry', (data) => {
+        function handleTelemetry(payload) {
+            const data = payload && payload.data ? payload.data : payload;
+            if (!data) return;
             // Filter by current source
             if (currentSource === 'cansat' && data.source !== 'CANSAT') return;
             if (currentSource === 'nrc' && data.source !== 'NRC') return;
@@ -274,6 +293,13 @@
                 const phase = data.flags & 0x02 ? 'DESCENT' : (data.flags & 0x01 ? 'POWERED FLIGHT' : 'STANDBY');
                 document.getElementById('val-phase').textContent = phase;
             }
+        }
+
+        socket.on('packet', handleTelemetry);
+        socket.on('telemetry', handleTelemetry);
+        socket.on('history', (history) => {
+            const packets = history?.packets || history?.cansat || [];
+            packets.forEach(handleTelemetry);
         });
 
         initMap();

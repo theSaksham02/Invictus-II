@@ -1,5 +1,9 @@
 const { Transform } = require('stream');
-const { PACKET_LENGTH_BYTES } = require('./cansat-hardware');
+const {
+  LEGACY_PACKET_LENGTH_BYTES,
+  PACKET_LENGTH_BYTES,
+  PACKET_SYNC
+} = require('./cansat-hardware');
 const { parseCansat } = require('./parser');
 
 class CansatFrameParser extends Transform {
@@ -29,7 +33,8 @@ class CansatFrameParser extends Transform {
   }
 
   drainFrames() {
-    while (this.buffer.length >= PACKET_LENGTH_BYTES) {
+    const minFrameBytes = Math.min(PACKET_LENGTH_BYTES, LEGACY_PACKET_LENGTH_BYTES);
+    while (this.buffer.length >= minFrameBytes) {
       const frameOffset = this.findNextFrameOffset();
 
       if (frameOffset < 0) {
@@ -44,8 +49,11 @@ class CansatFrameParser extends Transform {
         this.dropBytes(frameOffset);
       }
 
-      const frame = this.buffer.subarray(0, PACKET_LENGTH_BYTES);
-      this.buffer = this.buffer.subarray(PACKET_LENGTH_BYTES);
+      const frameLength = this.detectFrameLengthAtStart();
+      if (frameLength === 0) return;
+
+      const frame = this.buffer.subarray(0, frameLength);
+      this.buffer = this.buffer.subarray(frameLength);
       this.stats.frames++;
       this.push(frame);
     }
@@ -56,13 +64,36 @@ class CansatFrameParser extends Transform {
   }
 
   findNextFrameOffset() {
-    const maxStart = this.buffer.length - PACKET_LENGTH_BYTES;
+    const maxStart = this.buffer.length - Math.min(PACKET_LENGTH_BYTES, LEGACY_PACKET_LENGTH_BYTES);
     for (let offset = 0; offset <= maxStart; offset++) {
-      const candidate = this.buffer.subarray(offset, offset + PACKET_LENGTH_BYTES);
-      if (parseCansat(candidate)) return offset;
+      const v2Candidate = this.buffer.subarray(offset, offset + PACKET_LENGTH_BYTES);
+      if (v2Candidate.length === PACKET_LENGTH_BYTES && parseCansat(v2Candidate)) return offset;
+
+      const legacyCandidate = this.buffer.subarray(offset, offset + LEGACY_PACKET_LENGTH_BYTES);
+      if (
+        legacyCandidate.length === LEGACY_PACKET_LENGTH_BYTES &&
+        this.buffer.readUInt16LE(offset) !== PACKET_SYNC &&
+        parseCansat(legacyCandidate)
+      ) {
+        return offset;
+      }
       this.stats.rejected_windows++;
     }
     return -1;
+  }
+
+  detectFrameLengthAtStart() {
+    if (this.buffer.length >= PACKET_LENGTH_BYTES) {
+      const candidate = this.buffer.subarray(0, PACKET_LENGTH_BYTES);
+      if (parseCansat(candidate)) return PACKET_LENGTH_BYTES;
+    }
+    if (this.buffer.length >= LEGACY_PACKET_LENGTH_BYTES) {
+      const candidate = this.buffer.subarray(0, LEGACY_PACKET_LENGTH_BYTES);
+      if (this.buffer.readUInt16LE(0) !== PACKET_SYNC && parseCansat(candidate)) {
+        return LEGACY_PACKET_LENGTH_BYTES;
+      }
+    }
+    return 0;
   }
 
   dropBytes(count) {

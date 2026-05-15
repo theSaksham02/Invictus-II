@@ -1,6 +1,12 @@
 const {
+  CANSAT_SOURCE_ID,
+  LEGACY_PACKET_LENGTH_BYTES,
   PACKET_LENGTH_BYTES,
+  PACKET_PAYLOAD_LENGTH_BYTES,
+  PACKET_SYNC,
+  PACKET_VERSION,
   TELEMETRY_LIMITS,
+  crc16Ccitt,
   decodeFlags,
   deriveSensorHealth,
   packetWarnings,
@@ -56,10 +62,14 @@ function enrichPacket(packet) {
   };
 }
 
-function parseCansat(buffer) {
-  if (!Buffer.isBuffer(buffer) || buffer.length !== PACKET_LENGTH_BYTES) return null;
+function buildCansatPacket(parsed) {
+  return isValidTelemetryShape(parsed) ? enrichPacket(parsed) : null;
+}
 
-  const xor = xorChecksum(buffer);
+function parseLegacyCansat(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length !== LEGACY_PACKET_LENGTH_BYTES) return null;
+
+  const xor = xorChecksum(buffer, LEGACY_PACKET_LENGTH_BYTES - 1);
   if (xor !== buffer[36]) return null;
 
   try {
@@ -79,24 +89,89 @@ function parseCansat(buffer) {
       raw: buffer.toString('hex'),
       received_at: Date.now()
     };
-    return isValidTelemetryShape(parsed) ? enrichPacket(parsed) : null;
+    return buildCansatPacket(parsed);
   } catch {
     return null;
   }
 }
 
-// NRC: "NRC:<pkt_id>,<timestamp_ms>,<altitude_m>,<temp_c>,<pressure_hpa>,<lat>,<lon>,<rssi_dbm>\n"
-function parseNrc(line) {
-  if (typeof line !== 'string' || !line.startsWith('NRC:')) return null;
-  const parts = line.substring(4).trim().split(',');
-  if (parts.length !== 8) return null;
+function parseV2Cansat(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length !== PACKET_LENGTH_BYTES) return null;
+  if (buffer.readUInt16LE(0) !== PACKET_SYNC) return null;
+  if (buffer.readUInt8(2) !== PACKET_VERSION) return null;
+  if (buffer.readUInt8(3) !== CANSAT_SOURCE_ID) return null;
+  if (buffer.readUInt8(4) !== PACKET_PAYLOAD_LENGTH_BYTES) return null;
+
+  const expectedCrc = buffer.readUInt16LE(PACKET_LENGTH_BYTES - 2);
+  const actualCrc = crc16Ccitt(buffer, PACKET_LENGTH_BYTES - 2);
+  if (expectedCrc !== actualCrc) return null;
 
   try {
-    const nums = parts.map((value) => Number(value));
+    const parsed = {
+      source: 'CANSAT',
+      protocol_version: PACKET_VERSION,
+      pkt_id: buffer.readUInt16LE(5),
+      timestamp_ms: buffer.readUInt32LE(7),
+      altitude_m: buffer.readFloatLE(11),
+      temp_c: buffer.readFloatLE(15),
+      pressure_hpa: buffer.readFloatLE(19),
+      accel_z: buffer.readFloatLE(23),
+      gyro_x: buffer.readFloatLE(27),
+      lat: buffer.readFloatLE(31),
+      lon: buffer.readFloatLE(35),
+      rssi_dbm: buffer.readInt8(39),
+      flags: buffer.readUInt8(40),
+      raw: buffer.toString('hex'),
+      received_at: Date.now()
+    };
+    return buildCansatPacket(parsed);
+  } catch {
+    return null;
+  }
+}
+
+function parseCansat(buffer) {
+  if (!Buffer.isBuffer(buffer)) return null;
+  if (buffer.length === PACKET_LENGTH_BYTES) return parseV2Cansat(buffer);
+  if (buffer.length === LEGACY_PACKET_LENGTH_BYTES) return parseLegacyCansat(buffer);
+  return null;
+}
+
+function parseNrcNumberList(body) {
+  return body.trim().split(',').map((value) => Number(value));
+}
+
+// NRC legacy: "NRC:<pkt_id>,<timestamp_ms>,<altitude_m>,<temp_c>,<pressure_hpa>,<lat>,<lon>,<rssi_dbm>\n"
+// NRC v2: "NRC2:<same fields>,<flags>,<crc16_ccitt_hex>\n" where CRC covers the body before ",crc".
+function parseNrc(line) {
+  if (typeof line !== 'string') return null;
+  const trimmed = line.trim();
+  const isV2 = trimmed.startsWith('NRC2:');
+  if (!isV2 && !trimmed.startsWith('NRC:')) return null;
+
+  const body = trimmed.substring(isV2 ? 5 : 4);
+  let nums;
+  if (isV2) {
+    const lastComma = body.lastIndexOf(',');
+    if (lastComma < 0) return null;
+    const bodyWithoutCrc = body.slice(0, lastComma);
+    const expectedCrc = Number.parseInt(body.slice(lastComma + 1), 16);
+    if (!Number.isInteger(expectedCrc)) return null;
+    const actualCrc = crc16Ccitt(Buffer.from(bodyWithoutCrc, 'utf8'));
+    if (expectedCrc !== actualCrc) return null;
+    nums = parseNrcNumberList(bodyWithoutCrc);
+    if (nums.length !== 9) return null;
+  } else {
+    nums = parseNrcNumberList(body);
+    if (nums.length !== 8) return null;
+  }
+
+  try {
     if (nums.some((value) => Number.isNaN(value))) return null;
 
     const parsed = {
       source: 'NRC',
+      protocol_version: isV2 ? 2 : 1,
       pkt_id: Math.trunc(nums[0]),
       timestamp_ms: Math.trunc(nums[1]),
       altitude_m: nums[2],
@@ -107,8 +182,8 @@ function parseNrc(line) {
       lat: nums[5],
       lon: nums[6],
       rssi_dbm: Math.trunc(nums[7]),
-      flags: 0,
-      raw: line.trim(),
+      flags: isV2 ? Math.trunc(nums[8]) : 0,
+      raw: trimmed,
       received_at: Date.now()
     };
     return isValidTelemetryShape(parsed) ? parsed : null;

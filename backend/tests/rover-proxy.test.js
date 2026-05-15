@@ -15,12 +15,35 @@ function response(status, body, contentType = 'application/json') {
 }
 
 test('rover client returns data for successful response', async () => {
+  const paths = [];
   const client = createRoverClient({
     baseUrl: 'http://test.local',
-    fetchImpl: async () => response(200, { ok: true, battery: 80 })
+    fetchImpl: async (url) => {
+      paths.push(new URL(url).pathname);
+      return response(200, { ok: true, battery: 80 });
+    }
   });
   const data = await client.data();
   assert.deepEqual(data, { ok: true, battery: 80 });
+  assert.deepEqual(paths, ['/data']);
+});
+
+test('rover client uses the Pi app control and arm contract', async () => {
+  const requests = [];
+  const client = createRoverClient({
+    baseUrl: 'http://test.local',
+    fetchImpl: async (url, options) => {
+      requests.push({ path: new URL(url).pathname, method: options.method, body: options.body });
+      return response(200, { ok: true });
+    }
+  });
+
+  await client.control(25, -25);
+  await client.arm();
+  assert.equal(requests[0].path, '/control');
+  assert.equal(requests[0].method, 'POST');
+  assert.deepEqual(JSON.parse(requests[0].body), { left: 25, right: -25 });
+  assert.equal(requests[1].path, '/arm');
 });
 
 test('rover client maps non-OK upstream status to 502', async () => {

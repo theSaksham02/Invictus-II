@@ -1,4 +1,9 @@
-const PACKET_LENGTH_BYTES = 37;
+const LEGACY_PACKET_LENGTH_BYTES = 37;
+const PACKET_LENGTH_BYTES = 43;
+const PACKET_SYNC = 0xa55a;
+const PACKET_VERSION = 2;
+const CANSAT_SOURCE_ID = 1;
+const PACKET_PAYLOAD_LENGTH_BYTES = 36;
 
 const FLAG_BITS = Object.freeze({
   launched: 0x01,
@@ -13,6 +18,9 @@ const CIRCUIT = Object.freeze({
   name: 'INVICTUS II CANSAT',
   controller: 'STM32 Bluepill',
   telemetry_packet_bytes: PACKET_LENGTH_BYTES,
+  legacy_packet_bytes: LEGACY_PACKET_LENGTH_BYTES,
+  packet_sync: `0x${PACKET_SYNC.toString(16).toUpperCase()}`,
+  packet_version: PACKET_VERSION,
   buses: {
     sd_spi: {
       pins: { cs: 'PA4', clk: 'PA5', miso: 'PA6', mosi: 'PA7' },
@@ -46,18 +54,22 @@ const CIRCUIT = Object.freeze({
     protection: 'D1 between 3V3_BUS and 5V_BUS, pointed toward 5V_BUS'
   },
   packet_fields: [
-    { offset: 0, bytes: 2, type: 'uint16le', name: 'pkt_id' },
-    { offset: 2, bytes: 4, type: 'uint32le', name: 'timestamp_ms' },
-    { offset: 6, bytes: 4, type: 'floatle', name: 'altitude_m' },
-    { offset: 10, bytes: 4, type: 'floatle', name: 'temp_c' },
-    { offset: 14, bytes: 4, type: 'floatle', name: 'pressure_hpa' },
-    { offset: 18, bytes: 4, type: 'floatle', name: 'accel_z' },
-    { offset: 22, bytes: 4, type: 'floatle', name: 'gyro_x' },
-    { offset: 26, bytes: 4, type: 'floatle', name: 'lat' },
-    { offset: 30, bytes: 4, type: 'floatle', name: 'lon' },
-    { offset: 34, bytes: 1, type: 'int8', name: 'rssi_dbm' },
-    { offset: 35, bytes: 1, type: 'uint8', name: 'flags' },
-    { offset: 36, bytes: 1, type: 'uint8', name: 'checksum' }
+    { offset: 0, bytes: 2, type: 'uint16le', name: 'sync' },
+    { offset: 2, bytes: 1, type: 'uint8', name: 'version' },
+    { offset: 3, bytes: 1, type: 'uint8', name: 'source_id' },
+    { offset: 4, bytes: 1, type: 'uint8', name: 'payload_len' },
+    { offset: 5, bytes: 2, type: 'uint16le', name: 'pkt_id' },
+    { offset: 7, bytes: 4, type: 'uint32le', name: 'timestamp_ms' },
+    { offset: 11, bytes: 4, type: 'floatle', name: 'altitude_m' },
+    { offset: 15, bytes: 4, type: 'floatle', name: 'temp_c' },
+    { offset: 19, bytes: 4, type: 'floatle', name: 'pressure_hpa' },
+    { offset: 23, bytes: 4, type: 'floatle', name: 'accel_z' },
+    { offset: 27, bytes: 4, type: 'floatle', name: 'gyro_x' },
+    { offset: 31, bytes: 4, type: 'floatle', name: 'lat' },
+    { offset: 35, bytes: 4, type: 'floatle', name: 'lon' },
+    { offset: 39, bytes: 1, type: 'int8', name: 'rssi_dbm' },
+    { offset: 40, bytes: 1, type: 'uint8', name: 'flags' },
+    { offset: 41, bytes: 2, type: 'uint16le', name: 'crc16_ccitt' }
   ]
 });
 
@@ -79,6 +91,18 @@ function xorChecksum(buffer, length = PACKET_LENGTH_BYTES - 1) {
   let checksum = 0;
   for (let i = 0; i < length; i++) checksum ^= buffer[i];
   return checksum;
+}
+
+function crc16Ccitt(buffer, length = buffer.length, seed = 0xffff) {
+  let crc = seed;
+  for (let i = 0; i < length; i++) {
+    crc ^= buffer[i] << 8;
+    for (let bit = 0; bit < 8; bit++) {
+      crc = (crc & 0x8000) ? ((crc << 1) ^ 0x1021) : (crc << 1);
+      crc &= 0xffff;
+    }
+  }
+  return crc;
 }
 
 function decodeFlags(flags) {
@@ -143,9 +167,15 @@ function packetWarnings(packet) {
 
 module.exports = {
   CIRCUIT,
+  CANSAT_SOURCE_ID,
   FLAG_BITS,
+  LEGACY_PACKET_LENGTH_BYTES,
   PACKET_LENGTH_BYTES,
+  PACKET_PAYLOAD_LENGTH_BYTES,
+  PACKET_SYNC,
+  PACKET_VERSION,
   TELEMETRY_LIMITS,
+  crc16Ccitt,
   decodeFlags,
   deriveSensorHealth,
   packetWarnings,

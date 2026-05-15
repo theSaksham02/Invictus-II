@@ -1,4 +1,12 @@
 const { SerialPortMock } = require('serialport');
+const {
+  CANSAT_SOURCE_ID,
+  PACKET_LENGTH_BYTES,
+  PACKET_PAYLOAD_LENGTH_BYTES,
+  PACKET_SYNC,
+  PACKET_VERSION,
+  crc16Ccitt
+} = require('./cansat-hardware');
 
 let interval;
 let tick = 0;
@@ -64,33 +72,33 @@ function startEmulator() {
     if (tick >= 6) flags |= 0x20; // sd_ok
 
     // ═══════════════════════════════════════════════════════════
-    // 1. CANSAT BINARY INGESTION (37 bytes, little-endian)
+    // 1. CANSAT BINARY INGESTION (v2 fixed frame, little-endian)
     // ═══════════════════════════════════════════════════════════
-    const buf = Buffer.alloc(37);
-    buf.writeUInt16LE(tick, 0); // pkt_id
-    buf.writeUInt32LE(tick * 1000, 2); // timestamp_ms
-    buf.writeFloatLE(alt, 6); // altitude_m
-    buf.writeFloatLE(20.0 - (alt * 0.0065) + (Math.random()*0.6-0.3), 10); // temp_c
-    buf.writeFloatLE(1013.25 * Math.pow(1 - 2.25577e-5 * alt, 5.25588), 14); // pressure_hpa
-    buf.writeFloatLE(accel, 18); // accel_z
-    buf.writeFloatLE(Math.random() * 2 - 1, 22); // gyro_x
-    buf.writeFloatLE(lat, 26); // lat
-    buf.writeFloatLE(lon, 30); // lon
-    buf.writeInt8(-60 - Math.floor(alt / 20), 34); // rssi_dbm
-    buf.writeUInt8(flags, 35); // flags
+    const buf = Buffer.alloc(PACKET_LENGTH_BYTES);
+    buf.writeUInt16LE(PACKET_SYNC, 0);
+    buf.writeUInt8(PACKET_VERSION, 2);
+    buf.writeUInt8(CANSAT_SOURCE_ID, 3);
+    buf.writeUInt8(PACKET_PAYLOAD_LENGTH_BYTES, 4);
+    buf.writeUInt16LE(tick, 5); // pkt_id
+    buf.writeUInt32LE(tick * 1000, 7); // timestamp_ms
+    buf.writeFloatLE(alt, 11); // altitude_m
+    buf.writeFloatLE(20.0 - (alt * 0.0065) + (Math.random()*0.6-0.3), 15); // temp_c
+    buf.writeFloatLE(1013.25 * Math.pow(1 - 2.25577e-5 * alt, 5.25588), 19); // pressure_hpa
+    buf.writeFloatLE(accel, 23); // accel_z
+    buf.writeFloatLE(Math.random() * 2 - 1, 27); // gyro_x
+    buf.writeFloatLE(lat, 31); // lat
+    buf.writeFloatLE(lon, 35); // lon
+    buf.writeInt8(-60 - Math.floor(alt / 20), 39); // rssi_dbm
+    buf.writeUInt8(flags, 40); // flags
 
-    // Calculate strict XOR checksum (bytes 0-35)
-    let xor = 0;
-    for (let i = 0; i < 36; i++) {
-      xor ^= buf[i];
-    }
+    let crc = crc16Ccitt(buf, PACKET_LENGTH_BYTES - 2);
     
     // Simulate 5% CANSAT Packet Corruption (Intentionally break the checksum)
     if (Math.random() < 0.05) {
        console.log(`[HITL EMULATOR] ⚠️ Simulating CANSAT RF corruption on pkt ${tick}`);
-       xor ^= 0xFF; // Flips bits so the backend parser rejects it
+       crc ^= 0xffff; // Flips bits so the backend parser rejects it
     }
-    buf.writeUInt8(xor, 36);
+    buf.writeUInt16LE(crc, PACKET_LENGTH_BYTES - 2);
 
     // Push the raw byte array directly into the virtual serial port
     if (global.mockCansat && global.mockCansat.isOpen && global.mockCansat.port) {

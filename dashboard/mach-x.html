@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>MACH-X — MISSION CONTROL</title>
   <meta name="description" content="MACH-26 UKSEDS NRC 2025-26 real-time rocket telemetry ground station">
+  <!-- Site-wide transparent logo favicon. -->
+  <link rel="icon" type="image/png" href="../images/logo_w_tp.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -862,12 +864,15 @@
           let right = -padObj.axes[3] * 100;
           if(Math.abs(left) < 10) left = 0; if(Math.abs(right) < 10) right = 0;
           const now = Date.now();
-          if(now - lastControlTime > 100 && (Math.abs(left)>0 || Math.abs(right)>0)) {
+          if(now - lastControlTime > 100) {
             fetch(apiUrl('/api/rover/control'), { method: 'POST', headers: roverHeaders(), body: JSON.stringify({ left, right }) }).catch(()=>{});
             lastControlTime = now;
           }
         } else {
-          if(gamepadIndex !== null) { gamepadIndex = null; statusEl.textContent = 'PAD: DISCONNECTED'; statusEl.className = ''; }
+          if(gamepadIndex !== null) {
+            fetch(apiUrl('/api/rover/stop'), { method: 'POST', headers: roverHeaders() }).catch(()=>{});
+            gamepadIndex = null; statusEl.textContent = 'PAD: DISCONNECTED'; statusEl.className = '';
+          }
         }
         requestAnimationFrame(pollGamepad);
       }

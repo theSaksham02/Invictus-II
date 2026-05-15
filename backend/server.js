@@ -260,6 +260,10 @@ function startEmulatorOnce() {
 }
 
 async function enableSimFallback(reason) {
+  if (process.env.ENABLE_SIM_FALLBACK !== 'true') {
+    log('error', 'Hardware serial unavailable; simulator fallback disabled', { reason });
+    return;
+  }
   if (simStarted || isSimMode) return;
   log('warn', 'Hardware serial unavailable, falling back to emulator', { reason });
   isSimMode = true;
@@ -444,6 +448,11 @@ app.post('/api/rover/control', requireRoverControlAuth, asyncRoute(async (req, r
 
 app.post('/api/rover/stop', requireRoverControlAuth, asyncRoute(async (req, res) => {
   const data = await rover.stop();
+  res.json({ ok: true, data });
+}));
+
+app.post('/api/rover/arm', requireRoverControlAuth, asyncRoute(async (req, res) => {
+  const data = await rover.arm();
   res.json({ ok: true, data });
 }));
 

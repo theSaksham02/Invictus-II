@@ -74,6 +74,7 @@ function createRoverClient(options = {}) {
   return {
     control: (left, right) => proxyRequest('/control', 'POST', { left, right }),
     stop: () => proxyRequest('/stop', 'POST'),
+    arm: () => proxyRequest('/arm', 'POST'),
     data: () => proxyRequest('/data', 'GET')
   };
 }
