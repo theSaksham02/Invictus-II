@@ -70,6 +70,7 @@ const upload = multer({
 app.use(cors(corsOptions));
 app.use(express.json({ limit: '1mb' }));
 app.use('/vendor', express.static(path.resolve(__dirname, 'node_modules/three/build')));
+app.use('/images', express.static(path.resolve(__dirname, '../images')));
 
 let uptimeStart = Date.now();
 let isSimMode = process.env.SIM_MODE === 'true';
