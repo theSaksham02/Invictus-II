@@ -263,7 +263,10 @@ Invictus-II/
 │   └── .env.example
 │
 ├── 📁 dashboard/          ← ✅ Operational
-│   └── ground-station.html
+│   ├── index.html
+│   ├── nrc.html
+│   ├── ort.html
+│   └── mach-x.html
 │
 ├── 📁 firmware/           ← ✅ Operational
 │   ├── cansat/            ← STM32duino (PlatformIO)
@@ -279,7 +282,7 @@ Invictus-II/
 
 ### TODO
 
-- ✅ Push `dashboard/ground-station.html`
+- ✅ Push competition-specific dashboards
 - ✅ Push `firmware/` — STM32, Heltec, Rover code
 - ✅ Add `.gitignore` — protect `flight.db`, `.env`, `uploads/`, `node_modules/`
 - ✅ Hardware-verify `SMN-001` rail exit velocity flag

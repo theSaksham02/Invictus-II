@@ -1959,11 +1959,10 @@ backend/server.js (Socket.io)
   → broadcasts 'packet' event to all browser clients
       │
       ▼
-dashboard/ground-station.html
-  → Chart.js: live altitude/temperature/pressure graphs
-  → Leaflet.js: GPS track on map
-  → 3D attitude indicator: accel/gyro data
-  → Console: raw packet log
+dashboard/nrc.html + dashboard/mach-x.html
+  → live telemetry graphs
+  → GPS and attitude views where available
+  → source-specific packet views
 ```
 
 ### CANSAT Binary Packet (37 bytes, little-endian)

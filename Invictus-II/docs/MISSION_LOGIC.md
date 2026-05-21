@@ -119,10 +119,10 @@ Invictus-II/
 │   ├── db.js               ← SQLite — all sources
 │   └── emulator.js         ← Dev simulation (all sources)
 ├── dashboard/
-│   └── ground-station.html ← UOBRPL Avionics UI
-│       ├── Avionics tab    ← INVICTUS II + MATCHA
-│       ├── CanSat tab      ← SUGAR
-│       └── Rover tab       ← NOVARIUM II
+│   ├── index.html          ← HELIOS dashboard selector
+│   ├── nrc.html            ← NRC telemetry UI
+│   ├── ort.html            ← NOVARIUM II rover UI
+│   └── mach-x.html         ← Mach-X CanSat UI
 └── Invictus-II/
     └── docs/
         ├── MISSION_LOGIC.md    ← this file

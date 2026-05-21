@@ -134,9 +134,12 @@
     .metric-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; }
     .metric-label { font-family: var(--sans); font-size: 0.6rem; font-weight: 600; letter-spacing: 0.1em; color: var(--text-3); }
     .metric-unit { font-family: var(--mono); font-size: 0.6rem; color: var(--text-3); }
-    .metric-value { font-family: var(--mono); font-weight: 500; font-size: 1.8rem; line-height: 1; color: var(--text-1); font-variant-numeric: tabular-nums; text-align: right; }
+    .metric-value { font-family: var(--mono); font-weight: 500; font-size: 1.8rem; line-height: 1; color: var(--text-1); font-variant-numeric: tabular-nums; text-align: right; transition: color 0.16s ease; }
     
     #metric-alt .metric-value { font-size: 2.2rem; color: var(--text-1); }
+    #metric-alt #val-apogee { color: var(--text-2); }
+    .metric-value.trend-up, #metric-alt .metric-value.trend-up, #metric-alt #val-apogee.trend-up { color: var(--nominal); }
+    .metric-value.trend-down, #metric-alt .metric-value.trend-down, #metric-alt #val-apogee.trend-down { color: var(--critical); }
     #metric-alt .metric-label { color: var(--spx-blue-light); }
     .stability-badge { display: inline-block; font-family: var(--sans); font-size: 0.7rem; font-weight: 600; letter-spacing: 0.1em; color: var(--text-1); text-align: right; }
 
@@ -271,7 +274,7 @@
           <div class="metric-header"><span class="metric-label">ALTITUDE</span><span class="metric-unit">M</span></div>
           <div class="metric-value" id="val-alt">0000.0</div>
           <div class="metric-header" style="margin-top: 12px; margin-bottom: 0;"><span class="metric-label">APOGEE</span><span class="metric-unit">M</span></div>
-          <div class="metric-value" id="val-apogee" style="font-size: 1.2rem; color: var(--text-2);">0000.0</div>
+          <div class="metric-value" id="val-apogee" style="font-size: 1.2rem;">0000.0</div>
         </div>
         <div class="metric-card panel">
           <div class="metric-header"><span class="metric-label">VELOCITY</span><span class="metric-unit">M/S</span></div>
@@ -483,8 +486,24 @@
       };
       
       const historyDB = { CANSAT: [], NRC: [] };
+      const metricTrendValues = {};
       let isScrubbing = false;
       let scrubIndex = 0;
+
+      function updateMetricValue(id, value, text) {
+        const el = $(id);
+        if (!el) return;
+        const numericValue = Number(value);
+        const trendKey = `${source}:${id}`;
+        const previousValue = metricTrendValues[trendKey];
+        el.textContent = text;
+        el.classList.remove('trend-up', 'trend-down');
+        if (Number.isFinite(numericValue) && Number.isFinite(previousValue)) {
+          if (numericValue > previousValue) el.classList.add('trend-up');
+          if (numericValue < previousValue) el.classList.add('trend-down');
+        }
+        if (Number.isFinite(numericValue)) metricTrendValues[trendKey] = numericValue;
+      }
 
       // UPLOT
       let upAlt, upTemp, upPress, upVvel, upAccel, upRssi;
@@ -760,17 +779,17 @@
       function updateUIState(pkt) {
         if(!pkt) return;
         const src = pkt.source || source;
-        $('val-alt').textContent = pad(pkt.altitude_m, 4);
+        updateMetricValue('val-alt', pkt.altitude_m, pad(pkt.altitude_m, 4));
         if($('cam-alt')) $('cam-alt').textContent = parseFloat(pkt.altitude_m).toFixed(1) + 'M';
         if (pkt.altitude_m > maxAlt[src]) maxAlt[src] = pkt.altitude_m;
-        $('val-apogee').textContent = pad(maxAlt[src], 4);
+        updateMetricValue('val-apogee', maxAlt[src], pad(maxAlt[src], 4));
         $('stat-max-alt').textContent = pad(maxAlt[src], 4);
         $('alt-bar-fill').style.height = `${Math.min(100, (pkt.altitude_m / Math.max(maxAlt[src], 10)) * 100)}%`;
 
-        $('val-temp').textContent = pad(pkt.temp_c, 2);
-        $('val-press').textContent = pad(pkt.pressure_hpa, 4);
+        updateMetricValue('val-temp', pkt.temp_c, pad(pkt.temp_c, 2));
+        updateMetricValue('val-press', pkt.pressure_hpa, pad(pkt.pressure_hpa, 4));
         const accel = (pkt.accel_z - 1.0) * 9.81;
-        $('val-accel').textContent = pad(accel, 2);
+        updateMetricValue('val-accel', accel, pad(accel, 2));
         if($('cur-accel')) $('cur-accel').textContent = pad(accel, 2);
         $('hud-gforce').textContent = parseFloat(pkt.accel_z || 1).toFixed(2) + ' G';
         $('val-rssi').textContent = (pkt.rssi_dbm || '-00') + ' DBM';
@@ -795,7 +814,7 @@
         if (idx > 0) {
            const dt = (pkt.timestamp_ms - arr[idx-1].timestamp_ms)/1000;
            const vvel = dt > 0 ? (pkt.altitude_m - arr[idx-1].altitude_m)/dt : 0;
-           $('val-vvel').textContent = pad(vvel, 2);
+           updateMetricValue('val-vvel', vvel, pad(vvel, 2));
            $('cur-vvel').textContent = pad(vvel, 2);
         }
 
