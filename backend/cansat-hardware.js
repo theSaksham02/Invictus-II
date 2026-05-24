@@ -21,6 +21,35 @@ const CIRCUIT = Object.freeze({
   legacy_packet_bytes: LEGACY_PACKET_LENGTH_BYTES,
   packet_sync: `0x${PACKET_SYNC.toString(16).toUpperCase()}`,
   packet_version: PACKET_VERSION,
+
+  // Ground Station Receiver — ESP32 WROOM-32 + RFM69HCW 433 MHz
+  // The ESP32 bridges the RFM69 radio to the laptop via USB Serial (115200 baud).
+  // It is NOT a bare USB dongle — it is a dedicated microcontroller that:
+  //   1. Receives 43-byte binary packets over SPI from the RFM69HCW
+  //   2. Validates the 0xA55A sync word before forwarding
+  //   3. Stamps ground-side RSSI into byte 39 of the frame
+  //   4. Forwards the raw frame over USB CDC to the laptop (serial.js reads it)
+  ground_station_receiver: {
+    mcu: 'ESP32 WROOM-32',
+    radio: 'RFM69HCW 433 MHz',
+    interface: 'USB Serial (CP2102/CH340) @ 115200 baud',
+    firmware: 'firmware/ground-station/src/main.cpp',
+    pins: {
+      rfm69_mosi: 'GPIO23',
+      rfm69_miso: 'GPIO19',
+      rfm69_sck:  'GPIO18',
+      rfm69_cs:   'GPIO5',
+      rfm69_irq:  'GPIO4',
+      rfm69_rst:  'GPIO14'
+    },
+    competitive_advantage: [
+      'Hardware SPI at 10 MHz — zero missed packets at 1 Hz rate',
+      'Frame-level RSSI stamping before USB forward',
+      'Can buffer frames across USB stalls',
+      'Future WiFi fallback if USB cable disconnects mid-flight'
+    ]
+  },
+
   buses: {
     sd_spi: {
       pins: { cs: 'PA4', clk: 'PA5', miso: 'PA6', mosi: 'PA7' },
