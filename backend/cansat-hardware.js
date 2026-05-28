@@ -11,7 +11,8 @@ const FLAG_BITS = Object.freeze({
   gps_fix: 0x04,
   bmp_ok: 0x08,
   mpu_ok: 0x10,
-  sd_ok: 0x20
+  sd_ok: 0x20,
+  stale_sensor: 0x40
 });
 
 const CIRCUIT = Object.freeze({
