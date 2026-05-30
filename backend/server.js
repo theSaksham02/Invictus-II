@@ -53,6 +53,7 @@ const SD_UPLOAD_MAX_ROWS = Math.max(
 );
 const TELEMETRY_SOURCES = new Set(['CANSAT', 'NRC', 'SD_CARD']);
 const EXPORT_SOURCES = new Set(['CANSAT', 'NRC', 'SD_CARD', 'ALL']);
+const LAUNCH_SOURCES = new Set(['CANSAT', 'NRC', 'ALL']);
 
 const upload = multer({
   dest: 'uploads/',
@@ -359,6 +360,21 @@ app.post('/api/sim-mode', asyncRoute(async (req, res) => {
     sim_mode: isSimMode,
     signal: serial.getSignalState()
   });
+}));
+
+app.post('/api/launch', asyncRoute(async (req, res) => {
+  const source = parseSource(req.body?.source, LAUNCH_SOURCES, 'ALL');
+  const command = await serial.sendLaunchCommand(source);
+  const payload = {
+    ok: command.ok,
+    partial: command.partial,
+    source,
+    results: command.results,
+    issued_at: Date.now()
+  };
+
+  emitToAll('launch_command', payload);
+  res.status(command.ok ? 200 : 503).json(payload);
 }));
 
 app.get('/api/cansat/hardware', (req, res) => {

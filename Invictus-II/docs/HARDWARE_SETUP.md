@@ -81,7 +81,7 @@ There are **three independent hardware systems** in this project. Each is physic
 │                         │                          │                        │
 │  STM32 Bluepill         │  Heltec LoRa v3          │  Raspberry Pi 4B       │
 │  ┌──────────────────┐   │  ┌───────────────────┐   │  ┌──────────────────┐  │
-│  │ BMP388  (alt/prs)│   │  │ BMP388 (alt/prs)  │   │  │ BTS7960 × 2      │  │
+│  │ BMP388  (alt/prs)│   │  │ BMP280 (alt/prs)  │   │  │ BTS7960 × 2      │  │
 │  │ MPU-6500 (IMU)   │   │  │ NEO-6M  (GPS)     │   │  │ 6 DC Motors      │  │
 │  │ LM75    (temp)   │   │  │ LM75    (temp)    │   │  │ Camera Module 3  │  │
 │  │ NEO-6M  (GPS)    │   │  │ ESP32-CAM         │   │  │ LM2596 (5V PSU)  │  │
@@ -90,7 +90,7 @@ There are **three independent hardware systems** in this project. Each is physic
 │  │ SD Card          │   │  └───────────────────┘   │  WiFi → Ground Station │
 │  │ AMS1117 (3.3V)   │   │                          │                        │
 │  │ XL6009 (boost)   │   │  868 MHz LoRa            │                        │
-│  │ TP4056 (charger) │   │  "NRC:..." ASCII CSV      │                        │
+│  │ TP4056 (charger) │   │  "NRC2:..." ASCII CSV     │                        │
 │  └──────────────────┘   └──────────────────────────┘                        │
 │                                                                              │
 │  433 MHz RFM69           ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓                                 │
@@ -561,7 +561,7 @@ def video_feed():
 | 1 | Heltec WiFi LoRa 32 v3 | 1 | Main MCU + LoRa 868 MHz transmitter, OLED display |
 | 2 | ESP32-CAM (AI-Thinker) | 1 | In-flight imaging over WiFi |
 | 3 | NEO-6M GPS Module | 1 | Position and altitude from GPS |
-| 4 | BMP388 | 1 | Barometric altitude and temperature |
+| 4 | BMP280 | 1 | Barometric altitude and temperature |
 | 5 | LM75 | 1 | Ambient temperature monitoring |
 | 6 | TP4056 | 1 | LiPo battery charger |
 | 7 | XL6009 | 1 | Boost converter (3.7V LiPo → 5V for ESP32-CAM/GPS) |
@@ -574,15 +574,15 @@ def video_feed():
 The "brain" of the NRC satellite. It is an all-in-one board featuring an **ESP32-S3** MCU, a **Semtech SX1262** LoRa radio chip (868 MHz), a built-in **0.96" OLED display** (128×64, SSD1306), a LiPo battery connector with charging circuit, and a `Vext` rail for powering external sensors. Programming is done via the built-in USB-C port.
 
 #### What Data It Produces
-Transmits formatted ASCII CSV packets prefixed with `NRC:` over 868 MHz LoRa. Also displays live flight data on its OLED screen.
+Transmits formatted ASCII CSV packets prefixed with `NRC2:` over 868 MHz LoRa. Also displays live flight data on its OLED screen.
 
 #### Packet Format (NRC Telemetry)
 
 ```
-NRC:<pkt_id>,<timestamp_ms>,<altitude_m>,<temp_c>,<pressure_hpa>,<lat>,<lon>,<rssi_dbm>\n
+NRC2:<pkt_id>,<timestamp_ms>,<altitude_m>,<temp_c>,<pressure_hpa>,<lat>,<lon>,<rssi_dbm>,<flags>,<crc16_hex>\n
 
 Example:
-NRC:0042,173452,612.3,18.5,940.21,51.501476,-0.140634,-87
+NRC2:42,173452,612.30,18.50,940.21,51.501476,-0.140634,-87,44,7B3F
 ```
 
 #### Internal GPIO Assignments (Already Wired On-Board — Do Not Change)
@@ -608,11 +608,11 @@ NRC:0042,173452,612.3,18.5,940.21,51.501476,-0.140634,-87
 
 | Function | GPIO | Physical Header | Connect To |
 |----------|------|-----------------|------------|
-| I2C SDA (sensors) | 42 | — | BMP388 SDA, LM75 SDA |
-| I2C SCL (sensors) | 41 | — | BMP388 SCL, LM75 SCL |
-| GPS UART RX | 38 | — | NEO-6M TxD |
-| GPS UART TX | 39 | — | NEO-6M RxD |
-| Vext (3.3V out) | — | Vext pin | Powers BMP388, LM75 |
+| I2C SDA (sensors) | 1 | — | BMP280 SDA, LM75 SDA |
+| I2C SCL (sensors) | 2 | — | BMP280 SCL, LM75 SCL |
+| GPS UART RX | 7 | — | NEO-6M TxD |
+| GPS UART TX | 6 | — | NEO-6M RxD |
+| Vext (3.3V out) | — | Vext pin | Powers BMP280, LM75 |
 
 > 💡 Use `GPIO36` (Vext control) to switch sensors on/off. Set it LOW to enable the 3.3V Vext rail (FET is inverted). Set HIGH to cut power and save battery.
 
@@ -645,7 +645,7 @@ Board Name (exact):
 Required Libraries (install from Library Manager):
   - "Heltec ESP32 Dev-Boards" by ropg (search: heltec_esp32)
   - RadioLib (auto-installed as dependency)
-  - Adafruit BMP3XX Library
+  - Adafruit BMP280 Library
   - TinyGPSPlus
   - Wire (built-in)
 ```
@@ -656,13 +656,13 @@ Required Libraries (install from Library Manager):
 // firmware/nrc/nrc_main.ino
 #define HELTEC_POWER_BUTTON
 #include <heltec_unofficial.h>
-#include <Adafruit_BMP3XX.h>
+#include <Adafruit_BMP280.h>
 #include <TinyGPSPlus.h>
 #include <HardwareSerial.h>
 #include <Wire.h>
 
 // ── Sensor objects
-Adafruit_BMP3XX bmp;
+Adafruit_BMP280 bmp;
 TinyGPSPlus     gps;
 HardwareSerial  gpsSerial(1);   // UART1
 
@@ -683,21 +683,24 @@ void setup() {
   digitalWrite(Vext, LOW);      // LOW = Vext ON
   delay(100);
 
-  // Init I2C for sensors (SDA=42, SCL=41 on v3)
-  Wire.begin(42, 41);
+  // Init external I2C for BMP280/LM75
+  Wire.begin(1, 2);
 
-  // Init BMP388
-  if (!bmp.begin_I2C(0x77, &Wire)) {
-    display.println("BMP388 FAIL");
+  // Init BMP280
+  if (!bmp.begin(0x76)) {
+    display.println("BMP280 FAIL");
   } else {
-    bmp.setPressureOversampling(BMP3_OVERSAMPLING_8X);
-    bmp.setTemperatureOversampling(BMP3_OVERSAMPLING_2X);
-    bmp.setIIRFilterCoeff(BMP3_IIR_FILTER_COEFF_3);
-    bmp.setOutputDataRate(BMP3_ODR_12_5_HZ);
+    bmp.setSampling(
+      Adafruit_BMP280::MODE_NORMAL,
+      Adafruit_BMP280::SAMPLING_X2,
+      Adafruit_BMP280::SAMPLING_X16,
+      Adafruit_BMP280::FILTER_X16,
+      Adafruit_BMP280::STANDBY_MS_125
+    );
   }
 
-  // Init GPS UART (RX=38, TX=39, baud=9600)
-  gpsSerial.begin(9600, SERIAL_8N1, 38, 39);
+  // Init GPS UART (ESP RX=GPIO7, ESP TX=GPIO6, baud=9600)
+  gpsSerial.begin(9600, SERIAL_8N1, 7, 6);
 
   // Init LoRa radio
   RADIOLIB_OR_HALT(radio.begin());
@@ -717,22 +720,28 @@ void loop() {
   // Feed GPS
   while (gpsSerial.available()) gps.encode(gpsSerial.read());
 
-  // Read BMP388
-  bmp.performReading();
+  // Read BMP280
   float alt_m      = bmp.readAltitude(1013.25);
-  float temp_c     = bmp.temperature;
-  float press_hpa  = bmp.pressure / 100.0F;
+  float temp_c     = bmp.readTemperature();
+  float press_hpa  = bmp.readPressure() / 100.0F;
 
-  // Build NRC ASCII packet
-  String pkt = "NRC:";
-  pkt += pktId++;           pkt += ",";
-  pkt += millis();          pkt += ",";
-  pkt += String(alt_m, 1);  pkt += ",";
-  pkt += String(temp_c, 2); pkt += ",";
-  pkt += String(press_hpa, 2); pkt += ",";
-  pkt += String(gps.location.lat(), 6); pkt += ",";
-  pkt += String(gps.location.lng(), 6); pkt += ",";
-  pkt += String((int)radio.getRSSI());
+  // Build NRC2 ASCII packet. Production firmware computes CRC16-CCITT;
+  // see firmware/nrc/src/main.cpp for the exact packet builder.
+  uint8_t flags = 0;
+  String body = "";
+  body += pktId++;           body += ",";
+  body += millis();          body += ",";
+  body += String(alt_m, 1);  body += ",";
+  body += String(temp_c, 2); body += ",";
+  body += String(press_hpa, 2); body += ",";
+  body += String(gps.location.lat(), 6); body += ",";
+  body += String(gps.location.lng(), 6); body += ",";
+  body += String((int)radio.getRSSI()); body += ",";
+  body += String(flags);
+
+  String pkt = "NRC2:";
+  pkt += body;
+  pkt += ",0000";  // skeleton placeholder only; real firmware appends CRC16
 
   // Transmit over LoRa
   radio.transmit(pkt);
@@ -841,8 +850,8 @@ NEO-6M             Heltec LoRa v3
 ──────             ──────────────
 VCC  ────────────► Vext (3.3V output, enabled via GPIO36)
 GND  ────────────► GND
-TxD  ────────────► GPIO38 (UART1 RX on Heltec)
-RxD  ────────────► GPIO39 (UART1 TX on Heltec) [optional — for config only]
+TxD  ────────────► GPIO7 (UART1 RX on Heltec)
+RxD  ────────────► GPIO6 (UART1 TX on Heltec) [optional — for config only]
 ```
 
 > 💡 The NEO-6M module has an onboard 3.3V LDO regulator, so it can accept 5V or 3.3V on VCC. UART pins are also 5V-tolerant. Connect it to the Vext 3.3V rail to keep it powered by the Heltec's battery management system.
@@ -1222,22 +1231,22 @@ XL6009 OUT− ────► ESP32-CAM GND, NEO-6M GND
   │  │  LiPo (+) ──► BAT+ connector (onboard charger)  │        │
   │  │  LiPo (−) ──► GND                               │        │
   │  │                                                  │        │
-  │  │  GPIO36 (Vext FET) → Vext pin ──► BMP388 VIN   │        │
+  │  │  GPIO36 (Vext FET) → Vext pin ──► BMP280 VIN   │        │
   │  │                                  LM75 VCC       │        │
-  │  │  GPIO42 (SDA) ──────────────────► BMP388 SDA   │        │
+  │  │  GPIO1  (SDA) ──────────────────► BMP280 SDA   │        │
   │  │                                  LM75 SDA       │        │
-  │  │  GPIO41 (SCL) ──────────────────► BMP388 SCL   │        │
+  │  │  GPIO2  (SCL) ──────────────────► BMP280 SCL   │        │
   │  │                                  LM75 SCL       │        │
-  │  │  GPIO38 (UART1 RX) ─────────────► NEO-6M TxD   │        │
-  │  │  GPIO39 (UART1 TX) ─────────────► NEO-6M RxD   │        │
+  │  │  GPIO7  (UART1 RX) ─────────────► NEO-6M TxD   │        │
+  │  │  GPIO6  (UART1 TX) ─────────────► NEO-6M RxD   │        │
   │  │                                                  │        │
   │  │  Onboard SX1262 ─► IPEX antenna (868 MHz)       │        │
   │  │  Onboard OLED   ─► (displays telemetry values)  │        │
   │  └──────────────────────────────────────────────────┘        │
   │                                                              │
-  │  BMP388:  VIN─Vext  GND─GND  SDA─GPIO42  SCL─GPIO41         │
-  │  LM75:    VCC─Vext  GND─GND  SDA─GPIO42  SCL─GPIO41         │
-  │  NEO-6M:  VCC─5V    GND─GND  TxD─GPIO38                     │
+  │  BMP280:  VIN─Vext  GND─GND  SDA─GPIO1   SCL─GPIO2          │
+  │  LM75:    VCC─Vext  GND─GND  SDA─GPIO1   SCL─GPIO2          │
+  │  NEO-6M:  VCC─5V    GND─GND  TxD─GPIO7   RxD─GPIO6          │
   │  ESP32-CAM: 5V─5V   GND─GND  (WiFi image upload)            │
   │                                                              │
   │  Pull-up resistors: 4.7kΩ from SDA→Vext and SCL→Vext       │
@@ -1996,10 +2005,10 @@ uint8_t calcChecksum(uint8_t* buf, int len) {
 ### NRC ASCII Packet
 
 ```
-Format: NRC:<id>,<ts_ms>,<alt_m>,<temp_c>,<press_hpa>,<lat>,<lon>,<rssi>\n
+Format: NRC2:<id>,<ts_ms>,<alt_m>,<temp_c>,<press_hpa>,<lat>,<lon>,<rssi>,<flags>,<crc16_hex>\n
 
 Example:
-NRC:0042,173452,612.3,18.50,940.21,51.501476,-0.140634,-87
+NRC2:42,173452,612.30,18.50,940.21,51.501476,-0.140634,-87,44,7B3F
 ```
 
 ---
@@ -2356,7 +2365,7 @@ npm start
 |:-----:|:-------------:|:------:|
 | Raspberry Pi 4B | Heltec LoRa v3 | STM32 Bluepill |
 | BTS7960 × 2 | SX1262 868 MHz | RFM69HCW 433 MHz |
-| Camera Module 3 | BMP388 · NEO-6M | BMP388 · MPU-6500 |
+| Camera Module 3 | BMP280 · NEO-6M | BMP388 · MPU-6500 |
 | LM2596 5V PSU | LM75 · ESP32-CAM | NEO-6M · LM75 |
 | 6 DC Motors | TP4056 · XL6009 | SD Card · AMS1117 |
 

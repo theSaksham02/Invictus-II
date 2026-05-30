@@ -138,7 +138,9 @@ function parseCansat(buffer) {
 }
 
 function parseNrcNumberList(body) {
-  return body.trim().split(',').map((value) => Number(value));
+  const fields = body.trim().split(',');
+  if (fields.some((value) => value.trim() === '')) return null;
+  return fields.map((value) => Number(value));
 }
 
 // NRC legacy: "NRC:<pkt_id>,<timestamp_ms>,<altitude_m>,<temp_c>,<pressure_hpa>,<lat>,<lon>,<rssi_dbm>\n"
@@ -155,15 +157,17 @@ function parseNrc(line) {
     const lastComma = body.lastIndexOf(',');
     if (lastComma < 0) return null;
     const bodyWithoutCrc = body.slice(0, lastComma);
-    const expectedCrc = Number.parseInt(body.slice(lastComma + 1), 16);
+    const crcField = body.slice(lastComma + 1).trim();
+    if (!/^[0-9a-fA-F]{4}$/.test(crcField)) return null;
+    const expectedCrc = Number.parseInt(crcField, 16);
     if (!Number.isInteger(expectedCrc)) return null;
     const actualCrc = crc16Ccitt(Buffer.from(bodyWithoutCrc, 'utf8'));
     if (expectedCrc !== actualCrc) return null;
     nums = parseNrcNumberList(bodyWithoutCrc);
-    if (nums.length !== 9) return null;
+    if (!nums || nums.length !== 9) return null;
   } else {
     nums = parseNrcNumberList(body);
-    if (nums.length !== 8) return null;
+    if (!nums || nums.length !== 8) return null;
   }
 
   try {

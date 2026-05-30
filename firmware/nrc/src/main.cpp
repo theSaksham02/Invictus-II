@@ -133,6 +133,33 @@ bool lora_ok = false;
 
 int16_t last_rssi = 0;   // Updated after each LoRa TX
 
+void handleUsbCommands() {
+    static char command[32];
+    static size_t index = 0;
+
+    while (Serial.available() > 0) {
+        char ch = static_cast<char>(Serial.read());
+        if (ch == '\r') continue;
+
+        if (ch == '\n') {
+            command[index] = '\0';
+            if (strcmp(command, "CMD:LAUNCH") == 0) {
+                launched = true;
+                launch_consecutive = LAUNCH_CONFIRM_COUNT;
+                Serial.println("ACK:LAUNCH,NRC");
+            }
+            index = 0;
+            continue;
+        }
+
+        if (index < sizeof(command) - 1) {
+            command[index++] = ch;
+        } else {
+            index = 0;
+        }
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 //  CRC16-CCITT — must match backend cansat-hardware.js crc16Ccitt()
 // ═══════════════════════════════════════════════════════════════════════════
@@ -290,6 +317,8 @@ void setup() {
 //  MAIN LOOP
 // ═══════════════════════════════════════════════════════════════════════════
 void loop() {
+    handleUsbCommands();
+
     // ── Continuously feed GPS parser ─────────────────────────────────
     while (SerialGPS.available() > 0) {
         gps.encode(SerialGPS.read());

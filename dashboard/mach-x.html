@@ -226,6 +226,19 @@
     #actions-bar { display: flex; gap: var(--gap); }
     .action-btn { flex: 1; font-family: var(--sans); font-size: 0.65rem; font-weight: 600; padding: 12px 0; background: transparent; border: 1px solid var(--text-3); color: var(--text-2); cursor: pointer; transition: all 0.2s; letter-spacing: 0.1em; border-radius: var(--r); }
     .action-btn:hover, .action-btn:active { background: var(--text-1); color: #000; border-color: var(--text-1); }
+    .action-btn.launch-btn { background: #e03131; border-color: #ff5a5a; color: #fff; }
+    .action-btn.launch-btn:hover, .action-btn.launch-btn:active { background: #ff3b3b; border-color: #ff7777; box-shadow: 0 0 18px rgba(255,59,59,0.38); }
+    .launch-confirm { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 24px; background: rgba(0,0,0,0.72); backdrop-filter: blur(5px); }
+    .launch-confirm[hidden] { display: none; }
+    .launch-confirm-dialog { width: min(360px, 100%); border: 1px solid var(--border-hi); border-radius: var(--r); background: var(--bg-panel); box-shadow: 0 24px 60px rgba(0,0,0,0.58); padding: 22px; }
+    .launch-confirm-title { font-family: var(--mono); font-size: 1rem; font-weight: 800; color: var(--text-1); letter-spacing: 0.14em; text-align: center; margin-bottom: 20px; }
+    .launch-confirm-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .launch-confirm-btn { min-height: 42px; border-radius: var(--r); border: 1px solid transparent; font-family: var(--sans); font-size: 0.72rem; font-weight: 800; letter-spacing: 0.12em; cursor: pointer; transition: transform 0.1s, box-shadow 0.2s, background 0.2s; }
+    .launch-confirm-btn:active { transform: translateY(1px); }
+    .launch-confirm-btn.abort { background: #c92a2a; border-color: #ff5a5a; color: #fff; }
+    .launch-confirm-btn.abort:hover { background: #f03e3e; box-shadow: 0 0 18px rgba(240,62,62,0.32); }
+    .launch-confirm-btn.proceed { background: #2f9e44; border-color: #69db7c; color: #fff; }
+    .launch-confirm-btn.proceed:hover { background: #37b24d; box-shadow: 0 0 18px rgba(55,178,77,0.32); }
     
     /* ═══════════════════════════════════════════════════════════
        FOOTER - TIMELINE SCRUBBER
@@ -234,8 +247,11 @@
     #scrubber { flex: 1; -webkit-appearance: none; height: 4px; background: var(--border-hi); border-radius: 2px; outline: none; }
     #scrubber::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; background: var(--text-1); border-radius: 50%; cursor: ew-resize; box-shadow: 0 0 10px rgba(255,255,255,0.5); }
     .scrub-time { font-family: var(--mono); font-size: 0.8rem; color: var(--spx-blue-light); font-weight: bold; font-variant-numeric: tabular-nums; width: 80px; text-align: right; }
-    #btn-live { background: var(--text-1); color: #000; font-family: var(--sans); font-size: 0.6rem; font-weight: 600; padding: 6px 16px; cursor: pointer; border-radius: var(--r); border: 1px solid var(--text-1); transition: 0.2s; letter-spacing: 0.1em;}
-    #btn-live.dim { background: transparent; color: var(--text-3); border-color: var(--border-hi); }
+    #btn-live { min-width: 108px; min-height: 34px; background: linear-gradient(180deg, var(--text-1), #cfd6dd); color: #000; font-family: var(--sans); font-size: 0.6rem; font-weight: 700; padding: 8px 16px; cursor: pointer; border-radius: var(--r); border: 1px solid #fff; transition: background 0.2s, border-color 0.2s, box-shadow 0.2s, transform 0.1s; letter-spacing: 0.1em; box-shadow: 0 1px 0 rgba(255,255,255,0.65) inset, 0 8px 18px rgba(0,0,0,0.35); }
+    #btn-live:hover { box-shadow: 0 1px 0 rgba(255,255,255,0.8) inset, 0 0 18px rgba(255,255,255,0.18), 0 8px 18px rgba(0,0,0,0.35); }
+    #btn-live:active { transform: translateY(1px); box-shadow: 0 1px 0 rgba(255,255,255,0.4) inset, 0 4px 12px rgba(0,0,0,0.3); }
+    #btn-live:focus-visible { outline: 2px solid var(--spx-blue-light); outline-offset: 2px; }
+    #btn-live.dim { background: transparent; color: var(--text-2); border-color: var(--border-hi); box-shadow: none; }
   </style>
 </head>
 
@@ -372,6 +388,7 @@
           <div id="events-list"></div>
         </div>
         <div id="actions-bar">
+          <button class="action-btn launch-btn" id="btn-launch" onclick="showLaunchConfirm()">LAUNCH</button>
           <button class="action-btn" id="btn-upload" onclick="uploadSD()">UPLOAD SD</button>
           <button class="action-btn" id="btn-export" onclick="exportCSV()">EXPORT CSV</button>
           <input type="file" id="file-sd" accept=".csv" hidden>
@@ -384,6 +401,16 @@
       <input type="range" id="scrubber" min="0" max="0" value="0">
       <button id="btn-live">SYNC LIVE</button>
     </footer>
+  </div>
+
+  <div class="launch-confirm" id="launch-confirm" role="dialog" aria-modal="true" aria-labelledby="launch-confirm-title" hidden>
+    <div class="launch-confirm-dialog">
+      <div class="launch-confirm-title" id="launch-confirm-title">CONFIRM LAUNCH</div>
+      <div class="launch-confirm-actions">
+        <button class="launch-confirm-btn abort" type="button" onclick="hideLaunchConfirm()">ABORT</button>
+        <button class="launch-confirm-btn proceed" type="button" onclick="startLaunchSequence()">PROCEED</button>
+      </div>
+    </div>
   </div>
 
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
@@ -478,6 +505,7 @@
       let pktCount = { CANSAT: 0, NRC: 0 };
       let firstReceivedAt = null;
       let currentPhase = { CANSAT: 'IDLE', NRC: 'IDLE' };
+      const flightPhases = new Set(['IDLE', 'LAUNCHED', 'ASCENDING', 'APOGEE', 'DESCENDING', 'LANDED']);
       const gyroHistory = [];
       let signalState = {
         mode: 'hardware',
@@ -865,6 +893,74 @@
          }
       });
 
+      window.showLaunchConfirm = () => {
+        const modal = $('launch-confirm');
+        if (!modal) return;
+        modal.hidden = false;
+        const proceed = modal.querySelector('.proceed');
+        if (proceed) proceed.focus();
+      };
+
+      window.hideLaunchConfirm = () => {
+        const modal = $('launch-confirm');
+        if (!modal) return;
+        modal.hidden = true;
+        const launch = $('btn-launch');
+        if (launch) launch.focus();
+      };
+
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && !$('launch-confirm')?.hidden) hideLaunchConfirm();
+      });
+
+      window.startLaunchSequence = async () => {
+        hideLaunchConfirm();
+        setModeBadge('SENDING LAUNCH COMMAND', 'var(--warning)');
+        const proceed = document.querySelector('.launch-confirm-btn.proceed');
+        if (proceed) proceed.disabled = true;
+
+        let payload = null;
+        try {
+          const res = await fetch(apiUrl('/api/launch'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ source })
+          });
+          payload = await res.json().catch(() => null);
+          if (!res.ok && !payload?.partial) {
+            const errorText = payload?.results?.map(r => `${r.source}: ${r.error || r.status}`).join(' | ') || `launch ${res.status}`;
+            throw new Error(errorText);
+          }
+        } catch (error) {
+          setModeBadge('LAUNCH COMMAND FAILED', 'var(--critical)');
+          addEvent({
+            source,
+            event_type: 'LAUNCH_FAILED',
+            altitude_m: 0,
+            timestamp_ms: 0,
+            received_at: Date.now()
+          });
+          if (proceed) proceed.disabled = false;
+          return;
+        }
+
+        const now = Date.now();
+        const latest = historyDB[source][historyDB[source].length - 1] || {};
+        firstReceivedAt = now;
+        $('mission-timer').textContent = '00:00:00';
+        updatePhase('LAUNCHED', source);
+        addEvent({
+          source,
+          event_type: 'LAUNCHED',
+          altitude_m: Number.isFinite(latest.altitude_m) ? latest.altitude_m : 0,
+          timestamp_ms: Number.isFinite(latest.timestamp_ms) ? latest.timestamp_ms : 0,
+          received_at: now
+        });
+        setModeBadge(payload?.partial ? 'LAUNCH PARTIAL' : 'LAUNCH COMMAND SENT', payload?.partial ? 'var(--warning)' : 'var(--text-1)');
+        $('btn-launch').textContent = 'LAUNCH';
+        if (proceed) proceed.disabled = false;
+      };
+
       // EVENTS
       function addEvent(evt) {
         const list = $('events-list');
@@ -881,6 +977,7 @@
       }
 
       function updatePhase(phase, src) {
+        if (!flightPhases.has(phase)) return;
         if(src) currentPhase[src] = phase;
         if(src && src !== source) return;
         const b = $('phase-badge');
@@ -966,7 +1063,7 @@
         s.on('connect', () => {
           setModeBadge('SYSTEM ONLINE', 'var(--text-1)');
           s.emit('subscribe_source', { source });
-          s.emit('request_history', { source, limit: 5000 });
+          s.emit('request_history', { source, limit: 1000 });
         });
         s.on('disconnect', () => setModeBadge('OFFLINE', 'var(--critical)'));
         s.on('history', data => {
@@ -974,7 +1071,7 @@
           let pkts = data.cansat || data.nrc ? (source === 'CANSAT' ? data.cansat : data.nrc) : data.packets;
           if (data.events && data.events.length) {
              $('events-list').innerHTML = ''; data.events.forEach(e => addEvent(e));
-             const srcEvts = data.events.filter(e => e.source === source);
+             const srcEvts = data.events.filter(e => e.source === source && flightPhases.has(e.event_type));
              if (srcEvts.length) updatePhase(srcEvts[srcEvts.length - 1].event_type, source);
           }
           if (pkts && pkts.length) {
@@ -989,6 +1086,12 @@
           processPacket(pkt);
         });
         s.on('mission_event', evt => { addEvent(evt); updatePhase(evt.event_type, evt.source); });
+        s.on('launch_command', payload => {
+          if (!payload) return;
+          const result = Array.isArray(payload.results) ? payload.results.find(r => r.source === source) : null;
+          if (result && !result.ok) setModeBadge(`LAUNCH ${result.status.toUpperCase()}`, 'var(--warning)');
+        });
+        s.on('server_error', payload => setModeBadge(payload?.message || 'SERVER ERROR', 'var(--critical)'));
       }
 
       if (typeof window.io === 'function') {

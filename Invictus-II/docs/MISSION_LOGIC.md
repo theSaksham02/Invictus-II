@@ -169,7 +169,7 @@ The FSM runs **one independent state machine per source**:
 | Source | Vehicle | Hardware | Packet Format | Accel | Flags |
 |---|---|---|---|---|---|
 | `CANSAT` | INVICTUS II | STM32 + RFM69HCW 868MHz | 37-byte binary | ✅ | ✅ |
-| `NRC` | INVICTUS II | Heltec LoRa v3 868MHz | ASCII CSV `NRC:...` | ❌ | ❌ |
+| `NRC` | INVICTUS II | Heltec LoRa v3 868MHz | ASCII CSV `NRC2:...` | ❌ | ✅ |
 | `MACHX` | MATCHA | TBD | TBD (likely 37-byte binary) | 🔜 | 🔜 |
 | `SUGAR` | SUGAR CanSat | TBD | TBD | 🔜 | 🔜 |
 
@@ -213,8 +213,8 @@ CANSAT / MACHX / SUGAR:
      when accel_z > 2.5g for 3 consecutive reads (SMN-001)
 
 NRC:
-  flags hardcoded to 0 → this transition NEVER fires
-  └─ NRC skips to ASCENDING via altitude delta
+  (pkt.flags & 0x01) !== 0
+  └─ Bit 0 set by Heltec firmware or USB CMD:LAUNCH bench command
 ```
 
 **Timing constraint:** Must occur within 120 s of `npm start` in live mode.
@@ -230,7 +230,7 @@ All sources:
   └─ At least 2 consecutive packets showing altitude gain
 ```
 
-**Edge case:** GPS jitter can stall this. Use BMP388 barometric altitude as primary.
+**Edge case:** GPS jitter can stall this. Use barometric altitude as primary (BMP280 for NRC, BMP388 for CANSAT).
 
 ---
 
@@ -242,7 +242,8 @@ CANSAT / MACHX / SUGAR:
   OR (max_alt - pkt.altitude_m) > 5 ← 5m drop fallback
 
 NRC:
-  (max_alt - pkt.altitude_m) > 5    ← altitude drop only
+  (pkt.flags & 0x02) !== 0          ← firmware flag (preferred)
+  OR (max_alt - pkt.altitude_m) > 5 ← 5m drop fallback
 ```
 
 **Risk:** 5m threshold may trigger prematurely on low-altitude test flights. Raise to 10m for tests below 100m.
@@ -269,7 +270,7 @@ All sources:
   └─ Altitude variance < 1m over last 10 seconds = stationary
 ```
 
-**Risk:** GPS noise can exceed 1m. Increase to 3.0m or use BMP388 altitude.
+**Risk:** GPS noise can exceed 1m. Increase to 3.0m or use barometric altitude.
 
 ---
 

@@ -8,6 +8,20 @@ function closePort(port) {
   });
 }
 
+function writePort(port, command) {
+  return new Promise((resolve, reject) => {
+    if (!port || !port.isOpen) {
+      reject(new Error('NRC serial port is not open'));
+      return;
+    }
+    port.write(command, (writeError) => {
+      if (writeError) return reject(writeError);
+      if (typeof port.drain !== 'function') return resolve();
+      port.drain((drainError) => drainError ? reject(drainError) : resolve());
+    });
+  });
+}
+
 function createNrcSerial({
   PortClass,
   portPath,
@@ -23,6 +37,16 @@ function createNrcSerial({
   shouldReconnect
 }) {
   let nrcPort = null;
+  let reconnectTimer = null;
+
+  const scheduleReconnect = () => {
+    if (!shouldReconnect() || reconnectTimer) return;
+    diagnostics.NRC.reconnects++;
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      connect();
+    }, reconnectDelayMs);
+  };
 
   const connect = () => {
     if (disabledPortPath === portPath) {
@@ -39,6 +63,8 @@ function createNrcSerial({
 
       const parser = nrcPort.pipe(new ReadlineParser({ delimiter: '\n' }));
       parser.on('data', (line) => {
+        const trimmed = typeof line === 'string' ? line.trim() : '';
+        if (!trimmed.startsWith('NRC:') && !trimmed.startsWith('NRC2:')) return;
         const parsed = parseNrc(line);
         if (parsed) {
           handlePacket(parsed);
@@ -53,6 +79,10 @@ function createNrcSerial({
         diagnostics.NRC.last_error = null;
         sourceState.NRC.connected = true;
         sourceState.NRC.port = portPath;
+        if (reconnectTimer) {
+          clearTimeout(reconnectTimer);
+          reconnectTimer = null;
+        }
       });
 
       nrcPort.on('error', (err) => {
@@ -60,28 +90,34 @@ function createNrcSerial({
         diagnostics.NRC.last_error = err.message;
         sourceState.NRC.connected = false;
         console.warn('[SERIAL] NRC Error:', err.message);
+        scheduleReconnect();
       });
 
       nrcPort.on('close', () => {
         diagnostics.NRC.open = false;
         sourceState.NRC.connected = false;
-        if (!shouldReconnect()) return;
-
-        diagnostics.NRC.reconnects++;
         console.warn('[SERIAL] NRC Closed, reconnecting...');
-        setTimeout(connect, reconnectDelayMs);
+        scheduleReconnect();
       });
     } catch (error) {
       diagnostics.NRC.serial_errors++;
       diagnostics.NRC.last_error = error.message;
       sourceState.NRC.connected = false;
       console.warn('[SERIAL] NRC Init Error:', error.message);
+      scheduleReconnect();
     }
   };
 
   return {
     connect,
-    close: () => closePort(nrcPort),
+    close: () => {
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+      return closePort(nrcPort);
+    },
+    sendLaunchCommand: () => writePort(nrcPort, 'CMD:LAUNCH\n'),
     getPort: () => nrcPort
   };
 }

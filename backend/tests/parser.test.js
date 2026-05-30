@@ -105,6 +105,18 @@ test('parseNrc rejects corrupted CRC v2 line', () => {
   assert.equal(parsed, null);
 });
 
+test('parseNrc rejects v2 CRC fields with trailing junk', () => {
+  const body = '7,7000,101.2,22.5,1006.1,25.10,55.19,-64,12';
+  const crc = crc16Ccitt(Buffer.from(body, 'utf8')).toString(16).toUpperCase().padStart(4, '0');
+  const parsed = parseNrc(`NRC2:${body},${crc}JUNK\n`);
+  assert.equal(parsed, null);
+});
+
+test('parseNrc rejects empty numeric fields', () => {
+  const parsed = parseNrc('NRC:7,7000,101.2,22.5,1006.1,,55.19,-64\n');
+  assert.equal(parsed, null);
+});
+
 test('parseNrc rejects malformed line', () => {
   const parsed = parseNrc('NRC:7,7000,broken\n');
   assert.equal(parsed, null);

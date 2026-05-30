@@ -80,7 +80,7 @@ Rover            →  Raspberry Pi 4B · Flask · BTS7960 · Camera Module 3
 │   │  RFM69HCW 433MHz │         │   LoRa 868 MHz          │     │
 │   └────────┬─────────┘         └──────────┬──────────────┘     │
 │            │ 43-byte binary v2             │  ASCII CSV         │
-│            │ XOR checksum                  │  "NRC:..." prefix  │
+│            │ CRC16-CCITT                   │  "NRC2:..." prefix │
 └────────────┼───────────────────────────────┼────────────────────┘
              │                               │
              ▼                               ▼
@@ -148,7 +148,7 @@ npm install
 
 # 2. Configure
 cp .env.example .env
-# → Set SERIAL_PORT=/dev/ttyUSB0 (Linux) or COM3 (Windows)
+# → Set SERIAL_PORT_CANSAT, SERIAL_PORT_NRC, and 115200 baud values for your OS
 
 # 3. Launch 🚀
 npm start
@@ -182,6 +182,7 @@ GET  /api/health          →  System status, uptime, signal state
 GET  /api/packets         →  ?source=CANSAT&limit=200&since=0
 GET  /api/stats           →  Max alt, min temp, packet counts per source
 GET  /api/export          →  ?source=CANSAT → downloads flight.csv
+POST /api/launch          →  { source: "NRC" | "CANSAT" | "ALL" }
 POST /api/upload-sd       →  Multipart: SD card CSV file
 POST /api/rover/control   →  { left: 100, right: -100 }
 POST /api/rover/stop      →  Emergency stop

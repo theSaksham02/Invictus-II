@@ -227,6 +227,33 @@ void transmitTelemetry() {
     rf69.waitPacketSent(100);
 }
 
+void handleUsbCommands() {
+    static char command[32];
+    static size_t index = 0;
+
+    while (Serial.available() > 0) {
+        char ch = static_cast<char>(Serial.read());
+        if (ch == '\r') continue;
+
+        if (ch == '\n') {
+            command[index] = '\0';
+            if (strcmp(command, "CMD:LAUNCH") == 0) {
+                setFlag(FLAG_LAUNCHED, true);
+                launchConsecutive = LAUNCH_CONFIRM_SAMPLES;
+                Serial.println("ACK:LAUNCH,CANSAT");
+            }
+            index = 0;
+            continue;
+        }
+
+        if (index < sizeof(command) - 1) {
+            command[index++] = ch;
+        } else {
+            index = 0;
+        }
+    }
+}
+
 void setup() {
     Serial.begin(115200);
     SerialGPS.begin(9600);
@@ -273,6 +300,7 @@ void setup() {
 
 void loop() {
     uint32_t now = millis();
+    handleUsbCommands();
     updateGps(now);
 
     if (now - lastTxMs >= TX_INTERVAL_MS) {
