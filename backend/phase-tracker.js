@@ -1,6 +1,7 @@
 // UOBRPL Avionics — Flight State Machine
-// Sources: CANSAT (INVICTUS II), NRC (INVICTUS II sat), MACHX (MATCHA), SUGAR (SUGAR CanSat)
-// ROVER (NOVARIUM II) is HTTP-controlled and does NOT use this FSM.
+// Competitions: MachX (CanSat in bigger rocket), NRC (standalone rocket), NRC Rover (later)
+// Sources: CANSAT (MachX — STM32 + RFM69HCW), NRC (NRC Rocket — ESP-WROOM-32 + Bluetooth)
+// ROVER (NRC Rover) is HTTP-controlled and does NOT use this FSM.
 
 const { insertEvent } = require('./db');
 
@@ -17,10 +18,10 @@ function makeState() {
 }
 
 const states = {
-  CANSAT: makeState(),  // INVICTUS II — STM32 + RFM69HCW 868MHz — 37-byte binary
-  NRC:    makeState(),  // INVICTUS II — Heltec LoRa v3 868MHz   — ASCII CSV
-  MACHX:  makeState(),  // MATCHA      — TBD                     — TBD (likely 37-byte binary)
-  SUGAR:  makeState(),  // SUGAR CanSat — TBD                    — TBD
+  CANSAT: makeState(),  // MachX competition — STM32 + RFM69HCW 433MHz — 43-byte binary v2
+  NRC:    makeState(),  // NRC competition  — ESP-WROOM-32 Bluetooth   — ASCII CSV NRC2:
+  MACHX:  makeState(),  // MATCHA           — TBD                      — TBD
+  SUGAR:  makeState(),  // SUGAR CanSat     — TBD                      — TBD
 };
 
 function processPacket(pkt, emitFn) {

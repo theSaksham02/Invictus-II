@@ -49,12 +49,18 @@
 
 > *"One packet. One second. Sensor to screen. Three hardware systems, one ground station, zero tolerance for failure."*
 
-**INVICTUS II** is the complete avionics and ground station stack for our UKSEDS NRC MACH-26 competition rocket. It handles everything from raw binary radio packets at 433MHz all the way to a live browser dashboard — in under one second.
+**INVICTUS II** is the complete avionics and ground station stack for three UKSEDS competitions:
+
+| Competition | Vehicle | Avionics |
+|---|---|---|
+| **MachX** | Bigger rocket + CanSat inside | STM32 Bluepill · RFM69HCW 433MHz |
+| **NRC** | Smaller standalone rocket | ESP-WROOM-32 · Bluetooth Serial |
+| **NRC Rover** | Rocket + Rover deployment (later) | RPi 4B · Flask · BTS7960 |
 
 ```
 Target Altitude  →  2,200 ft (670 m)
 Telemetry Rate   →  1 Hz (1 packet/second)
-Radio Links      →  433 MHz RFM69 (CANSAT) + 868 MHz LoRa (NRC Satellite)
+Radio Links      →  433 MHz RFM69 (MachX CanSat) + Bluetooth Serial (NRC Rocket)
 Ground Station   →  Node.js · SQLite · Socket.io · Chart.js
 Rover            →  Raspberry Pi 4B · Flask · BTS7960 · Camera Module 3
 ```
@@ -68,12 +74,12 @@ Rover            →  Raspberry Pi 4B · Flask · BTS7960 · Camera Module 3
 │                        🚀  IN FLIGHT                            │
 │                                                                 │
 │   ┌──────────────────┐         ┌─────────────────────────┐     │
-│   │  STM32 BLUEPILL  │         │   HELTEC LoRa v3        │     │
-│   │  BMP388 · MPU6500│         │   ESP32-S3              │     │
-│   │  NEO-6M · LM75   │         │   BMP388 · NEO-6M       │     │
-│   │  RFM69HCW 433MHz │         │   868 MHz LoRa          │     │
+│   │  STM32 BLUEPILL  │         │   ESP-WROOM-32          │     │
+│   │  (MachX CanSat)  │         │   (NRC Rocket)          │     │
+│   │  BMP388 · MPU6500│         │   BMP280 · NEO-6M       │     │
+│   │  RFM69HCW 433MHz │         │   Bluetooth Serial      │     │
 │   └────────┬─────────┘         └──────────┬──────────────┘     │
-│            │ 37-byte binary                │  ASCII CSV         │
+│            │ 43-byte binary v2             │  ASCII CSV         │
 │            │ XOR checksum                  │  "NRC:..." prefix  │
 └────────────┼───────────────────────────────┼────────────────────┘
              │                               │
@@ -114,9 +120,9 @@ Rover            →  Raspberry Pi 4B · Flask · BTS7960 · Camera Module 3
 
 | System | Brain | Radio | Sensors | Notes |
 |---|---|---|---|---|
-| 🚀 **CANSAT** | STM32 Bluepill | RFM69HCW 433MHz | BMP388, MPU-6500, NEO-6M, LM75 | 37-byte binary packet |
-| 🛰️ **NRC Satellite** | Heltec LoRa v3 (ESP32-S3) | LoRa 868MHz | BMP388, NEO-6M, LM75 | ASCII CSV `NRC:` prefix |
-| 🤖 **ORT Rover** | Raspberry Pi 4B | WiFi | BTS7960 x2, Camera M3 | Flask HTTP server |
+| 🚀 **MachX CanSat** | STM32 Bluepill | RFM69HCW 433MHz | BMP388, MPU-6500, NEO-6M, LM75 | 43-byte binary v2 packet |
+| 🛰️ **NRC Rocket** | ESP-WROOM-32 | Bluetooth Serial | BMP280, NEO-6M, LM75 | ASCII CSV `NRC2:` prefix |
+| 🤖 **NRC Rover** *(later)* | Raspberry Pi 4B | WiFi | BTS7960 x2, Camera M3 | Flask HTTP server |
 | ⚡ **Power** | TP4056 → XL6009 → AMS1117 | — | — | 45 min endurance |
 
 </div>
@@ -219,10 +225,10 @@ Offset  Size  Type     Field
 36      1     uint8    checksum  (XOR of bytes 0–35)
 ```
 
-### NRC Satellite — ASCII CSV
+### NRC Rocket — ASCII CSV
 
 ```
-NRC:<pkt_id>,<timestamp_ms>,<altitude_m>,<temp_c>,<pressure_hpa>,<lat>,<lon>,<rssi_dbm>\n
+NRC2:<pkt_id>,<timestamp_ms>,<altitude_m>,<temp_c>,<pressure_hpa>,<lat>,<lon>,<rssi_dbm>,<flags>,<crc16_hex>\n
 ```
 
 ---
@@ -270,7 +276,7 @@ Invictus-II/
 │
 ├── 📁 firmware/           ← ✅ Operational
 │   ├── cansat/            ← STM32duino (PlatformIO)
-│   ├── nrc/               ← ESP32 Heltec (LoRa)
+│   ├── nrc/               ← ESP-WROOM-32 (Bluetooth)
 │   └── rover/             ← RPi Flask Control
 │
 └── README.md
@@ -283,7 +289,7 @@ Invictus-II/
 ### TODO
 
 - ✅ Push competition-specific dashboards
-- ✅ Push `firmware/` — STM32, Heltec, Rover code
+- ✅ Push `firmware/` — STM32, ESP-WROOM-32, Rover code
 - ✅ Add `.gitignore` — protect `flight.db`, `.env`, `uploads/`, `node_modules/`
 - ✅ Hardware-verify `SMN-001` rail exit velocity flag
 
@@ -317,7 +323,7 @@ Invictus-II/
   ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
 ```
 
-**Node.js · STM32duino · Heltec ESP32 · Raspberry Pi · Chart.js · Socket.io**
+**Node.js · STM32duino · ESP-WROOM-32 · Raspberry Pi · Chart.js · Socket.io**
 
 ![Visitors](https://visitor-badge.laobi.icu/badge?page_id=theSaksham02.Invictus-II&style=for-the-badge)
 
