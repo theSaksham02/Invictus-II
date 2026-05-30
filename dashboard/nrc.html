@@ -270,8 +270,8 @@
     <main id="dashboard">
       <aside id="metrics-panel">
         <div class="preflight-grid panel" style="margin-bottom: var(--gap);">
-           <div class="pf-item"><span class="pf-label">BMP388</span><span id="pf-bmp" class="pf-val">FLT</span></div>
-           <div class="pf-item"><span class="pf-label">MPU6500</span><span id="pf-mpu" class="pf-val">FLT</span></div>
+           <div class="pf-item"><span class="pf-label">BMP280</span><span id="pf-bmp" class="pf-val">FLT</span></div>
+           <div class="pf-item"><span class="pf-label">LORA</span><span id="pf-lora" class="pf-val">FLT</span></div>
            <div class="pf-item"><span class="pf-label">SD_CARD</span><span id="pf-sd" class="pf-val">FLT</span></div>
            <div class="pf-item"><span class="pf-label">GPS_FIX</span><span id="pf-gps" class="pf-val">FLT</span></div>
         </div>
@@ -742,10 +742,10 @@
         const flags = pkt?.flags || 0;
         const active = isTelemetrySourceActive(pkt?.source || source);
         const up = (id, ok) => {
-           const el = $(id); el.textContent = ok ? 'OK' : 'FLT'; el.className = 'pf-val ' + (ok ? 'ok' : '');
+           const el = $(id); if (el) { el.textContent = ok ? 'OK' : 'FLT'; el.className = 'pf-val ' + (ok ? 'ok' : ''); }
         };
         up('pf-bmp', active && (flags & 0x08) && Number.isFinite(pkt?.pressure_hpa) && Number.isFinite(pkt?.altitude_m));
-        up('pf-mpu', active && (flags & 0x10) && Number.isFinite(pkt?.accel_z) && Number.isFinite(pkt?.gyro_x));
+        up('pf-lora', active);
         up('pf-sd', active && (flags & 0x20));
         up('pf-gps', active && (flags & 0x04) && Number.isFinite(pkt?.lat) && Number.isFinite(pkt?.lon));
       }

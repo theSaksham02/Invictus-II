@@ -117,7 +117,16 @@ function startEmulator() {
     // ═══════════════════════════════════════════════════════════
     // 2. NRC ASCII INGESTION
     // ═══════════════════════════════════════════════════════════
-    const nrcStr = `NRC:${tick},${tick*1000},${alt.toFixed(2)},${(20.0 - alt*0.0065).toFixed(2)},${(1013.25 * Math.pow(1 - 2.25577e-5 * alt, 5.25588)).toFixed(2)},${lat.toFixed(5)},${lon.toFixed(5)},${-60 - Math.floor(alt / 20)}\n`;
+    let nrcFlags = 0;
+    if (tick >= 30) nrcFlags |= 0x01; // FLAG_LAUNCHED
+    if (tick >= 90) nrcFlags |= 0x02; // FLAG_APOGEE
+    if (tick >= 10) nrcFlags |= 0x04; // FLAG_GPS_FIX
+    if (tick >= 2)  nrcFlags |= 0x08; // FLAG_BARO_OK
+    if (tick >= 6)  nrcFlags |= 0x20; // FLAG_SD_OK
+
+    const nrcBody = `${tick},${tick*1000},${alt.toFixed(2)},${(20.0 - alt*0.0065).toFixed(2)},${(1013.25 * Math.pow(1 - 2.25577e-5 * alt, 5.25588)).toFixed(2)},${lat.toFixed(5)},${lon.toFixed(5)},${-60 - Math.floor(alt / 20)},${nrcFlags}`;
+    const nrcCrc = crc16Ccitt(Buffer.from(nrcBody, 'utf8')).toString(16).toUpperCase().padStart(4, '0');
+    const nrcStr = `NRC2:${nrcBody},${nrcCrc}\n`;
     
     // Simulate 5% NRC Packet Drop (Complete signal loss for 1 tick)
     if (Math.random() < 0.05) {

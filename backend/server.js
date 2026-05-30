@@ -385,6 +385,23 @@ app.get('/api/cansat/status', (req, res) => {
   });
 });
 
+app.get('/api/nrc/status', (req, res) => {
+  const latest = db.getLatest('NRC');
+  const signal = serial.getSignalState().NRC;
+  res.json({
+    ok: true,
+    signal,
+    latest: latest
+      ? {
+          ...latest,
+          flags_decoded: decodeFlags(latest.flags),
+          sensor_health: deriveSensorHealth(latest),
+          warnings: packetWarnings(latest)
+        }
+      : null
+  });
+});
+
 app.get('/api/packets', (req, res) => {
   const source = parseSource(req.query.source, TELEMETRY_SOURCES, 'CANSAT');
   const limit = parseBoundedInt(req.query.limit, 200, 1, db.MAX_HISTORY_LIMIT, 'limit');

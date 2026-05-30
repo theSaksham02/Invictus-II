@@ -144,6 +144,31 @@ function decodeFlags(flags) {
 
 function deriveSensorHealth(packet) {
   const flags = decodeFlags(packet?.flags);
+  if (packet?.source === 'NRC') {
+    return {
+      bmp280: {
+        ok: flags.bmp_ok && Number.isFinite(packet.pressure_hpa) && Number.isFinite(packet.altitude_m),
+        bus: 'i2c',
+        pins: { sda: 'GPIO1', scl: 'GPIO2' }
+      },
+      neo6m: {
+        ok: flags.gps_fix && Number.isFinite(packet.lat) && Number.isFinite(packet.lon),
+        bus: 'uart1',
+        pins: { rx: 'GPIO7', tx: 'GPIO6' }
+      },
+      sd_card: {
+        ok: flags.sd_ok,
+        bus: 'spi',
+        pins: { cs: 'GPIO38', sck: 'GPIO39', mosi: 'GPIO41', miso: 'GPIO42' }
+      },
+      lora: {
+        ok: Number.isInteger(packet.rssi_dbm) && packet.rssi_dbm >= TELEMETRY_LIMITS.rssi_dbm.min,
+        bus: 'internal_spi',
+        pins: { cs: 'GPIO8', dio1: 'GPIO14', rst: 'GPIO12', busy: 'GPIO13' }
+      }
+    };
+  }
+
   return {
     bmp388: {
       ok: flags.bmp_ok && Number.isFinite(packet.pressure_hpa) && Number.isFinite(packet.altitude_m),
@@ -176,6 +201,19 @@ function deriveSensorHealth(packet) {
 function packetWarnings(packet) {
   const warnings = [];
   const flags = decodeFlags(packet?.flags);
+
+  if (packet?.source === 'NRC') {
+    if (!flags.bmp_ok) warnings.push('BMP280 flag is not set; altitude, pressure, and temperature may be fallback values.');
+    if (!flags.gps_fix) warnings.push('NEO-6M GPS fix flag is not set; latitude and longitude may be stale or zero.');
+    if (!flags.sd_ok) warnings.push('SD card flag is not set; onboard recovery log may be unavailable.');
+    if (Number.isFinite(packet?.pressure_hpa) && packet.pressure_hpa < 300) {
+      warnings.push('Pressure is unusually low for the expected NRC flight envelope.');
+    }
+    if (Number.isInteger(packet?.rssi_dbm) && packet.rssi_dbm < -110) {
+      warnings.push('LoRa RSSI is very weak; expect packet loss.');
+    }
+    return warnings;
+  }
 
   if (!flags.bmp_ok) warnings.push('BMP388 flag is not set; altitude, pressure, and temperature may be fallback values.');
   if (!flags.mpu_ok) warnings.push('MPU-6500 flag is not set; acceleration and gyro data may be fallback values.');

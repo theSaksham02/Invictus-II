@@ -99,6 +99,12 @@ test('parseNrc parses v2 line with CRC and flags', () => {
   assert.equal(parsed.flags, 12);
 });
 
+test('parseNrc rejects corrupted CRC v2 line', () => {
+  const body = '7,7000,101.2,22.5,1006.1,25.10,55.19,-64,12';
+  const parsed = parseNrc(`NRC2:${body},EEEE\n`);
+  assert.equal(parsed, null);
+});
+
 test('parseNrc rejects malformed line', () => {
   const parsed = parseNrc('NRC:7,7000,broken\n');
   assert.equal(parsed, null);
@@ -117,4 +123,35 @@ test('CansatFrameParser resynchronizes after noise before a valid frame', async 
   assert.equal(frames.length, 1);
   assert.equal(parseCansat(frames[0]).pkt_id, 42);
   assert.equal(parser.getStats().resyncs, 1);
+});
+
+test('deriveSensorHealth correctly maps NRC sensor health', () => {
+  const { deriveSensorHealth } = require('../cansat-hardware');
+  const pkt = {
+    source: 'NRC',
+    flags: 0x08 | 0x20 | 0x04, // bmp_ok, sd_ok, gps_fix
+    pressure_hpa: 1013,
+    altitude_m: 100,
+    lat: 52.5,
+    lon: -1.9,
+    rssi_dbm: -50
+  };
+  const health = deriveSensorHealth(pkt);
+  assert.ok(health.bmp280);
+  assert.equal(health.bmp280.ok, true);
+  assert.equal(health.bmp280.pins.sda, 'GPIO1');
+  
+  assert.ok(health.neo6m);
+  assert.equal(health.neo6m.ok, true);
+  assert.equal(health.neo6m.pins.rx, 'GPIO7');
+  
+  assert.ok(health.sd_card);
+  assert.equal(health.sd_card.ok, true);
+  assert.equal(health.sd_card.pins.cs, 'GPIO38');
+  
+  assert.ok(health.lora);
+  assert.equal(health.lora.ok, true);
+  assert.equal(health.lora.pins.cs, 'GPIO8');
+  
+  assert.equal(health.mpu6500, undefined);
 });
