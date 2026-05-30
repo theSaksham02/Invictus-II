@@ -1,0 +1,89 @@
+const { ReadlineParser } = require('serialport');
+const { parseNrc } = require('./parser');
+
+function closePort(port) {
+  return new Promise((resolve) => {
+    if (!port || !port.isOpen) return resolve();
+    port.close(() => resolve());
+  });
+}
+
+function createNrcSerial({
+  PortClass,
+  portPath,
+  baudRate,
+  disabledPortPath,
+  isSimMode,
+  reconnectDelayMs,
+  diagnostics,
+  sourceState,
+  emitFn,
+  safeEmit,
+  handlePacket,
+  shouldReconnect
+}) {
+  let nrcPort = null;
+
+  const connect = () => {
+    if (disabledPortPath === portPath) {
+      const message = 'NRC disabled because CANSAT and NRC are configured with the same serial port';
+      diagnostics.NRC.last_error = message;
+      sourceState.NRC.connected = false;
+      console.warn(`[SERIAL] ${message}`);
+      return;
+    }
+
+    try {
+      nrcPort = new PortClass({ path: portPath, baudRate });
+      if (isSimMode) global.mockNrc = nrcPort;
+
+      const parser = nrcPort.pipe(new ReadlineParser({ delimiter: '\n' }));
+      parser.on('data', (line) => {
+        const parsed = parseNrc(line);
+        if (parsed) {
+          handlePacket(parsed);
+        } else {
+          diagnostics.NRC.parse_errors++;
+          safeEmit(emitFn, 'ingest_error', { source: 'NRC', error: 'Rejected NRC telemetry line' });
+        }
+      });
+
+      nrcPort.on('open', () => {
+        diagnostics.NRC.open = true;
+        diagnostics.NRC.last_error = null;
+        sourceState.NRC.connected = true;
+        sourceState.NRC.port = portPath;
+      });
+
+      nrcPort.on('error', (err) => {
+        diagnostics.NRC.serial_errors++;
+        diagnostics.NRC.last_error = err.message;
+        sourceState.NRC.connected = false;
+        console.warn('[SERIAL] NRC Error:', err.message);
+      });
+
+      nrcPort.on('close', () => {
+        diagnostics.NRC.open = false;
+        sourceState.NRC.connected = false;
+        if (!shouldReconnect()) return;
+
+        diagnostics.NRC.reconnects++;
+        console.warn('[SERIAL] NRC Closed, reconnecting...');
+        setTimeout(connect, reconnectDelayMs);
+      });
+    } catch (error) {
+      diagnostics.NRC.serial_errors++;
+      diagnostics.NRC.last_error = error.message;
+      sourceState.NRC.connected = false;
+      console.warn('[SERIAL] NRC Init Error:', error.message);
+    }
+  };
+
+  return {
+    connect,
+    close: () => closePort(nrcPort),
+    getPort: () => nrcPort
+  };
+}
+
+module.exports = { createNrcSerial };

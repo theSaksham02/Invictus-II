@@ -1,16 +1,16 @@
 const { SerialPort, SerialPortMock } = require('serialport');
-const { ReadlineParser } = require('serialport');
-const { parseCansat, parseNrc } = require('./parser');
+const { parseCansat } = require('./parser');
 const { CansatFrameParser } = require('./cansat-framer');
 const { insertPacket, insertEvent } = require('./db');
 const { processPacket } = require('./phase-tracker');
+const { createNrcSerial } = require('./nrc-serial');
 
 const CANSAT_PORT = process.env.SERIAL_PORT_CANSAT || '/dev/ttyUSB0';
 const NRC_PORT    = process.env.SERIAL_PORT_NRC    || '/dev/ttyUSB1';
 const CANSAT_BAUD = parseInt(process.env.SERIAL_BAUD_CANSAT || '9600', 10);
 const NRC_BAUD    = parseInt(process.env.SERIAL_BAUD_NRC || '9600', 10);
 
-let cansatPort, nrcPort, cansatFrameParser;
+let cansatPort, nrcSerial, cansatFrameParser;
 let shuttingDown = false;
 let fallbackTriggered = false;
 let watchdogInterval = null;
@@ -168,54 +168,23 @@ function initSerial(emitFn, enableSimFallback) {
     }
   };
 
-  const connectNrc = () => {
-    if (CANSAT_PORT === NRC_PORT) {
-      console.warn('[SERIAL] NRC disabled because CANSAT and NRC are configured with the same serial port');
-      return;
-    }
-    try {
-      nrcPort = new PortClass({ path: NRC_PORT, baudRate: NRC_BAUD });
-      if (isSimMode) global.mockNrc = nrcPort;
-      const parser = nrcPort.pipe(new ReadlineParser({ delimiter: '\n' }));
-      parser.on('data', (line) => {
-        const parsed = parseNrc(line);
-        if (parsed) {
-          handlePacket(parsed);
-        } else {
-          diagnostics.NRC.parse_errors++;
-          safeEmit(emitFn, 'ingest_error', { source: 'NRC', error: 'Rejected NRC telemetry line' });
-        }
-      });
-
-      nrcPort.on('open', () => {
-        diagnostics.NRC.open = true;
-        diagnostics.NRC.last_error = null;
-        sourceState.NRC.connected = true;
-        sourceState.NRC.port = NRC_PORT;
-      });
-      nrcPort.on('error', (err) => {
-        diagnostics.NRC.serial_errors++;
-        diagnostics.NRC.last_error = err.message;
-        sourceState.NRC.connected = false;
-        console.warn('[SERIAL] NRC Error:', err.message);
-      });
-      nrcPort.on('close', () => {
-        diagnostics.NRC.open = false;
-        sourceState.NRC.connected = false;
-        if (shuttingDown) return;
-        diagnostics.NRC.reconnects++;
-        console.warn('[SERIAL] NRC Closed, reconnecting...');
-        setTimeout(connectNrc, RECONNECT_DELAY_MS);
-      });
-    } catch (e) {
-      diagnostics.NRC.serial_errors++;
-      diagnostics.NRC.last_error = e.message;
-      console.warn('[SERIAL] NRC Init Error:', e.message);
-    }
-  };
+  nrcSerial = createNrcSerial({
+    PortClass,
+    portPath: NRC_PORT,
+    baudRate: NRC_BAUD,
+    disabledPortPath: CANSAT_PORT,
+    isSimMode,
+    reconnectDelayMs: RECONNECT_DELAY_MS,
+    diagnostics,
+    sourceState,
+    emitFn,
+    safeEmit,
+    handlePacket,
+    shouldReconnect: () => !shuttingDown
+  });
 
   connectCansat();
-  connectNrc();
+  nrcSerial.connect();
 }
 
 function getSignalState() {
@@ -258,7 +227,10 @@ async function shutdown() {
     clearInterval(watchdogInterval);
     watchdogInterval = null;
   }
-  await Promise.all([closePort(cansatPort), closePort(nrcPort)]);
+  await Promise.all([
+    closePort(cansatPort),
+    nrcSerial ? nrcSerial.close() : Promise.resolve()
+  ]);
 }
 
 module.exports = { initSerial, getSignalState, shutdown };
