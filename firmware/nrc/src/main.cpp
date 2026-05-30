@@ -1,42 +1,81 @@
 /*
  * INVICTUS II — NRC Rocket Payload Firmware
- * Hardware: ESP-WROOM-32 + BMP280 + NEO-6M + LM75 + SD Card
+ * ──────────────────────────────────────────
+ * Hardware : Heltec WiFi LoRa 32 V3 (ESP32-S3 + SX1262 LoRa + SSD1306 OLED)
+ * Sensors  : BMP280 (I2C), NEO-6M GPS (UART), LM75 (I2C), SD Card (SPI)
+ * Camera   : ESP32-CAM (standalone on 5V_BUS, records to its own SD card)
+ * Radio    : SX1262 LoRa @ 868 MHz (built into Heltec board)
+ * Display  : SSD1306 0.96" OLED (built into Heltec board)
  *
- * Telemetry link: Bluetooth Serial (SPP)
- *   - ESP-WROOM-32 advertises as "INVICTUS_NRC"
- *   - Ground laptop pairs via Bluetooth and reads the virtual serial port
- *   - The Node.js backend (serial.js) reads NRC2: lines identically
+ * Telemetry contract (NRC2 — v2 with CRC16):
+ *   NRC2:<pkt_id>,<ts_ms>,<alt_m>,<temp_c>,<press_hpa>,<lat>,<lon>,<rssi>,<flags>,<CRC16_HEX>\n
  *
- * ⚠️  Bluetooth Classic range is ~30-100m in open air.
- *     During flight (target altitude 670m), Bluetooth WILL disconnect.
- *     SD card logging is therefore the PRIMARY data source for NRC.
- *     Bluetooth provides pre-launch verification and post-landing recovery.
- *
- * Pin mapping — ESP-WROOM-32 DevKit:
- *   BMP280    → I2C:  SDA=GPIO21, SCL=GPIO22
- *   LM75      → I2C:  SDA=GPIO21, SCL=GPIO22 (shared bus)
- *   NEO-6M    → UART2: RX=GPIO16 (← GPS TX), TX=GPIO17 (→ GPS RX)
- *   SD Card   → VSPI:  MOSI=GPIO23, MISO=GPIO19, SCK=GPIO18, CS=GPIO5
+ * Pin mapping — per physical circuit (verified 2026-05-30):
+ *   BMP280  → I2C:  SDA=GPIO1,  SCL=GPIO2   (addr 0x76, SDO→GND)
+ *   LM75    → I2C:  SDA=GPIO1,  SCL=GPIO2   (addr 0x48, shared bus)
+ *   NEO-6M  → UART: RX=GPIO6  (ESP TX→GPS RX), TX=GPIO7  (GPS TX→ESP RX)
+ *   SD Card → SPI:  CS=GPIO38, SCK=GPIO39, MOSI=GPIO41, MISO=GPIO42
+ *   LoRa    → (internal) NSS=8, DIO1=14, RST=12, BUSY=13, SCK=9, MISO=11, MOSI=10
+ *   OLED    → (internal) SDA=17, SCL=18, RST=21
  */
 
 #include <Arduino.h>
-#include <BluetoothSerial.h>
+#include <RadioLib.h>
 #include <Adafruit_BMP280.h>
 #include <TinyGPSPlus.h>
 #include <Wire.h>
 #include <SPI.h>
 #include <SD.h>
+#include <U8g2lib.h>
 #include <esp_task_wdt.h>
 
-// ── Pin definitions (ESP-WROOM-32 defaults) ─────────────────────────────────
-#define I2C_SDA       21
-#define I2C_SCL       22
-#define GPS_RX        16    // ESP32 UART2 RX ← NEO-6M TX
-#define GPS_TX        17    // ESP32 UART2 TX → NEO-6M RX
-#define SD_CS          5    // VSPI chip select for SD card
-// VSPI uses default pins: MOSI=23, MISO=19, SCK=18
+// ═══════════════════════════════════════════════════════════════════════════
+//  PIN DEFINITIONS — Heltec WiFi LoRa 32 V3 (verified against circuit)
+// ═══════════════════════════════════════════════════════════════════════════
 
-// ── Telemetry flags (must match backend cansat-hardware.js / parser.js) ─────
+// I2C bus for BMP280 + LM75
+#define I2C_SDA         1
+#define I2C_SCL         2
+
+// GPS on UART (ESP32-S3 UART1)
+// NEO-6M TX → GPIO7 (ESP reads FROM GPS on this pin)
+// NEO-6M RX → GPIO6 (ESP writes TO GPS on this pin)
+#define GPS_RX_PIN      7   // ESP32 receives GPS data on this GPIO
+#define GPS_TX_PIN      6   // ESP32 transmits to GPS on this GPIO
+
+// SD Card on SPI
+#define SD_CS           38
+#define SD_SCK          39
+#define SD_MOSI         41
+#define SD_MISO         42
+
+// LoRa SX1262 (internal to Heltec V3 board — do NOT change)
+#define LORA_NSS        8
+#define LORA_DIO1       14
+#define LORA_RST        12
+#define LORA_BUSY       13
+#define LORA_SCK        9
+#define LORA_MISO       11
+#define LORA_MOSI       10
+
+// OLED SSD1306 (internal to Heltec V3 board)
+#define OLED_SDA        17
+#define OLED_SCL        18
+#define OLED_RST        21
+#define VEXT_PIN        36   // Controls 3.3V power to OLED + external sensors
+
+// LoRa frequency — UK Ofcom IR2030 compliant
+#define LORA_FREQ       868.0  // MHz
+#define LORA_BW         125.0  // kHz
+#define LORA_SF         9      // Spreading factor (range vs speed tradeoff)
+#define LORA_CR         7      // Coding rate 4/7
+#define LORA_SW         0x12   // Sync word (private network)
+#define LORA_POWER      14     // dBm (max allowed under ETSI)
+#define LORA_PREAMBLE   8
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  TELEMETRY FLAGS — must match backend parser.js / cansat-hardware.js
+// ═══════════════════════════════════════════════════════════════════════════
 #define FLAG_LAUNCHED       0x01
 #define FLAG_APOGEE         0x02
 #define FLAG_GPS_FIX        0x04
@@ -44,21 +83,38 @@
 #define FLAG_SD_OK          0x20
 #define FLAG_STALE_SENSOR   0x40
 
-// ── Flight detection thresholds ─────────────────────────────────────────────
-#define LAUNCH_ALT_DELTA_M    10.0f
-#define LAUNCH_CONFIRM_COUNT   3
-#define APOGEE_DROP_M          5.0f
-#define SENSOR_STALE_MS     3000
-#define BASELINE_SAMPLES      20
-#define WDT_TIMEOUT_S          5
+// Flight detection thresholds
+#define LAUNCH_ALT_DELTA_M    10.0f    // Must gain 10m above baseline
+#define LAUNCH_CONFIRM_COUNT   3       // For 3 consecutive readings
+#define APOGEE_DROP_M          5.0f    // 5m drop from max = apogee
+#define SENSOR_STALE_MS     3000       // 3s without baro reading = stale
+#define BASELINE_SAMPLES      20       // Average first 20 readings for baseline
+#define WDT_TIMEOUT_S          5       // Watchdog timeout in seconds
 
-BluetoothSerial SerialBT;
-Adafruit_BMP280 bmp;
+// ═══════════════════════════════════════════════════════════════════════════
+//  GLOBAL OBJECTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+// LoRa radio — SX1262 via RadioLib
+SPIClass loraSPI(FSPI);
+SX1262 radio = new Module(LORA_NSS, LORA_DIO1, LORA_RST, LORA_BUSY, loraSPI);
+
+// OLED display — U8g2, HW I2C on internal OLED bus
+U8G2_SSD1306_128X64_NONAME_F_HW_I2C display(U8G2_R0, OLED_RST, OLED_SCL, OLED_SDA);
+
+// Sensors
+TwoWire sensorI2C(0);            // I2C bus 0 for BMP280 + LM75
+Adafruit_BMP280 bmp(&sensorI2C);
 TinyGPSPlus gps;
-HardwareSerial SerialGPS(2);   // UART2 for GPS
+HardwareSerial SerialGPS(1);     // UART1 for GPS
 
+// SD Card — custom SPI bus
+SPIClass sdSPI(HSPI);
 File logFile;
 
+// ═══════════════════════════════════════════════════════════════════════════
+//  STATE VARIABLES
+// ═══════════════════════════════════════════════════════════════════════════
 uint32_t pkt_id = 0;
 float baseline_pressure = 1013.25f;
 float baseline_pressure_sum = 0.0f;
@@ -66,13 +122,20 @@ uint8_t baseline_count = 0;
 float baseline_altitude = 0.0f;
 float max_altitude = 0.0f;
 uint8_t launch_consecutive = 0;
+bool launched = false;
+bool apogee_detected = false;
 
 uint32_t last_baro_ms = 0;
 uint32_t last_gps_ms = 0;
 bool baro_ok = false;
 bool sd_ok = false;
+bool lora_ok = false;
 
-// ── CRC16-CCITT (must match backend crc16Ccitt in cansat-hardware.js) ───────
+int16_t last_rssi = 0;   // Updated after each LoRa TX
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  CRC16-CCITT — must match backend cansat-hardware.js crc16Ccitt()
+// ═══════════════════════════════════════════════════════════════════════════
 uint16_t crc16Ccitt(const uint8_t* data, size_t len) {
     uint16_t crc = 0xFFFF;
     for (size_t i = 0; i < len; i++) {
@@ -86,73 +149,148 @@ uint16_t crc16Ccitt(const uint8_t* data, size_t len) {
     return crc;
 }
 
-// ── LM75 temperature fallback ───────────────────────────────────────────────
-#define LM75_ADDR 0x48   // Default I2C address (A0=A1=A2=GND)
+// ═══════════════════════════════════════════════════════════════════════════
+//  LM75 TEMPERATURE FALLBACK
+// ═══════════════════════════════════════════════════════════════════════════
+#define LM75_ADDR 0x48
 
 float readLM75() {
-    Wire.beginTransmission(LM75_ADDR);
-    if (Wire.endTransmission() != 0) return NAN;
-
-    Wire.requestFrom((uint8_t)LM75_ADDR, (uint8_t)2);
-    if (Wire.available() < 2) return NAN;
-
-    int16_t raw = (Wire.read() << 8) | Wire.read();
+    sensorI2C.beginTransmission(LM75_ADDR);
+    if (sensorI2C.endTransmission() != 0) return NAN;
+    sensorI2C.requestFrom((uint8_t)LM75_ADDR, (uint8_t)2);
+    if (sensorI2C.available() < 2) return NAN;
+    int16_t raw = (sensorI2C.read() << 8) | sensorI2C.read();
     return (float)(raw >> 5) * 0.125f;
 }
 
-// ── Setup ───────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+//  OLED DISPLAY HELPERS
+// ═══════════════════════════════════════════════════════════════════════════
+void displayStatus(float alt, float maxAlt, uint8_t flags, uint32_t pktCount) {
+    display.clearBuffer();
+    display.setFont(u8g2_font_6x10_tf);
 
+    // Line 1: Mission phase
+    display.drawStr(0, 10, "NRC INVICTUS II");
+
+    // Line 2: Current altitude
+    char line[32];
+    snprintf(line, sizeof(line), "ALT: %.1f m", alt);
+    display.drawStr(0, 24, line);
+
+    // Line 3: Max altitude (apogee) — THIS is what judges read
+    display.setFont(u8g2_font_9x18B_tf);
+    snprintf(line, sizeof(line), "MAX:%.0fm", maxAlt);
+    display.drawStr(0, 44, line);
+
+    // Line 4: Status flags
+    display.setFont(u8g2_font_6x10_tf);
+    snprintf(line, sizeof(line), "P:%lu %s%s%s", pktCount,
+        (flags & FLAG_GPS_FIX)  ? "GPS " : "--- ",
+        (flags & FLAG_BARO_OK)  ? "BAR " : "--- ",
+        (flags & FLAG_SD_OK)    ? "SD"   : "--");
+    display.drawStr(0, 58, line);
+
+    display.sendBuffer();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  SETUP
+// ═══════════════════════════════════════════════════════════════════════════
 void setup() {
     Serial.begin(115200);
+    delay(500);
 
-    // Watchdog: auto-reboot if loop() hangs for > 5 seconds
+    // ── Watchdog: auto-reboot if loop() hangs > 5 seconds ────────────
     esp_task_wdt_init(WDT_TIMEOUT_S, true);
     esp_task_wdt_add(NULL);
 
-    // Bluetooth Serial — advertise as "INVICTUS_NRC"
-    SerialBT.begin("INVICTUS_NRC");
-    Serial.println("NRC: Bluetooth started — INVICTUS_NRC");
+    // ── Power on OLED + Vext rail ────────────────────────────────────
+    pinMode(VEXT_PIN, OUTPUT);
+    digitalWrite(VEXT_PIN, LOW);   // LOW = Vext ON for Heltec V3
+    delay(50);
 
-    // GPS on UART2
-    SerialGPS.begin(9600, SERIAL_8N1, GPS_RX, GPS_TX);
+    // ── OLED display init ────────────────────────────────────────────
+    display.begin();
+    display.clearBuffer();
+    display.setFont(u8g2_font_6x10_tf);
+    display.drawStr(0, 10, "NRC BOOTING...");
+    display.sendBuffer();
 
-    // I2C bus for BMP280 + LM75
-    Wire.begin(I2C_SDA, I2C_SCL);
+    // ── LoRa SX1262 init ─────────────────────────────────────────────
+    loraSPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_NSS);
+    int state = radio.begin(LORA_FREQ, LORA_BW, LORA_SF, LORA_CR, LORA_SW, LORA_POWER, LORA_PREAMBLE);
+    if (state == RADIOLIB_ERR_NONE) {
+        lora_ok = true;
+        Serial.println("[NRC] LoRa SX1262 OK @ 868 MHz");
+    } else {
+        Serial.printf("[NRC] LoRa FAILED (err %d)\n", state);
+    }
 
-    // BMP280 barometer
-    if (bmp.begin(0x76)) {  // BMP280 default addr with SDO=GND
+    // ── GPS on UART1 ─────────────────────────────────────────────────
+    SerialGPS.begin(9600, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
+    Serial.println("[NRC] GPS UART1 started");
+
+    // ── I2C bus for BMP280 + LM75 ────────────────────────────────────
+    sensorI2C.begin(I2C_SDA, I2C_SCL);
+
+    // ── BMP280 barometer (addr 0x76: SDO→GND) ───────────────────────
+    if (bmp.begin(0x76)) {
         bmp.setSampling(
             Adafruit_BMP280::MODE_NORMAL,
-            Adafruit_BMP280::SAMPLING_X8,   // temperature oversampling
-            Adafruit_BMP280::SAMPLING_X4,   // pressure oversampling
-            Adafruit_BMP280::FILTER_X4,     // IIR filter
+            Adafruit_BMP280::SAMPLING_X8,       // temp oversampling
+            Adafruit_BMP280::SAMPLING_X4,       // pressure oversampling
+            Adafruit_BMP280::FILTER_X4,         // IIR filter
             Adafruit_BMP280::STANDBY_MS_62_5
         );
         baro_ok = true;
         last_baro_ms = millis();
-        Serial.println("NRC: BMP280 OK");
+        Serial.println("[NRC] BMP280 OK @ 0x76");
     } else {
-        Serial.println("NRC: BMP280 FAILED");
+        Serial.println("[NRC] BMP280 FAILED");
     }
 
-    // SD Card
-    if (SD.begin(SD_CS)) {
+    // ── LM75 probe ──────────────────────────────────────────────────
+    float lm75_test = readLM75();
+    Serial.printf("[NRC] LM75 %s (%.1f°C)\n",
+        isfinite(lm75_test) ? "OK" : "FAILED", lm75_test);
+
+    // ── SD Card on custom SPI bus ────────────────────────────────────
+    sdSPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
+    if (SD.begin(SD_CS, sdSPI)) {
         logFile = SD.open("/flight.csv", FILE_WRITE);
         if (logFile) {
             logFile.println("pkt_id,timestamp_ms,altitude_m,temp_c,pressure_hpa,lat,lon,rssi_dbm,flags");
             logFile.flush();
             sd_ok = true;
-            Serial.println("NRC: SD card OK");
+            Serial.println("[NRC] SD card OK");
         }
     } else {
-        Serial.println("NRC: SD card FAILED");
+        Serial.println("[NRC] SD card FAILED");
     }
+
+    // ── Boot status on OLED ──────────────────────────────────────────
+    display.clearBuffer();
+    display.setFont(u8g2_font_6x10_tf);
+    display.drawStr(0, 10, "NRC INVICTUS II");
+    char line[32];
+    snprintf(line, sizeof(line), "LoRa:%s BMP:%s",
+        lora_ok ? "OK" : "XX", baro_ok ? "OK" : "XX");
+    display.drawStr(0, 24, line);
+    snprintf(line, sizeof(line), "SD:%s GPS:WAIT",
+        sd_ok ? "OK" : "XX");
+    display.drawStr(0, 38, line);
+    display.drawStr(0, 52, "READY");
+    display.sendBuffer();
+
+    Serial.println("[NRC] Setup complete — transmitting at 1 Hz");
 }
 
-// ── Main Loop ───────────────────────────────────────────────────────────────
-
+// ═══════════════════════════════════════════════════════════════════════════
+//  MAIN LOOP
+// ═══════════════════════════════════════════════════════════════════════════
 void loop() {
-    // Continuously feed GPS parser
+    // ── Continuously feed GPS parser ─────────────────────────────────
     while (SerialGPS.available() > 0) {
         gps.encode(SerialGPS.read());
     }
@@ -163,21 +301,25 @@ void loop() {
         pkt_id++;
         uint32_t now = millis();
 
-        // ── Read barometer ──────────────────────────────────────────────
+        // ── Read barometer ───────────────────────────────────────────
         float temp = 0, press = 0, alt = 0;
         uint8_t flags = 0;
 
         if (baro_ok) {
-            temp = bmp.readTemperature();
-            press = bmp.readPressure() / 100.0f;  // Pa → hPa
+            float t = bmp.readTemperature();
+            float p = bmp.readPressure() / 100.0f;  // Pa → hPa
 
-            if (isfinite(temp) && isfinite(press) && press > 100.0f) {
-                // Averaged baseline calibration (first 20 readings)
+            if (isfinite(t) && isfinite(p) && p > 100.0f) {
+                temp = t;
+                press = p;
+
+                // Averaged baseline calibration (first N readings)
                 if (baseline_count < BASELINE_SAMPLES) {
                     baseline_pressure_sum += press;
                     baseline_count++;
                     baseline_pressure = baseline_pressure_sum / baseline_count;
                 }
+
                 alt = bmp.readAltitude(baseline_pressure);
                 if (baseline_count <= BASELINE_SAMPLES) baseline_altitude = alt;
                 if (alt > max_altitude) max_altitude = alt;
@@ -185,13 +327,15 @@ void loop() {
                 last_baro_ms = now;
                 flags |= FLAG_BARO_OK;
             }
-        } else {
-            // BMP280 temperature fallback → LM75
-            float lm75_temp = readLM75();
-            if (isfinite(lm75_temp)) temp = lm75_temp;
         }
 
-        // ── Read GPS ────────────────────────────────────────────────────
+        // If BMP280 temp failed, try LM75 as fallback
+        if (temp == 0) {
+            float lm75_t = readLM75();
+            if (isfinite(lm75_t)) temp = lm75_t;
+        }
+
+        // ── Read GPS ─────────────────────────────────────────────────
         double lat = 0, lon = 0;
         if (gps.location.isValid() && gps.location.age() < 2000) {
             lat = gps.location.lat();
@@ -200,57 +344,57 @@ void loop() {
             flags |= FLAG_GPS_FIX;
         }
 
-        // ── Launch / Apogee detection (altitude-only, no IMU) ───────────
-        if (!(flags & FLAG_LAUNCHED)) {
-            bool alt_launch = (alt - baseline_altitude) > LAUNCH_ALT_DELTA_M;
-            launch_consecutive = alt_launch ? launch_consecutive + 1 : 0;
-            if (launch_consecutive >= LAUNCH_CONFIRM_COUNT) {
-                flags |= FLAG_LAUNCHED;
-            }
+        // ── Launch detection (altitude-only, no IMU) ─────────────────
+        if (!launched) {
+            float gain = alt - baseline_altitude;
+            launch_consecutive = (gain > LAUNCH_ALT_DELTA_M) ? launch_consecutive + 1 : 0;
+            if (launch_consecutive >= LAUNCH_CONFIRM_COUNT) launched = true;
         }
-        // Persist launch flag once set
-        static bool launched = false;
-        if (flags & FLAG_LAUNCHED) launched = true;
         if (launched) flags |= FLAG_LAUNCHED;
 
-        static bool apogee_detected = false;
+        // ── Apogee detection ─────────────────────────────────────────
         if (launched && !apogee_detected) {
-            if ((max_altitude - alt) > APOGEE_DROP_M) {
-                apogee_detected = true;
-            }
+            if ((max_altitude - alt) > APOGEE_DROP_M) apogee_detected = true;
         }
         if (apogee_detected) flags |= FLAG_APOGEE;
 
-        // ── Health flags ────────────────────────────────────────────────
+        // ── Health flags ─────────────────────────────────────────────
         if ((now - last_baro_ms) > SENSOR_STALE_MS) flags |= FLAG_STALE_SENSOR;
         if (sd_ok && logFile) flags |= FLAG_SD_OK;
 
-        // ── RSSI placeholder (Bluetooth doesn't expose RSSI easily) ────
-        int rssi = 0;
-
-        // ── Build NRC2 packet string ────────────────────────────────────
+        // ── Build NRC2 packet string ─────────────────────────────────
         char body[128];
         char buffer[160];
         snprintf(body, sizeof(body), "%u,%lu,%.2f,%.2f,%.2f,%.6f,%.6f,%d,%u",
-                 pkt_id, now, alt, temp, press, lat, lon, rssi, (unsigned)flags);
+                 (unsigned)pkt_id, (unsigned long)now, alt, temp, press,
+                 lat, lon, (int)last_rssi, (unsigned)flags);
         uint16_t crc = crc16Ccitt(
             reinterpret_cast<const uint8_t*>(body), strlen(body));
         snprintf(buffer, sizeof(buffer), "NRC2:%s,%04X", body, crc);
 
-        // ── Transmit over Bluetooth Serial ──────────────────────────────
-        SerialBT.println(buffer);
-
-        // ── Also print to USB Serial (debug) ────────────────────────────
-        Serial.println(buffer);
-
-        // ── Log to SD card (PRIMARY data source during flight) ──────────
-        if (sd_ok && logFile) {
-            logFile.printf("%u,%lu,%.2f,%.2f,%.2f,%.6f,%.6f,%d,%u\n",
-                pkt_id, now, alt, temp, press, lat, lon, rssi, (unsigned)flags);
-            if (pkt_id % 5 == 0) logFile.flush();
+        // ── Transmit via LoRa ────────────────────────────────────────
+        if (lora_ok) {
+            int txState = radio.transmit(buffer);
+            if (txState == RADIOLIB_ERR_NONE) {
+                last_rssi = radio.getRSSI();
+            }
         }
 
-        // ── Watchdog pet ────────────────────────────────────────────────
+        // ── USB Serial debug ─────────────────────────────────────────
+        Serial.println(buffer);
+
+        // ── Log to SD card ───────────────────────────────────────────
+        if (sd_ok && logFile) {
+            logFile.printf("%u,%lu,%.2f,%.2f,%.2f,%.6f,%.6f,%d,%u\n",
+                (unsigned)pkt_id, (unsigned long)now, alt, temp, press,
+                lat, lon, (int)last_rssi, (unsigned)flags);
+            if (pkt_id % 5 == 0) logFile.flush();  // Flush every 5 packets
+        }
+
+        // ── Update OLED ──────────────────────────────────────────────
+        displayStatus(alt, max_altitude, flags, pkt_id);
+
+        // ── Pet watchdog ─────────────────────────────────────────────
         esp_task_wdt_reset();
     }
 }

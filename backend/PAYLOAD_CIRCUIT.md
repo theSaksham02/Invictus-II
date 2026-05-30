@@ -14,12 +14,7 @@ if there is no pcb board name explicitly mentioned, for example:
 EMPTY refers to no connections to the pin. GROUND is grounded.
 ------------------------------------------------------------------------------
 
-ESP-WROOM-32 [abbrev. ESP32] CONNECTIONS
-⚠️ NOTE: Pin numbers below were originally documented for a Heltec WiFi LoRa 32(V3).
-   The actual board is an ESP-WROOM-32 (classic ESP32). Default pin mapping:
-   I2C: SDA=GPIO21, SCL=GPIO22 | UART2 (GPS): RX=GPIO16, TX=GPIO17
-   VSPI (SD): MOSI=GPIO23, MISO=GPIO19, SCK=GPIO18, CS=GPIO5
-   Verify against actual wiring before flashing firmware.
+WiFi LoRa 32(V3) [abbrev. LoRa] CONNECTIONS
 
 1 LoRa GND to GROUND
 2 LoRa 5V to 5V_BUS
@@ -40,8 +35,8 @@ ESP-WROOM-32 [abbrev. ESP32] CONNECTIONS
 17 LoRa GPIO20 to EMPTY
 18 LoRa GPIO19 to EMPTY
 
-19 LoRa GPIO7 to EMPTY
-20 LoRa GPIO6 to EMPTY
+19 LoRa GPIO7 to 3 Neo-6m1 TX
+20 LoRa GPIO6 to 2 Neo-6m1 RX
 21 LoRa GPIO5 to EMPTY
 22 LoRa GPIO4 to EMPTY
 23 LoRa GPIO3 to EMPTY
@@ -52,8 +47,8 @@ ESP-WROOM-32 [abbrev. ESP32] CONNECTIONS
 28 LoRa GPIO40 to EMPTY
 29 LoRa GPIO41 to 4 SDCardModule1
 30 LoRa GPIO42 to 3 SdCardModule1
-31 LoRa GPIO45 to 3 Neo-6m1 RX
-32 LoRa GPIO46 to 2 Neo-6m1 TX
+31 LoRa GPIO45 to EMPTY
+32 LoRa GPIO46 to EMPTY
 33 LoRa GPIO37 to EMPTY
 34 LoRa 3V3 to EMPTY
 35 LoRa 3V3 to 3V3_BUS

@@ -54,13 +54,13 @@
 | Competition | Vehicle | Avionics |
 |---|---|---|
 | **MachX** | Bigger rocket + CanSat inside | STM32 Bluepill · RFM69HCW 433MHz |
-| **NRC** | Smaller standalone rocket | ESP-WROOM-32 · Bluetooth Serial |
+| **NRC** | Smaller standalone rocket | Heltec LoRa V3 · LoRa 868 MHz |
 | **NRC Rover** | Rocket + Rover deployment (later) | RPi 4B · Flask · BTS7960 |
 
 ```
 Target Altitude  →  2,200 ft (670 m)
 Telemetry Rate   →  1 Hz (1 packet/second)
-Radio Links      →  433 MHz RFM69 (MachX CanSat) + Bluetooth Serial (NRC Rocket)
+Radio Links      →  433 MHz RFM69 (MachX CanSat) + LoRa 868 MHz (NRC Rocket)
 Ground Station   →  Node.js · SQLite · Socket.io · Chart.js
 Rover            →  Raspberry Pi 4B · Flask · BTS7960 · Camera Module 3
 ```
@@ -74,10 +74,10 @@ Rover            →  Raspberry Pi 4B · Flask · BTS7960 · Camera Module 3
 │                        🚀  IN FLIGHT                            │
 │                                                                 │
 │   ┌──────────────────┐         ┌─────────────────────────┐     │
-│   │  STM32 BLUEPILL  │         │   ESP-WROOM-32          │     │
+│   │  STM32 BLUEPILL  │         │   HELTEC LoRa V3        │     │
 │   │  (MachX CanSat)  │         │   (NRC Rocket)          │     │
 │   │  BMP388 · MPU6500│         │   BMP280 · NEO-6M       │     │
-│   │  RFM69HCW 433MHz │         │   Bluetooth Serial      │     │
+│   │  RFM69HCW 433MHz │         │   LoRa 868 MHz          │     │
 │   └────────┬─────────┘         └──────────┬──────────────┘     │
 │            │ 43-byte binary v2             │  ASCII CSV         │
 │            │ XOR checksum                  │  "NRC:..." prefix  │
@@ -121,7 +121,7 @@ Rover            →  Raspberry Pi 4B · Flask · BTS7960 · Camera Module 3
 | System | Brain | Radio | Sensors | Notes |
 |---|---|---|---|---|
 | 🚀 **MachX CanSat** | STM32 Bluepill | RFM69HCW 433MHz | BMP388, MPU-6500, NEO-6M, LM75 | 43-byte binary v2 packet |
-| 🛰️ **NRC Rocket** | ESP-WROOM-32 | Bluetooth Serial | BMP280, NEO-6M, LM75 | ASCII CSV `NRC2:` prefix |
+| 🛰️ **NRC Rocket** | Heltec LoRa V3 (ESP32-S3) | LoRa 868 MHz | BMP280, NEO-6M, LM75 | ASCII CSV `NRC2:` prefix |
 | 🤖 **NRC Rover** *(later)* | Raspberry Pi 4B | WiFi | BTS7960 x2, Camera M3 | Flask HTTP server |
 | ⚡ **Power** | TP4056 → XL6009 → AMS1117 | — | — | 45 min endurance |
 
@@ -276,7 +276,7 @@ Invictus-II/
 │
 ├── 📁 firmware/           ← ✅ Operational
 │   ├── cansat/            ← STM32duino (PlatformIO)
-│   ├── nrc/               ← ESP-WROOM-32 (Bluetooth)
+│   ├── nrc/               ← Heltec LoRa V3 (LoRa 868MHz)
 │   └── rover/             ← RPi Flask Control
 │
 └── README.md
@@ -289,7 +289,7 @@ Invictus-II/
 ### TODO
 
 - ✅ Push competition-specific dashboards
-- ✅ Push `firmware/` — STM32, ESP-WROOM-32, Rover code
+- ✅ Push `firmware/` — STM32, Heltec LoRa V3, Rover code
 - ✅ Add `.gitignore` — protect `flight.db`, `.env`, `uploads/`, `node_modules/`
 - ✅ Hardware-verify `SMN-001` rail exit velocity flag
 
@@ -323,7 +323,7 @@ Invictus-II/
   ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
 ```
 
-**Node.js · STM32duino · ESP-WROOM-32 · Raspberry Pi · Chart.js · Socket.io**
+**Node.js · STM32duino · Heltec ESP32-S3 · Raspberry Pi · Chart.js · Socket.io**
 
 ![Visitors](https://visitor-badge.laobi.icu/badge?page_id=theSaksham02.Invictus-II&style=for-the-badge)
 

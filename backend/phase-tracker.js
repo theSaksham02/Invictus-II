@@ -1,6 +1,6 @@
 // UOBRPL Avionics — Flight State Machine
 // Competitions: MachX (CanSat in bigger rocket), NRC (standalone rocket), NRC Rover (later)
-// Sources: CANSAT (MachX — STM32 + RFM69HCW), NRC (NRC Rocket — ESP-WROOM-32 + Bluetooth)
+// Sources: CANSAT (MachX — STM32 + RFM69HCW), NRC (NRC Rocket — Heltec LoRa V3 + LoRa 868MHz)
 // ROVER (NRC Rover) is HTTP-controlled and does NOT use this FSM.
 
 const { insertEvent } = require('./db');
@@ -19,7 +19,7 @@ function makeState() {
 
 const states = {
   CANSAT: makeState(),  // MachX competition — STM32 + RFM69HCW 433MHz — 43-byte binary v2
-  NRC:    makeState(),  // NRC competition  — ESP-WROOM-32 Bluetooth   — ASCII CSV NRC2:
+  NRC:    makeState(),  // NRC competition  — Heltec LoRa V3 868MHz    — ASCII CSV NRC2:
   MACHX:  makeState(),  // MATCHA           — TBD                      — TBD
   SUGAR:  makeState(),  // SUGAR CanSat     — TBD                      — TBD
 };
