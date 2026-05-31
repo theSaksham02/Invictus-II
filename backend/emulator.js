@@ -54,8 +54,9 @@ function startEmulator() {
     }
 
     if (process.env.BENCH_ALT === 'true') {
-      alt = alt / 150.0; // Scale 660m peak down to ~4.4m (14.4 feet)
+      alt = alt / 216.5; // Scale 660m peak down to exactly 3.05m (10.0 feet)
     }
+
 
 
     // Simulated GPS Trajectory (Wind Drift)
@@ -87,6 +88,11 @@ function startEmulator() {
     // ═══════════════════════════════════════════════════════════
     // 1. CANSAT BINARY INGESTION (v2 fixed frame, little-endian)
     // ═══════════════════════════════════════════════════════════
+    let temp = 20.0 - (alt * 0.0065) + (Math.random()*0.6-0.3);
+    if (process.env.BENCH_ALT === 'true') {
+      temp = 22.50 + (Math.random() * 0.04 - 0.02); // Constant room temp (22.5 +/- 0.02)
+    }
+
     const buf = Buffer.alloc(PACKET_LENGTH_BYTES);
     buf.writeUInt16LE(PACKET_SYNC, 0);
     buf.writeUInt8(PACKET_VERSION, 2);
@@ -95,7 +101,7 @@ function startEmulator() {
     buf.writeUInt16LE(tick, 5); // pkt_id
     buf.writeUInt32LE(tick * 1000, 7); // timestamp_ms
     buf.writeFloatLE(alt, 11); // altitude_m
-    buf.writeFloatLE(20.0 - (alt * 0.0065) + (Math.random()*0.6-0.3), 15); // temp_c
+    buf.writeFloatLE(temp, 15); // temp_c
     buf.writeFloatLE(1013.25 * Math.pow(1 - 2.25577e-5 * alt, 5.25588), 19); // pressure_hpa
     buf.writeFloatLE(accel, 23); // accel_z
     buf.writeFloatLE(Math.random() * 2 - 1, 27); // gyro_x
@@ -103,6 +109,7 @@ function startEmulator() {
     buf.writeFloatLE(lon, 35); // lon
     buf.writeInt8(-60 - Math.floor(alt / 20), 39); // rssi_dbm
     buf.writeUInt8(flags, 40); // flags
+
 
     let crc = crc16Ccitt(buf, PACKET_LENGTH_BYTES - 2);
     
@@ -128,7 +135,8 @@ function startEmulator() {
     if (tick >= 2)  nrcFlags |= 0x08; // FLAG_BARO_OK
     if (tick >= 6)  nrcFlags |= 0x20; // FLAG_SD_OK
 
-    const nrcBody = `${tick},${tick*1000},${alt.toFixed(2)},${(20.0 - alt*0.0065).toFixed(2)},${(1013.25 * Math.pow(1 - 2.25577e-5 * alt, 5.25588)).toFixed(2)},${lat.toFixed(5)},${lon.toFixed(5)},${-60 - Math.floor(alt / 20)},${nrcFlags}`;
+    const nrcBody = `${tick},${tick*1000},${alt.toFixed(2)},${temp.toFixed(2)},${(1013.25 * Math.pow(1 - 2.25577e-5 * alt, 5.25588)).toFixed(2)},${lat.toFixed(5)},${lon.toFixed(5)},${-60 - Math.floor(alt / 20)},${nrcFlags}`;
+
     const nrcCrc = crc16Ccitt(Buffer.from(nrcBody, 'utf8')).toString(16).toUpperCase().padStart(4, '0');
     const nrcStr = `NRC2:${nrcBody},${nrcCrc}\n`;
     
