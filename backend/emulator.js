@@ -33,9 +33,9 @@ const {
 let interval;
 let tick = 0;
 
-// UAE (University of Birmingham Dubai) base coordinates
-const BASE_LAT = 25.10366;
-const BASE_LON = 55.15535;
+// UAE (Dubai Outsource City, near Academic City) base coordinates
+const BASE_LAT = 25.1297;
+const BASE_LON = 55.4306;
 
 // Persistent state for smooth noise (EMA low-pass)
 let tempEma    = 22.50;

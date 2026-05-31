@@ -47,8 +47,8 @@ class FlightSimulator:
         self.max_altitude = 0.0
         self.temperature = 22.50
         self.pressure = 1013.25
-        self.latitude = 25.1036     # University of Birmingham Dubai coordinates
-        self.longitude = 55.1553
+        self.latitude = 25.1297     # Dubai Outsource City coordinates
+        self.longitude = 55.4306
         self.flags = 0x2C           # FLAG_GPS_FIX | FLAG_BARO_OK | FLAG_SD_OK
         self.rssi = -55
         self.state = "PRE_FLIGHT"
