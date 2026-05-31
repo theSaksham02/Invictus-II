@@ -38,7 +38,6 @@ function startEmulator() {
     tick++;
     let alt = 0, accel = 1.0;
     
-    // Simulated Flight Physics
     if (tick < 30) {
       alt = 0 + (Math.random()*0.4 - 0.2); // IDLE
     } else if (tick < 90) {
@@ -53,6 +52,11 @@ function startEmulator() {
     } else {
       alt = 0 + (Math.random()*0.4 - 0.2); // LANDED
     }
+
+    if (process.env.BENCH_ALT === 'true') {
+      alt = alt / 150.0; // Scale 660m peak down to ~4.4m (14.4 feet)
+    }
+
 
     // Simulated GPS Trajectory (Wind Drift)
     let windLat = 0;
