@@ -1,3 +1,17 @@
+#!/usr/bin/env python3
+"""
+NRC Interactive Flight Injector — FRR Bench-Test Simulator
+==========================================================
+Creates a virtual serial port on macOS and feeds realistic NRC2: telemetry
+packets into the backend at 1 Hz. Keyboard hotkeys control the flight profile.
+
+Usage:
+    python3 flight_injector.py
+
+Requires:  Python 3.8+, macOS (uses pty for virtual serial)
+No external pip packages needed — stdlib only.
+"""
+
 import os
 import pty
 import sys
@@ -5,9 +19,10 @@ import time
 import tty
 import termios
 import select
+import random
 
 # ==============================================================================
-# CRC16-CCITT CHECKSUM UTILITY
+# CRC16-CCITT CHECKSUM  (mirrors backend/cansat-hardware.js crc16Ccitt exactly)
 # ==============================================================================
 def crc16_ccitt(data: str) -> int:
     crc = 0xFFFF
@@ -30,161 +45,206 @@ class FlightSimulator:
         self.start_time = int(time.time() * 1000)
         self.altitude = 0.0
         self.max_altitude = 0.0
-        self.temperature = 22.5
+        self.temperature = 22.50
         self.pressure = 1013.25
-        self.latitude = 52.4797   # University of Birmingham coordinates
-        self.longitude = -1.9268
-        self.flags = 0x2C         # Default: FLAG_BARO_OK | FLAG_SD_OK | FLAG_GPS_FIX
+        self.latitude = 25.1036     # University of Birmingham Dubai coordinates
+        self.longitude = 55.1553
+        self.flags = 0x2C           # FLAG_GPS_FIX | FLAG_BARO_OK | FLAG_SD_OK
         self.rssi = -55
-        self.state = "PRE_FLIGHT" # PRE_FLIGHT, POWERED, APOGEE, LANDED
-        self.launch_tick = 0
-        self.landed_tick = 0
+        self.state = "PRE_FLIGHT"
+        self.descent_started = False
 
-    def update(self, key_press):
+    def build_packet(self):
+        """Format the telemetry body, compute CRC, return full NRC2: line."""
         self.packet_id += 1
         current_time = int(time.time() * 1000) - self.start_time
 
-        # State transition handling based on keyboard inputs
+        body = (
+            f"{self.packet_id},{current_time},"
+            f"{self.altitude:.2f},{self.temperature:.2f},{self.pressure:.2f},"
+            f"{self.latitude:.6f},{self.longitude:.6f},"
+            f"{self.rssi},{self.flags}"
+        )
+        crc = crc16_ccitt(body)
+        return f"NRC2:{body},{crc:04X}\n"
+
+    def tick(self, key_press):
+        """Advance the simulation by one second, applying any key command."""
+
+        # ── Key 1: Reset to pad ──────────────────────────────────────────
         if key_press == '1':
             self.state = "PRE_FLIGHT"
             self.altitude = 0.0
+            self.max_altitude = 0.0
             self.pressure = 1013.25
+            self.temperature = 22.50
             self.flags = 0x2C
-            print("\n[SIM] State: PRE_FLIGHT Staging Mode")
+            self.descent_started = False
+            print("\n  ▶ [STATE] PRE_FLIGHT — On pad, 0.0m, sensors nominal")
 
+        # ── Key 2: Bench lift (10-15 ft / 3-4.5m) ───────────────────────
         elif key_press == '2':
-            self.state = "POWERED"
-            self.flags |= 0x01  # Set FLAG_LAUNCHED
-            print("\n[SIM] State: POWERED FLIGHT initiated")
+            self.state = "BENCH_LIFT"
+            print("\n  ▶ [STATE] BENCH LIFT — Simulating 10-15 ft physical lift")
 
+        # ── Key 3: Apogee lock ───────────────────────────────────────────
         elif key_press == '3':
             self.state = "APOGEE"
-            self.flags |= 0x03  # Set FLAG_LAUNCHED | FLAG_APOGEE
-            self.altitude = 670.56 # ~2200 feet target apogee
-            self.max_altitude = 670.56
-            self.pressure = 938.50
-            print("\n[SIM] State: APOGEE reached (2200 ft target locked)")
+            self.flags |= 0x03  # FLAG_LAUNCHED | FLAG_APOGEE
+            self.descent_started = True
+            print(f"\n  ▶ [STATE] APOGEE — Peak locked at {self.max_altitude:.2f}m, descending")
 
+        # ── Key 4: Landed ────────────────────────────────────────────────
         elif key_press == '4':
             self.state = "LANDED"
-            self.altitude = 0.2
-            self.pressure = 1013.20
-            print("\n[SIM] State: LANDED Recovery Mode active")
+            self.altitude = 0.10 + random.uniform(-0.05, 0.05)
+            self.pressure = 1013.25 + random.uniform(-0.1, 0.1)
+            self.flags |= 0x03
+            print(f"\n  ▶ [STATE] LANDED — Ground level, OLED locked at MAX: {self.max_altitude:.2f}m")
 
+        # ── Key 6: Toggle BMP280 sensor failure ──────────────────────────
         elif key_press == '6':
-            # Toggle sensor failure
             if self.flags & 0x40:
-                self.flags &= ~0x40 # Remove FLAG_STALE_SENSOR
-                self.temperature = 22.5
-                print("\n[SIM] Sensor status: BMP280 recovered")
+                self.flags &= ~0x40
+                self.temperature = 22.50
+                print("\n  ▶ [SENSOR] BMP280 recovered — primary temperature restored")
             else:
-                self.flags |= 0x40 # Set FLAG_STALE_SENSOR
-                self.temperature = 23.8 # Switch to secondary LM75 reading
-                print("\n[SIM] Sensor status: BMP280 failed. Hot-swapping to LM75 fallback")
+                self.flags |= 0x40
+                self.temperature = 23.80  # LM75 fallback reading
+                print("\n  ▶ [SENSOR] BMP280 FAILED — hot-swapped to LM75 (23.80°C)")
 
-        # Dynamic physics simulation
-        if self.state == "POWERED":
-            self.altitude += 75.0  # Rapid climb
-            self.pressure -= 8.5
+        # ── Physics per state ────────────────────────────────────────────
+        if self.state == "PRE_FLIGHT":
+            # Small sensor noise on the pad
+            self.altitude = random.uniform(-0.15, 0.15)
+            self.pressure = 1013.25 + random.uniform(-0.08, 0.08)
+
+        elif self.state == "BENCH_LIFT":
+            # Gradually rise to 3-4.5m over ~5 ticks, then hold
+            target = random.uniform(3.0, 4.5)
+            if self.altitude < target:
+                self.altitude += random.uniform(0.5, 1.2)
+                self.pressure -= random.uniform(0.03, 0.06)
+            else:
+                self.altitude += random.uniform(-0.1, 0.1)  # Hold with noise
+            if self.altitude > 3.0:
+                self.flags |= 0x01  # FLAG_LAUNCHED triggers at >3m sustained
+
             if self.altitude > self.max_altitude:
                 self.max_altitude = self.altitude
+
         elif self.state == "APOGEE":
-            self.altitude -= 10.5  # Slow parachute descent
-            self.pressure += 1.2
-            if self.altitude < 10.0:
+            # Slow parachute descent
+            self.altitude -= random.uniform(1.5, 3.0)
+            self.pressure += random.uniform(0.1, 0.3)
+            if self.altitude < 0.5:
                 self.state = "LANDED"
-                self.altitude = 0.0
+                self.altitude = 0.10
                 self.pressure = 1013.25
-        elif self.state == "PRE_FLIGHT":
+
+        elif self.state == "LANDED":
+            self.altitude = 0.10 + random.uniform(-0.05, 0.05)
+            self.pressure = 1013.25 + random.uniform(-0.1, 0.1)
+
+        # Clamp altitude floor
+        if self.altitude < -0.5:
             self.altitude = 0.0
-            self.pressure = 1013.25
 
-        # Format raw telemetry payload
-        body = f"{self.packet_id},{current_time},{self.altitude:.2f},{self.temperature:.2f},{self.pressure:.2f},{self.latitude:.6f},{self.longitude:.6f},{self.rssi},{self.flags}"
-        crc = crc16_ccitt(body)
-        packet = f"NRC2:{body},{crc:04X}\n"
-        return packet
+        # Track max
+        if self.altitude > self.max_altitude:
+            self.max_altitude = self.altitude
+
+        # Add subtle RSSI jitter
+        self.rssi = -55 + random.randint(-8, 4)
+
+        return self.build_packet()
+
 
 # ==============================================================================
-# KEYBOARD INPUT HANDLER
+# NON-BLOCKING KEYBOARD
 # ==============================================================================
-def get_key_non_blocking():
+def get_key():
     if select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], []):
         return sys.stdin.read(1)
     return None
 
+
 # ==============================================================================
-# MAIN EMULATION ENGINE
+# MAIN
 # ==============================================================================
 def main():
-    print("==========================================================")
-    print("      NRC FLIGHT SENSORS INTERACTIVE HIL INJECTOR         ")
-    print("==========================================================")
+    print("=" * 62)
+    print("   NRC FLIGHT INJECTOR  —  FRR Bench-Test Simulator v1.0")
+    print("=" * 62)
 
-    # Open virtual serial terminal pair
+    # Create virtual serial port pair
     master, slave = pty.openpty()
     slave_name = os.ttyname(slave)
-    
-    # Create absolute symlink matching the backend config
+
     symlink_path = "/dev/tty.virtual-nrc"
     if os.path.exists(symlink_path):
         os.remove(symlink_path)
-    
+
     try:
         os.symlink(slave_name, symlink_path)
-        print(f"[SIMULATOR] Virtual port established successfully.")
-        print(f"[SIMULATOR] Symlink target: {symlink_path}")
-        print(f"[SIMULATOR] Ensure backend .env has: SERIAL_PORT_NRC={symlink_path}\n")
+        print(f"\n  ✅ Virtual serial port: {symlink_path}")
+        print(f"     Backend .env needs:  SERIAL_PORT_NRC={symlink_path}")
     except Exception as e:
-        print(f"[WARNING] Could not create symlink: {e}")
-        print(f"[SIMULATOR] Configure your backend .env to read directly from: {slave_name}\n")
+        print(f"\n  ⚠️  Symlink failed ({e}), use raw device: {slave_name}")
 
-    print("----------------------------------------------------------")
-    print(" KEYBOARD MANUAL CONTROLLER:")
-    print("   [1] Reset to PRE-FLIGHT (Staging / 0m)")
-    print("   [2] Trigger LAUNCH THRUST (Rapid Ascent)")
-    print("   [3] Force APOGEE (Peak at ~2200 ft, deploy parachute)")
-    print("   [4] Force LANDED (Resting at Ground Level)")
-    print("   [5] Test Watchdog Hang (Freezes transmit for 5 seconds)")
-    print("   [6] Trigger BMP280 Sensor Fail (Hot-swaps to LM75 fallback)")
-    print("   [Q] Quit simulator")
-    print("----------------------------------------------------------")
+    print("\n" + "-" * 62)
+    print("  KEYBOARD CONTROLS:")
+    print("    [1]  PRE-FLIGHT   — Reset to pad (0m, all sensors OK)")
+    print("    [2]  BENCH LIFT   — Physical 10-15 ft lift simulation")
+    print("    [3]  APOGEE       — Lock peak altitude, begin descent")
+    print("    [4]  LANDED       — Return to ground, freeze OLED")
+    print("    [5]  WDT HANG     — Freeze TX for 5s (watchdog test)")
+    print("    [6]  SENSOR FAIL  — Toggle BMP280 failure / LM75 swap")
+    print("    [Q]  QUIT")
+    print("-" * 62)
+    print("  Transmitting at 1 Hz...\n")
 
-    # Set terminal to non-blocking mode to catch keypresses instantly
     old_settings = termios.tcgetattr(sys.stdin)
     try:
         tty.setcbreak(sys.stdin.fileno())
         sim = FlightSimulator()
-        
+
         while True:
-            key = get_key_non_blocking()
-            if key == 'q' or key == 'Q':
-                print("\n[SIMULATOR] Shutting down...")
+            key = get_key()
+
+            if key in ('q', 'Q'):
+                print("\n\n  [SIMULATOR] Shutting down gracefully...")
                 break
-            
+
             if key == '5':
-                print("\n[SIMULATOR] ⚠️ Injecting Watchdog Test: Freezing transmissions for 5s...")
+                print("\n  ⚠️  [WDT] Freezing transmissions for 5 seconds...")
                 time.sleep(5)
-                print("[SIMULATOR] Watchdog recovery cycle complete. Resuming...")
+                print("  ✅ [WDT] Watchdog triggered reboot — resuming TX")
                 key = None
 
-            # Generate packet based on key inputs
-            packet = sim.update(key)
-            
-            # Write packet to virtual serial port
+            packet = sim.tick(key)
+
+            # Feed into virtual serial port
             os.write(master, packet.encode('utf-8'))
-            
-            # Print feedback to emulator console
-            sys.stdout.write(f"\r[TX] {packet.strip()}   ")
+
+            # Console feedback
+            state_tag = sim.state.ljust(12)
+            alt_str = f"{sim.altitude:7.2f}m"
+            max_str = f"MAX:{sim.max_altitude:.2f}m"
+            flags_hex = f"0x{sim.flags:02X}"
+            sys.stdout.write(
+                f"\r  [{state_tag}] ALT:{alt_str}  {max_str}  FLAGS:{flags_hex}  PKT:{sim.packet_id}   "
+            )
             sys.stdout.flush()
-            
+
             time.sleep(1.0)
-            
+
     finally:
         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
         if os.path.exists(symlink_path):
             os.remove(symlink_path)
-        print("[SIMULATOR] Cleaned up virtual port links.")
+        print("\n  [SIMULATOR] Virtual port cleaned up. Goodbye.\n")
+
 
 if __name__ == '__main__':
     main()
