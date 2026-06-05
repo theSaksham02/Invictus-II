@@ -33,9 +33,6 @@ async function withMockedServer(sendLaunchCommand, fn) {
         sendLaunchCommand
       };
     }
-    if (request === './emulator') {
-      return { startEmulator: () => {}, stopEmulator: () => {} };
-    }
     if (request === './rover-proxy') {
       return {
         control: async () => ({}),

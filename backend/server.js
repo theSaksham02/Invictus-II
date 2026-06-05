@@ -10,7 +10,6 @@ const fs = require('fs');
 
 const db = require('./db');
 const serial = require('./serial');
-const emulator = require('./emulator');
 const rover = require('./rover-proxy');
 const { log } = require('./logger');
 const {
@@ -22,9 +21,10 @@ const {
 
 const app = express();
 const server = http.createServer(app);
+const CONFIGURED_PORT = Number.parseInt(process.env.PORT || '3000', 10);
 const DEFAULT_ALLOWED_ORIGINS = [
-  'http://localhost:3000',
-  'http://127.0.0.1:3000',
+  `http://localhost:${CONFIGURED_PORT}`,
+  `http://127.0.0.1:${CONFIGURED_PORT}`,
   'http://localhost:5500',
   'http://127.0.0.1:5500',
   'null'
@@ -51,8 +51,8 @@ const SD_UPLOAD_MAX_ROWS = Math.max(
   Number.parseInt(process.env.SD_UPLOAD_MAX_ROWS || '50000', 10) || 50000,
   100
 );
-const TELEMETRY_SOURCES = new Set(['CANSAT', 'NRC', 'SD_CARD']);
-const EXPORT_SOURCES = new Set(['CANSAT', 'NRC', 'SD_CARD', 'ALL']);
+const TELEMETRY_SOURCES = new Set(['CANSAT', 'NRC']);
+const EXPORT_SOURCES = new Set(['CANSAT', 'NRC', 'ALL']);
 const LAUNCH_SOURCES = new Set(['CANSAT', 'NRC', 'ALL']);
 
 const upload = multer({
@@ -74,10 +74,7 @@ app.use('/vendor', express.static(path.resolve(__dirname, 'node_modules/three/bu
 app.use('/images', express.static(path.resolve(__dirname, '../images')));
 
 let uptimeStart = Date.now();
-let isSimMode = process.env.SIM_MODE === 'true';
-let simStarted = false;
 let shuttingDown = false;
-let modeSwitchInFlight = Promise.resolve();
 
 class HttpError extends Error {
   constructor(status, message, details = {}) {
@@ -188,16 +185,25 @@ function getCsvValue(row, lookup, names) {
   return undefined;
 }
 
-function parseSdPacketRow(row, lookup, raw, receivedAt) {
+function parseOptionalCsvFloat(row, lookup, names) {
+  const rawValue = getCsvValue(row, lookup, names);
+  if (rawValue === undefined || rawValue === null || String(rawValue).trim() === '') return null;
+  const parsed = Number.parseFloat(rawValue);
+  return Number.isFinite(parsed) ? parsed : NaN;
+}
+
+function parseSdPacketRow(row, lookup, raw, receivedAt, source) {
+  const accelZ = parseOptionalCsvFloat(row, lookup, ['accel_z', 'acceleration_z']);
+  const gyroX = parseOptionalCsvFloat(row, lookup, ['gyro_x', 'gyroscope_x']);
   const packet = {
-    source: 'SD_CARD',
+    source,
     pkt_id: Number.parseInt(getCsvValue(row, lookup, ['pkt_id', 'packet_id', 'id']), 10),
     timestamp_ms: Number.parseInt(getCsvValue(row, lookup, ['timestamp_ms', 'time_ms', 'timestamp']), 10),
     altitude_m: Number.parseFloat(getCsvValue(row, lookup, ['altitude_m', 'alt_m', 'altitude'])),
     temp_c: Number.parseFloat(getCsvValue(row, lookup, ['temp_c', 'temperature_c', 'temperature'])),
     pressure_hpa: Number.parseFloat(getCsvValue(row, lookup, ['pressure_hpa', 'pressure'])),
-    accel_z: Number.parseFloat(getCsvValue(row, lookup, ['accel_z', 'acceleration_z'])),
-    gyro_x: Number.parseFloat(getCsvValue(row, lookup, ['gyro_x', 'gyroscope_x'])),
+    accel_z: accelZ,
+    gyro_x: gyroX,
     lat: Number.parseFloat(getCsvValue(row, lookup, ['lat', 'latitude'])),
     lon: Number.parseFloat(getCsvValue(row, lookup, ['lon', 'lng', 'longitude'])),
     flags: Number.parseInt(getCsvValue(row, lookup, ['flags', 'flag']), 10),
@@ -212,8 +218,8 @@ function parseSdPacketRow(row, lookup, raw, receivedAt) {
     Number.isFinite(packet.altitude_m) &&
     Number.isFinite(packet.temp_c) &&
     Number.isFinite(packet.pressure_hpa) &&
-    Number.isFinite(packet.accel_z) &&
-    Number.isFinite(packet.gyro_x) &&
+    (source === 'NRC' ? packet.accel_z === null || Number.isFinite(packet.accel_z) : Number.isFinite(packet.accel_z)) &&
+    (source === 'NRC' ? packet.gyro_x === null || Number.isFinite(packet.gyro_x) : Number.isFinite(packet.gyro_x)) &&
     Number.isFinite(packet.lat) &&
     Number.isFinite(packet.lon) &&
     Number.isInteger(packet.flags)
@@ -256,50 +262,7 @@ let emitToAll = (event, payload) => {
   io.emit(event, payload);
 };
 
-function startEmulatorOnce() {
-  if (simStarted) return;
-  emulator.startEmulator();
-  simStarted = true;
-}
-
-async function setSimMode(enabled, reason = 'manual') {
-  if (enabled === isSimMode) return;
-
-  isSimMode = enabled;
-  process.env.SIM_MODE = enabled ? 'true' : 'false';
-  await serial.shutdown();
-
-  if (enabled) {
-    startEmulatorOnce();
-    serial.initSerial(emitToAll);
-  } else {
-    if (simStarted) {
-      emulator.stopEmulator();
-      simStarted = false;
-    }
-    serial.initSerial(emitToAll, enableSimFallback);
-  }
-
-  log('info', 'Simulation mode changed', { enabled, reason });
-  emitToAll('sim_mode_changed', { sim_mode: isSimMode, reason });
-}
-
-async function enableSimFallback(reason) {
-  if (process.env.ENABLE_SIM_FALLBACK !== 'true') {
-    log('error', 'Hardware serial unavailable; simulator fallback disabled', { reason });
-    return;
-  }
-  if (simStarted || isSimMode) return;
-  log('warn', 'Hardware serial unavailable, falling back to emulator', { reason });
-  await setSimMode(true, `fallback: ${reason}`);
-}
-
-if (isSimMode) {
-  process.env.SIM_MODE = 'true';
-  startEmulatorOnce();
-}
-
-serial.initSerial(emitToAll, enableSimFallback);
+serial.initSerial(emitToAll);
 
 app.get('/', (req, res) => {
   const dashPath = path.resolve(__dirname, '../dashboard/index.html');
@@ -340,27 +303,9 @@ app.get('/api/health', (req, res) => {
     uptime_s: Math.floor((Date.now() - uptimeStart) / 1000),
     serial_connected: Boolean(signal.CANSAT.connected || signal.NRC.connected),
     db_packet_count: cansatStats.count + nrcStats.count,
-    sim_mode: isSimMode,
     signal
   });
 });
-
-app.post('/api/sim-mode', asyncRoute(async (req, res) => {
-  if (typeof req.body?.enabled !== 'boolean') {
-    throw new HttpError(400, 'enabled must be a boolean');
-  }
-
-  modeSwitchInFlight = modeSwitchInFlight
-    .catch(() => {})
-    .then(() => setSimMode(req.body.enabled, 'frontend'));
-  await modeSwitchInFlight;
-
-  res.json({
-    ok: true,
-    sim_mode: isSimMode,
-    signal: serial.getSignalState()
-  });
-}));
 
 app.post('/api/launch', asyncRoute(async (req, res) => {
   const source = parseSource(req.body?.source, LAUNCH_SOURCES, 'ALL');
@@ -437,6 +382,7 @@ app.get('/api/stats', (req, res) => {
 
 app.post('/api/upload-sd', upload.single('file'), asyncRoute(async (req, res) => {
   if (!req.file) throw new HttpError(400, 'No file uploaded');
+  const source = parseSource(req.body?.source || req.query?.source, new Set(['CANSAT', 'NRC']), 'CANSAT');
 
   const now = Date.now();
   let content = '';
@@ -457,12 +403,12 @@ app.post('/api/upload-sd', upload.single('file'), asyncRoute(async (req, res) =>
   let skipped = 0;
   for (let i = 1; i < records.length; i++) {
     const row = records[i];
-    if (row.length < 10) {
+    if (row.length < 8) {
       skipped++;
       continue;
     }
 
-    const packet = parseSdPacketRow(row, headerLookup, row.map(csvEscape).join(','), now);
+    const packet = parseSdPacketRow(row, headerLookup, row.map(csvEscape).join(','), now, source);
     if (!packet) {
       skipped++;
       continue;
@@ -481,6 +427,7 @@ app.post('/api/upload-sd', upload.single('file'), asyncRoute(async (req, res) =>
 
   const response = {
     ok: true,
+    source,
     inserted: packets.length,
     skipped,
     filename: req.file.originalname
@@ -587,23 +534,15 @@ app.use((error, req, res, next) => {
   res.status(status).json(payload);
 });
 
-const PORT = Number.parseInt(process.env.PORT || '3000', 10);
+const PORT = CONFIGURED_PORT;
 server.listen(PORT, () => {
-  log('info', 'MACH-26 Ground Station started', { port: PORT, sim_mode: isSimMode });
+  log('info', 'MACH-26 Ground Station started', { port: PORT, mode: 'hardware' });
 });
 
 async function shutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
   log('info', 'Shutting down ground station', { signal });
-
-  if (simStarted) {
-    try {
-      emulator.stopEmulator();
-    } catch (error) {
-      log('warn', 'Failed to stop emulator cleanly', { error: error.message });
-    }
-  }
 
   try {
     await serial.shutdown();

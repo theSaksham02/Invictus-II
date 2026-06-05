@@ -32,7 +32,6 @@ test('NRC serial schedules reconnect after port error', async () => {
     portPath: '/dev/missing',
     baudRate: 115200,
     disabledPortPath: '/dev/other',
-    isSimMode: false,
     reconnectDelayMs: 10,
     diagnostics,
     sourceState,

@@ -368,16 +368,16 @@ Because the Heltec WiFi LoRa 32 V3 has a dual-core ESP32-S3 chip, you can utiliz
 5. The local diagnostic web page will display:
    * **Sensor Checklists:** BMP280 status, LM75 status, SD card health, GPS satellite count.
    * **SD Card File Explorer:** Lets you download `/flight.csv` directly over WiFi after a test flight!
-   * **Simulated Launch Button:** Triggers a software altitude spike to test if the telemetry flags (`FLAG_LAUNCHED`, `FLAG_APOGEE`) are transmitted correctly.
+   * **Flight data download:** Use captured PCB logs for review; do not use software-generated launch data for competition preparation.
 6. Disable WiFi (remove the jumper) before actual launch to conserve battery and eliminate RF noise.
 
 ### Phase 3: Syringe/Jar Pressure Test (State Machine Validation)
-To verify that the flight computer correctly identifies **Launch** and **Apogee** without actually launching the rocket, simulate atmospheric pressure changes:
+To verify that the flight computer correctly identifies **Launch** and **Apogee** without launching the rocket, apply real pressure changes to the BMP280:
 1. Place the complete avionics bay (Heltec, BMP280, battery) inside a large, clear airtight jar, or seal the BMP280 module inside a large plastic syringe.
 2. Monitor the real-time telemetry output on your ground station.
-3. **Simulate Launch:** Slowly pull the syringe plunger out (or draw air out of the jar). This creates a vacuum, simulating rising altitude.
+3. **Launch-equivalent pressure change:** Slowly pull the syringe plunger out (or draw air out of the jar). This creates a real pressure drop at the sensor.
    * Verify that when calculated altitude increases by > 10m, the telemetry string shows the `FLAG_LAUNCHED` bit (Bit 0) is set.
-4. **Simulate Apogee:** Stop pulling the plunger and slowly push it back in (increasing pressure, which simulates descent).
+4. **Descent-equivalent pressure change:** Stop pulling the plunger and slowly push it back in, increasing pressure at the sensor.
    * Verify that as calculated altitude drops by > 5m from the peak, the telemetry string shows the `FLAG_APOGEE` bit (Bit 1) is set.
    * Confirm the built-in OLED screen locks the maximum altitude value.
 
@@ -392,7 +392,7 @@ To verify that the flight computer correctly identifies **Launch** and **Apogee*
 ### Phase 5: Thermal Failure Fallback Test
 1. Power up the avionics bay.
 2. Heat up the BMP280 module using a hair dryer (or cool it with compressed air).
-3. **Simulated Hardware Disconnection:** While the system is running, unplug the BMP280 module's I2C pins (SDA/SCL) or jump the CSB line to simulate sensor failure.
+3. **Hardware Disconnection:** While the system is running, unplug the BMP280 module's I2C pins (SDA/SCL) or jump the CSB line to verify sensor-failure handling.
 4. Verify the following:
    * Telemetry flag sets `FLAG_STALE_SENSOR` (Bit 6) to alert the ground crew.
    * The temperature reading instantly falls back to the secondary **LM75 sensor**.
@@ -411,14 +411,14 @@ To verify that the flight computer correctly identifies **Launch** and **Apogee*
 Rocket launches produce intense vibrations (up to 15G). You must ensure no components come loose.
 1. Seal your complete avionics bay.
 2. Turn on the system and ensure it is logging data to the SD card.
-3. Perform a **Stress Shake Test:** Vigorously shake the avionics bay for 60 seconds (simulating launch thrust and aerodynamic buffet).
+3. Perform a **Stress Shake Test:** Vigorously shake the avionics bay for 60 seconds to validate connector and SD-card retention under vibration.
 4. Unpack the bay and check the logs:
    * **Power Stability:** Ensure the board did not reboot (timestamp did not reset to 0). If it did, add hot glue or solder joints to the battery switch and JST connector.
    * **SD Card Continuity:** Check `/flight.csv` to confirm that logging did not stop. Micro-SD cards inside standard spring-loaded slots can lose contact under high-vibration unless taped down securely.
    * **I2C Integrity:** Confirm that the BMP280 did not throw sensor errors.
 
 ### Phase 8: Watchdog Timer Recovery Test
-1. Insert a temporary test loop in the firmware main loop that simulates a system hang (e.g. `while(true) {}`) when a button is pressed or after 60 seconds.
+1. Insert a temporary test loop in the firmware main loop that forces a system hang (e.g. `while(true) {}`) when a button is pressed or after 60 seconds.
 2. Run the system. When the freeze is triggered, verify that:
    * Telemetry stops for exactly **5 seconds**.
    * The hardware **Watchdog Timer** expires.

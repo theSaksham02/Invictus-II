@@ -282,7 +282,7 @@
         <div class="preflight-grid panel" style="margin-bottom: var(--gap);">
            <div class="pf-item"><span class="pf-label">BMP388</span><span id="pf-bmp" class="pf-val">FLT</span></div>
            <div class="pf-item"><span class="pf-label">MPU6500</span><span id="pf-mpu" class="pf-val">FLT</span></div>
-           <div class="pf-item"><span class="pf-label">SD_CARD</span><span id="pf-sd" class="pf-val">FLT</span></div>
+           <div class="pf-item"><span class="pf-label">SD LOG</span><span id="pf-sd" class="pf-val">FLT</span></div>
            <div class="pf-item"><span class="pf-label">GPS_FIX</span><span id="pf-gps" class="pf-val">FLT</span></div>
         </div>
 
@@ -623,7 +623,7 @@
       L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png', { maxZoom: 19 }).addTo(map);
       
       let mapMarker = null;
-      let elzMarker = null; // Expected Landing Zone
+      let elzMarker = null; // Expected Landing Zone disabled until real drift data is available.
       const trail = L.polyline([], { color: '#ffffff', weight: 2, opacity: 0.8 }).addTo(map);
 
       function updateMap(pkt) {
@@ -632,10 +632,10 @@
         if (mapMarker) mapMarker.setLatLng(pos);
         else mapMarker = L.circleMarker(pos, { radius: 3, color: '#fff', fillColor: '#fff', fillOpacity: 1, weight: 1 }).addTo(map);
         
-        // ELZ drift simulation based on altitude
-        const elzPos = [pkt.lat, pkt.lon + (pkt.altitude_m * 0.000002)];
-        if(elzMarker) elzMarker.setLatLng(elzPos).setRadius(Math.max(10, pkt.altitude_m * 0.1));
-        else elzMarker = L.circle(elzPos, { radius: Math.max(10, pkt.altitude_m * 0.1), color: '#ffb000', weight: 1, fillOpacity: 0.1, dashArray: '4' }).addTo(map);
+        if (elzMarker) {
+          map.removeLayer(elzMarker);
+          elzMarker = null;
+        }
 
         if (!isScrubbing) { trail.addLatLng(pos); map.panTo(pos); }
         $('coord-lat').textContent = pkt.lat.toFixed(5); $('coord-lon').textContent = pkt.lon.toFixed(5);
@@ -768,12 +768,8 @@
           const speed = Math.max(0.01, rktAccelCurrent * 0.1);
           gridHelper.position.z += speed; if (gridHelper.position.z > 1) gridHelper.position.z -= 1;
 
-          if (rktAccelCurrent > 1.2 && !isScrubbing) {
-             const shake = Math.min((rktAccelCurrent - 1.2) * 0.01, 0.03);
-             camera.position.x = 2.5 + (Math.random() - 0.5) * shake; camera.position.y = 1 + (Math.random() - 0.5) * shake;
-          } else {
-             camera.position.x += (2.5 - camera.position.x) * 0.1; camera.position.y += (1 - camera.position.y) * 0.1;
-          }
+          camera.position.x += (2.5 - camera.position.x) * 0.1;
+          camera.position.y += (1 - camera.position.y) * 0.1;
           renderer.render(scene, camera);
         };
         animate();
@@ -788,7 +784,7 @@
       // PREFLIGHT CHECKLIST
       function isTelemetrySourceActive(src) {
         const state = signalState[src] || {};
-        return signalState.mode === 'sim' || (state.connected && !state.lost);
+        return state.connected && !state.lost;
       }
 
       function updatePreflight(pkt) {
@@ -1104,7 +1100,7 @@
       $('file-sd').addEventListener('change', e => {
         const file = e.target.files[0];
         if (!file) return;
-        const fd = new FormData(); fd.append('file', file);
+        const fd = new FormData(); fd.append('file', file); fd.append('source', source);
         $('btn-upload').textContent = 'UPLOADING...';
         fetch(apiUrl('/api/upload-sd'), { method: 'POST', body: fd }).finally(() => { $('btn-upload').textContent = 'UPLOAD SD'; e.target.value = ''; });
       });

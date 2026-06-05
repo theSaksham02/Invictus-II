@@ -263,7 +263,6 @@ Invictus-II/
 │   ├── db.js              ← SQLite schema + queries
 │   ├── parser.js          ← Binary CANSAT + NRC ASCII parser
 │   ├── serial.js          ← SerialPort + auto-reconnect
-│   ├── simulator.js       ← Parabolic flight simulation (dev)
 │   ├── phase-tracker.js   ← Flight state machine (per source)
 │   ├── rover-proxy.js     ← HTTP proxy → RPi Flask
 │   ├── package.json

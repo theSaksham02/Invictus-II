@@ -115,11 +115,7 @@ cd firmware/nrc
 pio run --target upload
 ```
 
-**Option B — If PlatformIO is not installed, use the fake demo:**
-```bash
-cd scripts
-bash heltec_testing.sh
-```
+If PlatformIO is not installed, install it before continuing. This competition checkout only supports telemetry from physical PCBs.
 
 After flashing, open the serial monitor:
 ```bash
@@ -202,15 +198,12 @@ SERIAL_PORT_NRC=/dev/cu.usbmodem14201 node backend/server.js
 > **Finding your USB port:** Run `ls /dev/cu.usb*` to see connected devices. The Heltec V3 typically shows up as `/dev/cu.usbmodem14201` or `/dev/cu.usbserial-*`.
 
 > [!NOTE]
-> If no Heltec is plugged in, start in simulation mode instead:
-> ```bash
-> SIM_MODE=true node backend/server.js
-> ```
+> If no Heltec is plugged in, the dashboard must show disconnected/lost hardware state. It must not generate replacement telemetry.
 
 **Expected terminal output from the server:**
 
 ```
-[INFO] MACH-26 Ground Station started { port: 3000, sim_mode: false }
+[INFO] MACH-26 Ground Station started { port: 3000, mode: 'hardware' }
 [SERIAL] NRC port opened on /dev/cu.usbmodem14201 @ 115200
 ```
 
@@ -287,7 +280,7 @@ After a flight test (lifting the board up and down):
 
 ## How to Simulate a Flight (Bench Test)
 
-Since you're indoors, simulate flight by physically **lifting the board up** (changes barometric altitude):
+Since you're indoors, validate altitude response by physically **lifting the board up** (changes barometric altitude):
 
 1. Place the board flat on the table → altitude reads ~0.0m
 2. Slowly raise the board to head height (~1.5m) → altitude climbs
@@ -379,7 +372,6 @@ You can also upload this CSV to the dashboard via the **Upload SD** button, whic
 | Flash firmware | `cd firmware/nrc && pio run --target upload` |
 | Serial monitor | `pio device monitor --baud 115200` |
 | Start server (hardware) | `SERIAL_PORT_NRC=/dev/cu.usbmodem14201 node backend/server.js` |
-| Start server (simulation) | `SIM_MODE=true node backend/server.js` |
 | Open dashboard | `http://localhost:3000/nrc` |
 | Force launch command | Type `CMD:LAUNCH` in serial monitor |
 | Export flight data | `http://localhost:3000/api/export?source=NRC` |

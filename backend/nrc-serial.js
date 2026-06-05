@@ -27,7 +27,6 @@ function createNrcSerial({
   portPath,
   baudRate,
   disabledPortPath,
-  isSimMode,
   reconnectDelayMs,
   diagnostics,
   sourceState,
@@ -59,7 +58,6 @@ function createNrcSerial({
 
     try {
       nrcPort = new PortClass({ path: portPath, baudRate });
-      if (isSimMode) global.mockNrc = nrcPort;
 
       const parser = nrcPort.pipe(new ReadlineParser({ delimiter: '\n' }));
       parser.on('data', (line) => {

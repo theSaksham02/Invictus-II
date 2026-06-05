@@ -55,7 +55,7 @@ UOBRPL competes in three simultaneous national and international competitions, a
 
 **Competition:** [UKSEDS ORT](https://ukseds.org/ignition/competitions/olympus-rover-trials/)
 **Vehicle:** NOVARIUM II
-**Type:** Planetary surface simulation rover
+**Type:** Planetary surface operations rover
 **Dashboard section:** Rover tab
 
 | Parameter | Value |
@@ -116,8 +116,7 @@ Invictus-II/
 │   ├── parser.js           ← Binary (CANSAT/MACHX/SUGAR) + ASCII (NRC)
 │   ├── serial.js           ← Multi-port serial (CANSAT + NRC)
 │   ├── rover-proxy.js      ← NOVARIUM II HTTP proxy
-│   ├── db.js               ← SQLite — all sources
-│   └── emulator.js         ← Dev simulation (all sources)
+│   └── db.js               ← SQLite — all sources
 ├── dashboard/
 │   ├── index.html          ← HELIOS dashboard selector
 │   ├── nrc.html            ← NRC telemetry UI

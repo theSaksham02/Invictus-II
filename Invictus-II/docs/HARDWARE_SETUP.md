@@ -2181,9 +2181,6 @@ cp .env.example .env
 # SERIAL_PORT=COM3            (Windows)
 # BAUD_RATE=115200
 
-# Start in simulation mode (no hardware needed)
-npm run sim
-
 # Start with real hardware
 npm start
 

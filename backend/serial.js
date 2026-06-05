@@ -1,4 +1,4 @@
-const { SerialPort, SerialPortMock } = require('serialport');
+const { SerialPort } = require('serialport');
 const { parseCansat } = require('./parser');
 const { CansatFrameParser } = require('./cansat-framer');
 const { insertPacket, insertEvent } = require('./db');
@@ -14,11 +14,10 @@ const CANSAT_CMD_BAUD = parseInt(process.env.SERIAL_BAUD_CANSAT_CMD || String(CA
 
 let cansatPort, cansatCmdPort, nrcSerial, cansatFrameParser;
 let shuttingDown = false;
-let fallbackTriggered = false;
 let watchdogInterval = null;
 let cansatReconnectTimer = null;
 let cansatCmdReconnectTimer = null;
-let activeMode = process.env.SIM_MODE === 'true' ? 'sim' : 'hardware';
+let activeMode = 'hardware';
 
 const SIGNAL_TIMEOUT_MS = Math.max(
   Number.parseInt(process.env.SIGNAL_TIMEOUT_MS || '5000', 10) || 5000,
@@ -79,21 +78,10 @@ function triggerSignalLost(source, emitFn, now) {
   }
 }
 
-function triggerFallback(enableSimFallback, reason) {
-  if (!enableSimFallback || fallbackTriggered) return;
-  fallbackTriggered = true;
-  console.warn('[SERIAL] enabling simulator fallback:', reason);
-  Promise.resolve(enableSimFallback(reason)).catch((error) => {
-    console.error('[SERIAL] simulator fallback failed:', error.message);
-  });
-}
-
-function initSerial(emitFn, enableSimFallback) {
+function initSerial(emitFn) {
   shuttingDown = false;
-  fallbackTriggered = false;
-  const isSimMode = process.env.SIM_MODE === 'true';
-  activeMode = isSimMode ? 'sim' : 'hardware';
-  const PortClass = isSimMode ? SerialPortMock : SerialPort;
+  activeMode = 'hardware';
+  const PortClass = SerialPort;
 
   if (watchdogInterval) clearInterval(watchdogInterval);
   watchdogInterval = setInterval(() => {
@@ -144,7 +132,6 @@ function initSerial(emitFn, enableSimFallback) {
   const connectCansat = () => {
     try {
       cansatPort = new PortClass({ path: CANSAT_PORT, baudRate: CANSAT_BAUD });
-      if (isSimMode) global.mockCansat = cansatPort;
 
       cansatFrameParser = cansatPort.pipe(new CansatFrameParser());
       cansatFrameParser.on('error', (err) => {
@@ -177,7 +164,6 @@ function initSerial(emitFn, enableSimFallback) {
         diagnostics.CANSAT.last_error = err.message;
         sourceState.CANSAT.connected = false;
         console.warn('[SERIAL] CANSAT Error:', err.message);
-        if (!isSimMode) triggerFallback(enableSimFallback, err.message);
         scheduleCansatReconnect(connectCansat);
       });
       cansatPort.on('close', () => {
@@ -190,7 +176,6 @@ function initSerial(emitFn, enableSimFallback) {
       diagnostics.CANSAT.serial_errors++;
       diagnostics.CANSAT.last_error = e.message;
       console.warn('[SERIAL] CANSAT Init Error:', e.message);
-      if (!isSimMode) triggerFallback(enableSimFallback, e.message);
       scheduleCansatReconnect(connectCansat);
     }
   };
@@ -221,7 +206,6 @@ function initSerial(emitFn, enableSimFallback) {
     portPath: NRC_PORT,
     baudRate: NRC_BAUD,
     disabledPortPath: CANSAT_PORT,
-    isSimMode,
     reconnectDelayMs: RECONNECT_DELAY_MS,
     diagnostics,
     sourceState,

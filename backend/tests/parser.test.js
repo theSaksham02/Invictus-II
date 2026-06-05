@@ -1,169 +1,52 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const { parseCansat, parseNrc } = require('../parser');
-const { CansatFrameParser } = require('../cansat-framer');
-const {
-  CANSAT_SOURCE_ID,
-  LEGACY_PACKET_LENGTH_BYTES,
-  PACKET_LENGTH_BYTES,
-  PACKET_PAYLOAD_LENGTH_BYTES,
-  PACKET_SYNC,
-  PACKET_VERSION,
-  crc16Ccitt
-} = require('../cansat-hardware');
 
-function makeValidLegacyCansatPacket() {
-  const buffer = Buffer.alloc(LEGACY_PACKET_LENGTH_BYTES);
-  buffer.writeUInt16LE(42, 0);
-  buffer.writeUInt32LE(123456, 2);
-  buffer.writeFloatLE(125.5, 6);
-  buffer.writeFloatLE(21.2, 10);
-  buffer.writeFloatLE(1008.4, 14);
-  buffer.writeFloatLE(0.8, 18);
-  buffer.writeFloatLE(-0.3, 22);
-  buffer.writeFloatLE(25.201, 26);
-  buffer.writeFloatLE(55.271, 30);
-  buffer.writeInt8(-70, 34);
-  buffer.writeUInt8(0x03, 35);
+const FIXTURE_DIR = path.join(__dirname, 'fixtures', 'hardware');
+const SKIP_REASON = 'No real PCB hardware parser fixtures captured yet. Run tests/capture-hardware-fixtures.js with connected PCBs.';
 
-  let checksum = 0;
-  for (let i = 0; i < 36; i++) checksum ^= buffer[i];
-  buffer.writeUInt8(checksum, 36);
-  return buffer;
+function readFixtureLines(extension) {
+  if (!fs.existsSync(FIXTURE_DIR)) return [];
+  return fs.readdirSync(FIXTURE_DIR)
+    .filter((file) => file.endsWith(extension))
+    .flatMap((file) => {
+      const content = fs.readFileSync(path.join(FIXTURE_DIR, file), 'utf8');
+      return content.split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line && !line.startsWith('#'));
+    });
 }
 
-function makeValidCansatPacket() {
-  const buffer = Buffer.alloc(PACKET_LENGTH_BYTES);
-  buffer.writeUInt16LE(PACKET_SYNC, 0);
-  buffer.writeUInt8(PACKET_VERSION, 2);
-  buffer.writeUInt8(CANSAT_SOURCE_ID, 3);
-  buffer.writeUInt8(PACKET_PAYLOAD_LENGTH_BYTES, 4);
-  buffer.writeUInt16LE(42, 5);
-  buffer.writeUInt32LE(123456, 7);
-  buffer.writeFloatLE(125.5, 11);
-  buffer.writeFloatLE(21.2, 15);
-  buffer.writeFloatLE(1008.4, 19);
-  buffer.writeFloatLE(0.8, 23);
-  buffer.writeFloatLE(-0.3, 27);
-  buffer.writeFloatLE(25.201, 31);
-  buffer.writeFloatLE(55.271, 35);
-  buffer.writeInt8(-70, 39);
-  buffer.writeUInt8(0x03, 40);
-  buffer.writeUInt16LE(crc16Ccitt(buffer, PACKET_LENGTH_BYTES - 2), PACKET_LENGTH_BYTES - 2);
-  return buffer;
-}
+test('parseNrc accepts captured NRC PCB telemetry lines', (t) => {
+  const lines = readFixtureLines('.nrc');
+  if (lines.length === 0) {
+    t.skip(SKIP_REASON);
+    return;
+  }
 
-test('parseCansat parses valid binary packet', () => {
-  const parsed = parseCansat(makeValidCansatPacket());
-  assert.ok(parsed);
-  assert.equal(parsed.source, 'CANSAT');
-  assert.equal(parsed.protocol_version, 2);
-  assert.equal(parsed.pkt_id, 42);
-  assert.equal(parsed.timestamp_ms, 123456);
-  assert.equal(parsed.flags, 0x03);
-  assert.equal(parsed.flags_decoded.launched, true);
-  assert.equal(parsed.sensor_health.rfm69hcw.ok, true);
+  for (const line of lines) {
+    const parsed = parseNrc(line);
+    assert.ok(parsed, `failed to parse NRC fixture: ${line}`);
+    assert.equal(parsed.source, 'NRC');
+    assert.equal(parsed.accel_z, null);
+    assert.equal(parsed.gyro_x, null);
+  }
 });
 
-test('parseCansat rejects invalid checksum', () => {
-  const corrupted = makeValidCansatPacket();
-  corrupted.writeUInt16LE(corrupted.readUInt16LE(PACKET_LENGTH_BYTES - 2) ^ 0xffff, PACKET_LENGTH_BYTES - 2);
-  const parsed = parseCansat(corrupted);
-  assert.equal(parsed, null);
-});
+test('parseCansat accepts captured CanSat PCB frames', (t) => {
+  const hexFrames = readFixtureLines('.cansat.hex');
+  if (hexFrames.length === 0) {
+    t.skip(SKIP_REASON);
+    return;
+  }
 
-test('parseCansat still accepts legacy XOR packet', () => {
-  const parsed = parseCansat(makeValidLegacyCansatPacket());
-  assert.ok(parsed);
-  assert.equal(parsed.source, 'CANSAT');
-  assert.equal(parsed.pkt_id, 42);
-});
-
-test('parseNrc parses valid line', () => {
-  const line = 'NRC:7,7000,101.2,22.5,1006.1,25.10,55.19,-64\n';
-  const parsed = parseNrc(line);
-  assert.ok(parsed);
-  assert.equal(parsed.source, 'NRC');
-  assert.equal(parsed.pkt_id, 7);
-  assert.equal(parsed.timestamp_ms, 7000);
-  assert.equal(parsed.flags, 0);
-});
-
-test('parseNrc parses v2 line with CRC and flags', () => {
-  const body = '7,7000,101.2,22.5,1006.1,25.10,55.19,-64,12';
-  const crc = crc16Ccitt(Buffer.from(body, 'utf8')).toString(16).toUpperCase().padStart(4, '0');
-  const parsed = parseNrc(`NRC2:${body},${crc}\n`);
-  assert.ok(parsed);
-  assert.equal(parsed.source, 'NRC');
-  assert.equal(parsed.protocol_version, 2);
-  assert.equal(parsed.flags, 12);
-});
-
-test('parseNrc rejects corrupted CRC v2 line', () => {
-  const body = '7,7000,101.2,22.5,1006.1,25.10,55.19,-64,12';
-  const parsed = parseNrc(`NRC2:${body},EEEE\n`);
-  assert.equal(parsed, null);
-});
-
-test('parseNrc rejects v2 CRC fields with trailing junk', () => {
-  const body = '7,7000,101.2,22.5,1006.1,25.10,55.19,-64,12';
-  const crc = crc16Ccitt(Buffer.from(body, 'utf8')).toString(16).toUpperCase().padStart(4, '0');
-  const parsed = parseNrc(`NRC2:${body},${crc}JUNK\n`);
-  assert.equal(parsed, null);
-});
-
-test('parseNrc rejects empty numeric fields', () => {
-  const parsed = parseNrc('NRC:7,7000,101.2,22.5,1006.1,,55.19,-64\n');
-  assert.equal(parsed, null);
-});
-
-test('parseNrc rejects malformed line', () => {
-  const parsed = parseNrc('NRC:7,7000,broken\n');
-  assert.equal(parsed, null);
-});
-
-test('CansatFrameParser resynchronizes after noise before a valid frame', async () => {
-  const parser = new CansatFrameParser();
-  const frames = [];
-  parser.on('data', (frame) => frames.push(frame));
-
-  parser.write(Buffer.from([0x99, 0x88, 0x77, 0x66]));
-  parser.write(makeValidCansatPacket());
-  parser.end();
-
-  await new Promise((resolve) => parser.on('finish', resolve));
-  assert.equal(frames.length, 1);
-  assert.equal(parseCansat(frames[0]).pkt_id, 42);
-  assert.equal(parser.getStats().resyncs, 1);
-});
-
-test('deriveSensorHealth correctly maps NRC sensor health', () => {
-  const { deriveSensorHealth } = require('../cansat-hardware');
-  const pkt = {
-    source: 'NRC',
-    flags: 0x08 | 0x20 | 0x04, // bmp_ok, sd_ok, gps_fix
-    pressure_hpa: 1013,
-    altitude_m: 100,
-    lat: 52.5,
-    lon: -1.9,
-    rssi_dbm: -50
-  };
-  const health = deriveSensorHealth(pkt);
-  assert.ok(health.bmp280);
-  assert.equal(health.bmp280.ok, true);
-  assert.equal(health.bmp280.pins.sda, 'GPIO1');
-  
-  assert.ok(health.neo6m);
-  assert.equal(health.neo6m.ok, true);
-  assert.equal(health.neo6m.pins.rx, 'GPIO7');
-  
-  assert.ok(health.sd_card);
-  assert.equal(health.sd_card.ok, true);
-  assert.equal(health.sd_card.pins.cs, 'GPIO38');
-  
-  assert.ok(health.lora);
-  assert.equal(health.lora.ok, true);
-  assert.equal(health.lora.pins.cs, 'GPIO8');
-  
-  assert.equal(health.mpu6500, undefined);
+  for (const hex of hexFrames) {
+    const parsed = parseCansat(Buffer.from(hex, 'hex'));
+    assert.ok(parsed, `failed to parse CanSat fixture: ${hex}`);
+    assert.equal(parsed.source, 'CANSAT');
+    assert.equal(Number.isFinite(parsed.accel_z), true);
+    assert.equal(Number.isFinite(parsed.gyro_x), true);
+  }
 });

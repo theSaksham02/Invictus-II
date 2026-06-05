@@ -92,7 +92,7 @@
     .sim-switch input:checked + .sim-slider { background: rgba(255, 255, 255, 0.16); border-color: var(--text-1); }
     .sim-switch input:checked + .sim-slider::before { transform: translateX(22px); background: var(--text-1); }
     .sim-switch input:focus-visible + .sim-slider { outline: 2px solid var(--text-1); outline-offset: 3px; }
-    #sim-state, #status-voice-state { min-width: 3ch; color: var(--text-3); }
+    #status-voice-state { min-width: 3ch; color: var(--text-3); }
     .grid {
       position: relative; z-index: 1; display: grid;
       width: min(100%, calc(4 * 260px + 3 * 1.5rem));
@@ -122,14 +122,6 @@
       <span class="control-menu-icon" aria-hidden="true"><span></span></span>
     </summary>
     <div class="top-controls">
-      <div class="control-row">
-        <span>SIMULATE DATA</span>
-        <label class="sim-switch" for="sim-mode-toggle" title="Toggle backend simulation mode">
-          <input id="sim-mode-toggle" type="checkbox" aria-label="Toggle simulated data">
-          <span class="sim-slider" aria-hidden="true"></span>
-        </label>
-        <span id="sim-state">OFF</span>
-      </div>
       <div class="control-row">
         <span>STATUS VOICE</span>
         <label class="sim-switch" for="status-voice-toggle" title="Toggle spoken status updates">
@@ -165,50 +157,6 @@
   </div>
 
   <script>
-    (() => {
-      const toggle = document.getElementById('sim-mode-toggle');
-      const state = document.getElementById('sim-state');
-      if (!toggle || !state) return;
-
-      function render(enabled) {
-        toggle.checked = Boolean(enabled);
-        state.textContent = enabled ? 'ON' : 'OFF';
-      }
-
-      async function syncMode() {
-        try {
-          const res = await fetch('/api/health');
-          if (!res.ok) throw new Error(`health ${res.status}`);
-          const data = await res.json();
-          render(data.sim_mode);
-        } catch (error) {
-          state.textContent = 'ERR';
-        }
-      }
-
-      toggle.addEventListener('change', async () => {
-        const requested = toggle.checked;
-        toggle.disabled = true;
-        state.textContent = '...';
-        try {
-          const res = await fetch('/api/sim-mode', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ enabled: requested })
-          });
-          const data = await res.json();
-          if (!res.ok) throw new Error(data.error || `sim-mode ${res.status}`);
-          render(data.sim_mode);
-        } catch (error) {
-          await syncMode();
-        } finally {
-          toggle.disabled = false;
-        }
-      });
-
-      syncMode();
-    })();
-
     (() => {
       const toggle = document.getElementById('status-voice-toggle');
       const state = document.getElementById('status-voice-state');

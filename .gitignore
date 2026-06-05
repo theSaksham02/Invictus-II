@@ -15,12 +15,20 @@ backend/flight.db
 backend/flight.db-journal
 backend/flight.db-shm
 backend/flight.db-wal
+backend/*.db
+backend/*.db-journal
+backend/*.db-shm
+backend/*.db-wal
+backend/flight_frr_demo.db*
 logs/
 *.log
+*.trace
 
 # Uploads
 uploads/
 dashboard/uploads/
+backend/uploads/
+*.uploaded.csv
 
 # OS
 .DS_Store
