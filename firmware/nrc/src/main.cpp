@@ -268,7 +268,7 @@ void setup() {
             Adafruit_BMP280::SAMPLING_X8,       // temp oversampling
             Adafruit_BMP280::SAMPLING_X4,       // pressure oversampling
             Adafruit_BMP280::FILTER_X4,         // IIR filter
-            Adafruit_BMP280::STANDBY_MS_62_5
+            Adafruit_BMP280::STANDBY_MS_63
         );
         baro_ok = true;
         last_baro_ms = millis();
