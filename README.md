@@ -11,7 +11,7 @@
 
 # 🚀 MACH-26 · UKSEDS NRC 2025–26
 
-**Competition rocketry avionics · Real-time telemetry · Ground station software**
+**Competition rocketry avionics · Flight data logging · Ground station software**
 
 *University of Birmingham Dubai*
 
@@ -47,21 +47,21 @@
 
 ## 🌌 Mission Overview
 
-> *"One packet. One second. Sensor to screen. Three hardware systems, one ground station, zero tolerance for failure."*
+> *"One flight. One recovered SD card. Sensor data to verified apogee."*
 
 **INVICTUS II** is the complete avionics and ground station stack for three UKSEDS competitions:
 
 | Competition | Vehicle | Avionics |
 |---|---|---|
 | **MachX** | Bigger rocket + CanSat inside | STM32 Bluepill · RFM69HCW 433MHz |
-| **NRC** | Smaller standalone rocket | Heltec LoRa V3 · LoRa 868 MHz |
+| **NRC** | Smaller standalone rocket | Heltec LoRa V3 · SD recovery + OLED apogee |
 | **NRC Rover** | Rocket + Rover deployment (later) | RPi 4B · Flask · BTS7960 |
 
 ```
 Target Altitude  →  2,200 ft (670 m)
-Telemetry Rate   →  1 Hz (1 packet/second)
-Radio Links      →  433 MHz RFM69 (MachX CanSat) + LoRa 868 MHz (NRC Rocket)
-Ground Station   →  Node.js · SQLite · Socket.io · Chart.js
+Telemetry Rate   →  1 Hz logging
+Radio Links      →  433 MHz RFM69 for MachX CanSat live tracking
+Ground Station   →  Node.js · SQLite · Socket.io for MachX · NRC SD review
 Rover            →  Raspberry Pi 4B · Flask · BTS7960 · Camera Module 3
 ```
 
@@ -77,17 +77,18 @@ Rover            →  Raspberry Pi 4B · Flask · BTS7960 · Camera Module 3
 │   │  STM32 BLUEPILL  │         │   HELTEC LoRa V3        │     │
 │   │  (MachX CanSat)  │         │   (NRC Rocket)          │     │
 │   │  BMP388 · MPU6500│         │   BMP280 · NEO-6M       │     │
-│   │  RFM69HCW 433MHz │         │   LoRa 868 MHz          │     │
+│   │  RFM69HCW 433MHz │         │   SD card + OLED        │     │
 │   └────────┬─────────┘         └──────────┬──────────────┘     │
-│            │ 43-byte binary v2             │  ASCII CSV         │
-│            │ CRC16-CCITT                   │  "NRC2:..." prefix │
+│            │ 43-byte binary v2             │  recovery CSV      │
+│            │ CRC16-CCITT                   │  apogee latched    │
 └────────────┼───────────────────────────────┼────────────────────┘
              │                               │
-             ▼                               ▼
+             ▼                               ▼ after recovery
 ┌─────────────────────────────────────────────────────────────────┐
 │                    💻  GROUND STATION                           │
 │                                                                 │
-│   USB Dongle ──► serial.js ──► parser.js ──► phase-tracker.js  │
+│   MachX USB ──► serial.js ──► parser.js ──► phase-tracker.js   │
+│   NRC SD CSV ─► upload API ─► SQLite ─────► altitude chart      │
 │                                    │                            │
 │                         ┌──────────┼──────────┐                │
 │                         ▼          ▼           ▼                │
@@ -99,8 +100,7 @@ Rover            →  Raspberry Pi 4B · Flask · BTS7960 · Camera Module 3
 │                                    ▼                            │
 │              ┌──────────────────────────────────────┐          │
 │              │   🖥️  BROWSER DASHBOARD               │          │
-│              │   Chart.js · Leaflet · Socket.io      │          │
-│              │   CANSAT tab · NRC tab · ROVER tab    │          │
+│              │   MachX live · NRC SD review · ROVER  │          │
 │              └──────────────────────────────────────┘          │
 └─────────────────────────────────────────────────────────────────┘
              ▲
@@ -121,7 +121,7 @@ Rover            →  Raspberry Pi 4B · Flask · BTS7960 · Camera Module 3
 | System | Brain | Radio | Sensors | Notes |
 |---|---|---|---|---|
 | 🚀 **MachX CanSat** | STM32 Bluepill | RFM69HCW 433MHz | BMP388, MPU-6500, NEO-6M, LM75 | 43-byte binary v2 packet |
-| 🛰️ **NRC Rocket** | Heltec LoRa V3 (ESP32-S3) | LoRa 868 MHz | BMP280, NEO-6M, LM75 | ASCII CSV `NRC2:` prefix |
+| 🛰️ **NRC Rocket** | Heltec LoRa V3 (ESP32-S3) | SD card | BMP280, NEO-6M, LM75 | Recovery CSV + OLED apogee |
 | 🤖 **NRC Rover** *(later)* | Raspberry Pi 4B | WiFi | BTS7960 x2, Camera M3 | Flask HTTP server |
 | ⚡ **Power** | TP4056 → XL6009 → AMS1117 | — | — | 45 min endurance |
 
@@ -148,7 +148,7 @@ npm install
 
 # 2. Configure
 cp .env.example .env
-# → Set SERIAL_PORT_CANSAT, SERIAL_PORT_NRC, and 115200 baud values for your OS
+# → Set SERIAL_PORT_CANSAT for MachX live tracking. NRC live ingest is off by default.
 
 # 3. Launch 🚀
 npm start
@@ -182,8 +182,9 @@ GET  /api/health          →  System status, uptime, signal state
 GET  /api/packets         →  ?source=CANSAT&limit=200&since=0
 GET  /api/stats           →  Max alt, min temp, packet counts per source
 GET  /api/export          →  ?source=CANSAT → downloads flight.csv
-POST /api/launch          →  { source: "NRC" | "CANSAT" | "ALL" }
+POST /api/launch          →  { source: "CANSAT" } only; NRC launch is BMP280-detected
 POST /api/upload-sd       →  Multipart: SD card CSV file
+GET  /api/sd-uploads/:id/packets → Full packet set for an uploaded SD file
 POST /api/rover/control   →  { left: 100, right: -100 }
 POST /api/rover/stop      →  Emergency stop
 GET  /api/rover/data      →  Rover sensor readings
@@ -192,14 +193,14 @@ GET  /api/rover/data      →  Rover sensor readings
 ### Socket.io Events
 
 ```
-← packet              Every telemetry packet (1 Hz)
+← packet              Live MachX telemetry packets
 ← mission_event       IDLE→LAUNCHED→ASCENDING→APOGEE→DESCENDING→LANDED
 ← signal_lost         No packet received for 5 seconds
 ← signal_recovered    Signal resumed after gap
 ← sd_upload_complete  SD card CSV processed
 ← history             Sent on connect: last 60 packets + all events
 
-→ subscribe_source    { source: "CANSAT" | "NRC" | "ALL" }
+→ subscribe_source    { source: "CANSAT" | "ALL" }
 → request_history     { source, limit }
 ```
 
@@ -226,11 +227,13 @@ Offset  Size  Type     Field
 36      1     uint8    checksum  (XOR of bytes 0–35)
 ```
 
-### NRC Rocket — ASCII CSV
+### NRC Rocket — SD Recovery CSV
 
 ```
-NRC2:<pkt_id>,<timestamp_ms>,<altitude_m>,<temp_c>,<pressure_hpa>,<lat>,<lon>,<rssi_dbm>,<flags>,<crc16_hex>\n
+pkt_id,timestamp_ms,altitude_m,temp_c,pressure_hpa,lat,lon,flags,max_altitude_m,apogee_detected
 ```
+
+Optional NRC debug streaming can be enabled for bench work with `ENABLE_NRC_LIVE=true` in the backend and `-DENABLE_NRC_LIVE=1` in the firmware build flags. It is not the NRC competition workflow.
 
 ---
 
@@ -241,7 +244,7 @@ NRC2:<pkt_id>,<timestamp_ms>,<altitude_m>,<temp_c>,<pressure_hpa>,<lat>,<lon>,<r
 | REQ ID | Description | Implementation | Status |
 |---|---|---|---|
 | RPD-003 | Altitude plot within 10 min of recovery | SD card CSV drag-drop → auto-chart | ✅ COVERED |
-| RPD-004 | Apogee on display, no laptop | STM32 writes max_alt to SSD1306 OLED | ✅ COVERED |
+| RPD-004 | Apogee on display, no laptop | Heltec latches apogee to SSD1306 OLED | ✅ COVERED |
 | CPD-001 | Customer payload 3.5–5V DC | XL6009 boost → regulated XT30 | ✅ COVERED |
 | CPD-002 | Power for 45 minutes minimum | Bench tested with dummy load | ✅ COVERED |
 | ESS-001 | Electronics on 15 min before launch | No sleep mode, idle loop | ✅ COVERED |
@@ -276,7 +279,7 @@ Invictus-II/
 │
 ├── 📁 firmware/           ← ✅ Operational
 │   ├── cansat/            ← STM32duino (PlatformIO)
-│   ├── nrc/               ← Heltec LoRa V3 (LoRa 868MHz)
+│   ├── nrc/               ← Heltec SD recovery + OLED apogee
 │   └── rover/             ← RPi Flask Control
 │
 └── README.md

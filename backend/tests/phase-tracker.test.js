@@ -1,9 +1,16 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const os = require('node:os');
-const path = require('node:path');
+const Module = require('node:module');
 
-process.env.DB_FILE = path.join(os.tmpdir(), `invictus-phase-tracker-${process.pid}.db`);
+const originalLoad = Module._load;
+Module._load = function patchedLoad(request, parent, isMain) {
+  if (request === './db') {
+    return {
+      insertEvent: () => ({ changes: 1 })
+    };
+  }
+  return originalLoad.call(this, request, parent, isMain);
+};
 
 const { processPacket, resetState, states } = require('../phase-tracker');
 
@@ -26,7 +33,7 @@ function packet(source, pktId, timestampMs, altitudeM, flags = 0) {
   };
 }
 
-test('NRC can enter ASCENDING from altitude trend without firmware flags', () => {
+test('NRC enters ASCENDING from altitude gain and repeated upward threshold changes', () => {
   resetState('NRC');
   const events = [];
   const emit = (event, payload) => events.push({ event, payload });
@@ -41,14 +48,57 @@ test('NRC can enter ASCENDING from altitude trend without firmware flags', () =>
   assert.equal(events[0].payload.event_type, 'ASCENDING');
 });
 
-test('CANSAT launch flag still produces LAUNCHED before altitude trend', () => {
-  resetState('CANSAT');
+test('phase tracker ignores launch flags and stays GROUNDED without altitude threshold changes', () => {
+  resetState('NRC');
   const events = [];
   const emit = (event, payload) => events.push({ event, payload });
 
-  processPacket(packet('CANSAT', 1, 1000, 0), emit);
-  processPacket(packet('CANSAT', 2, 2000, 1, 0x01), emit);
+  processPacket(packet('NRC', 1, 1000, 0), emit);
+  processPacket(packet('NRC', 2, 2000, 1, 0x03), emit);
 
-  assert.equal(states.CANSAT.phase, 'LAUNCHED');
-  assert.equal(events[0].payload.event_type, 'LAUNCHED');
+  assert.equal(states.NRC.phase, 'GROUNDED');
+  assert.equal(events.length, 0);
+});
+
+test('NRC progresses through APOGEE, DESCENDING, and LANDED from altitude changes', () => {
+  resetState('NRC');
+  const events = [];
+  const emit = (event, payload) => events.push({ event, payload });
+
+  [
+    [1, 1000, 0],
+    [2, 2000, 6],
+    [3, 3000, 12],
+    [4, 4000, 20],
+    [5, 5000, 32],
+    [6, 6000, 44],
+    [7, 7000, 50],
+    [8, 8000, 44],
+    [9, 9000, 38],
+    [10, 10000, 32],
+    [11, 11000, 26],
+    [12, 12000, 20],
+    [13, 13000, 14],
+    [14, 14000, 8],
+    [15, 15000, 2],
+    [16, 16000, 1.6],
+    [17, 17000, 1.4],
+    [18, 18000, 1.2],
+    [19, 19000, 1.1],
+    [20, 20000, 1.0],
+    [21, 21000, 1.0],
+    [22, 22000, 1.1],
+    [23, 23000, 1.0],
+    [24, 24000, 1.0]
+  ].forEach(([pktId, timestampMs, altitudeM]) => {
+    processPacket(packet('NRC', pktId, timestampMs, altitudeM), emit);
+  });
+
+  assert.equal(states.NRC.phase, 'LANDED');
+  assert.deepEqual(events.map(({ payload }) => payload.event_type), [
+    'ASCENDING',
+    'APOGEE',
+    'DESCENDING',
+    'LANDED'
+  ]);
 });

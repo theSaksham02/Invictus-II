@@ -11,6 +11,7 @@ const CANSAT_CMD_PORT = process.env.SERIAL_PORT_CANSAT_CMD || '';
 const CANSAT_BAUD = parseInt(process.env.SERIAL_BAUD_CANSAT || '115200', 10);
 const NRC_BAUD    = parseInt(process.env.SERIAL_BAUD_NRC || '115200', 10);
 const CANSAT_CMD_BAUD = parseInt(process.env.SERIAL_BAUD_CANSAT_CMD || String(CANSAT_BAUD), 10);
+const ENABLE_NRC_LIVE = process.env.ENABLE_NRC_LIVE === 'true';
 
 let cansatPort, cansatCmdPort, nrcSerial, cansatFrameParser;
 let shuttingDown = false;
@@ -29,11 +30,11 @@ const RECONNECT_DELAY_MS = Math.max(
 );
 const sourceState = {
   CANSAT: { lastSeenAt: null, lost: false, connected: false, port: CANSAT_PORT },
-  NRC: { lastSeenAt: null, lost: false, connected: false, port: NRC_PORT }
+  NRC: { lastSeenAt: null, lost: false, connected: false, port: NRC_PORT, live_enabled: ENABLE_NRC_LIVE }
 };
 const diagnostics = {
   CANSAT: { port: CANSAT_PORT, baud: CANSAT_BAUD, open: false, packets: 0, parse_errors: 0, serial_errors: 0, reconnects: 0, last_error: null },
-  NRC: { port: NRC_PORT, baud: NRC_BAUD, open: false, packets: 0, parse_errors: 0, serial_errors: 0, reconnects: 0, last_error: null }
+  NRC: { port: NRC_PORT, baud: NRC_BAUD, open: false, packets: 0, parse_errors: 0, serial_errors: 0, reconnects: 0, last_error: ENABLE_NRC_LIVE ? null : 'NRC live telemetry disabled' }
 };
 
 function clearTimer(timer) {
@@ -87,7 +88,7 @@ function initSerial(emitFn) {
   watchdogInterval = setInterval(() => {
     const now = Date.now();
     triggerSignalLost('CANSAT', emitFn, now);
-    triggerSignalLost('NRC', emitFn, now);
+    if (ENABLE_NRC_LIVE) triggerSignalLost('NRC', emitFn, now);
   }, 1000);
 
   const handlePacket = (pkt) => {
@@ -201,23 +202,31 @@ function initSerial(emitFn) {
     }
   };
 
-  nrcSerial = createNrcSerial({
-    PortClass,
-    portPath: NRC_PORT,
-    baudRate: NRC_BAUD,
-    disabledPortPath: CANSAT_PORT,
-    reconnectDelayMs: RECONNECT_DELAY_MS,
-    diagnostics,
-    sourceState,
-    emitFn,
-    safeEmit,
-    handlePacket,
-    shouldReconnect: () => !shuttingDown
-  });
+  if (ENABLE_NRC_LIVE) {
+    nrcSerial = createNrcSerial({
+      PortClass,
+      portPath: NRC_PORT,
+      baudRate: NRC_BAUD,
+      disabledPortPath: CANSAT_PORT,
+      reconnectDelayMs: RECONNECT_DELAY_MS,
+      diagnostics,
+      sourceState,
+      emitFn,
+      safeEmit,
+      handlePacket,
+      shouldReconnect: () => !shuttingDown
+    });
+  } else {
+    nrcSerial = null;
+    sourceState.NRC.connected = false;
+    sourceState.NRC.lost = false;
+    diagnostics.NRC.open = false;
+    diagnostics.NRC.last_error = 'NRC live telemetry disabled';
+  }
 
   connectCansat();
   connectCansatCommand();
-  nrcSerial.connect();
+  if (nrcSerial) nrcSerial.connect();
 }
 
 function writePort(port, command, unavailableMessage) {
@@ -236,20 +245,16 @@ function writePort(port, command, unavailableMessage) {
 
 async function sendLaunchCommand(source) {
   const normalizedSource = String(source || '').toUpperCase();
-  if (!['CANSAT', 'NRC', 'ALL'].includes(normalizedSource)) {
+  if (normalizedSource !== 'CANSAT') {
     throw new Error(`Unsupported launch source: ${source}`);
   }
 
-  const targets = normalizedSource === 'ALL' ? ['NRC', 'CANSAT'] : [normalizedSource];
+  const targets = [normalizedSource];
   const results = [];
 
   for (const target of targets) {
     try {
-      if (target === 'NRC') {
-        if (!nrcSerial) throw new Error('NRC serial is not initialized');
-        await nrcSerial.sendLaunchCommand();
-        results.push({ source: target, ok: true, status: 'sent' });
-      } else if (target === 'CANSAT') {
+      if (target === 'CANSAT') {
         if (!CANSAT_CMD_PORT) {
           results.push({ source: target, ok: false, status: 'unavailable', error: 'SERIAL_PORT_CANSAT_CMD is not configured' });
         } else {
@@ -288,6 +293,7 @@ function getSignalState() {
     NRC: {
       lost: sourceState.NRC.lost,
       connected: sourceState.NRC.connected,
+      live_enabled: ENABLE_NRC_LIVE,
       port: sourceState.NRC.port,
       last_seen_ms: sourceState.NRC.lastSeenAt || 0,
       diagnostics: { ...diagnostics.NRC }

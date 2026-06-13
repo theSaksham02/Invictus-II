@@ -959,6 +959,7 @@
 
       // EVENTS
       function addEvent(evt) {
+        if (evt?.source && evt.source !== source) return;
         const list = $('events-list');
         const row = document.createElement('div'); row.className = 'event-row';
         const d = new Date(evt.received_at || Date.now());

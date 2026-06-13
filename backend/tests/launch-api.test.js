@@ -11,7 +11,9 @@ function makeDbMock() {
     getAllEvents: () => [],
     exportCsv: () => [],
     insertPacketsBulk: () => ({ changes: 0 }),
-    insertUpload: () => ({ changes: 1 }),
+    insertUpload: () => ({ changes: 1, lastInsertRowid: 1 }),
+    getUpload: () => null,
+    getUploadPackets: () => [],
     close: () => {}
   };
 }
@@ -62,15 +64,15 @@ async function withMockedServer(sendLaunchCommand, fn) {
   }
 }
 
-test('POST /api/launch sends valid source to serial layer', async () => {
+test('POST /api/launch sends CANSAT source to serial layer', async () => {
   await withMockedServer(async (source) => {
-    assert.equal(source, 'NRC');
-    return { ok: true, partial: false, results: [{ source: 'NRC', ok: true, status: 'sent' }] };
+    assert.equal(source, 'CANSAT');
+    return { ok: true, partial: false, results: [{ source: 'CANSAT', ok: true, status: 'sent' }] };
   }, async (baseUrl) => {
     const res = await fetch(`${baseUrl}/api/launch`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ source: 'NRC' })
+      body: JSON.stringify({ source: 'CANSAT' })
     });
     const body = await res.json();
     assert.equal(res.status, 200);
@@ -97,37 +99,26 @@ test('POST /api/launch reports unavailable command paths as 503', async () => {
   });
 });
 
-test('POST /api/launch reports partial success for ALL when CANSAT command port is missing', async () => {
-  await withMockedServer(async (source) => {
-    assert.equal(source, 'ALL');
-    return {
-      ok: true,
-      partial: true,
-      results: [
-        { source: 'NRC', ok: true, status: 'sent' },
-        { source: 'CANSAT', ok: false, status: 'unavailable', error: 'SERIAL_PORT_CANSAT_CMD is not configured' }
-      ]
-    };
-  }, async (baseUrl) => {
-    const res = await fetch(`${baseUrl}/api/launch`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ source: 'ALL' })
-    });
-    const body = await res.json();
-    assert.equal(res.status, 200);
-    assert.equal(body.ok, true);
-    assert.equal(body.partial, true);
-    assert.equal(body.results[1].status, 'unavailable');
-  });
-});
-
 test('POST /api/launch rejects invalid source', async () => {
   await withMockedServer(async () => ({ ok: true, partial: false, results: [] }), async (baseUrl) => {
     const res = await fetch(`${baseUrl}/api/launch`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ source: 'ROVER' })
+    });
+    const body = await res.json();
+    assert.equal(res.status, 400);
+    assert.equal(body.ok, false);
+    assert.equal(body.error, 'Invalid source parameter');
+  });
+});
+
+test('POST /api/launch rejects NRC because launch is detected by firmware sensors', async () => {
+  await withMockedServer(async () => ({ ok: true, partial: false, results: [] }), async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/api/launch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: 'NRC' })
     });
     const body = await res.json();
     assert.equal(res.status, 400);

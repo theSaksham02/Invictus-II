@@ -8,20 +8,6 @@ function closePort(port) {
   });
 }
 
-function writePort(port, command) {
-  return new Promise((resolve, reject) => {
-    if (!port || !port.isOpen) {
-      reject(new Error('NRC serial port is not open'));
-      return;
-    }
-    port.write(command, (writeError) => {
-      if (writeError) return reject(writeError);
-      if (typeof port.drain !== 'function') return resolve();
-      port.drain((drainError) => drainError ? reject(drainError) : resolve());
-    });
-  });
-}
-
 function createNrcSerial({
   PortClass,
   portPath,
@@ -115,7 +101,6 @@ function createNrcSerial({
       }
       return closePort(nrcPort);
     },
-    sendLaunchCommand: () => writePort(nrcPort, 'CMD:LAUNCH\n'),
     getPort: () => nrcPort
   };
 }

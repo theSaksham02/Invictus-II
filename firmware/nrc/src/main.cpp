@@ -4,10 +4,10 @@
  * Hardware : Heltec WiFi LoRa 32 V3 (ESP32-S3 + SX1262 LoRa + SSD1306 OLED)
  * Sensors  : BMP280 (I2C), NEO-6M GPS (UART), LM75 (I2C), SD Card (SPI)
  * Camera   : ESP32-CAM (standalone on 5V_BUS, records to its own SD card)
- * Radio    : SX1262 LoRa @ 868 MHz (built into Heltec board)
+ * Radio    : SX1262 LoRa @ 868 MHz (built into Heltec board, bench/debug only)
  * Display  : SSD1306 0.96" OLED (built into Heltec board)
  *
- * Telemetry contract (NRC2 — v2 with CRC16):
+ * Optional live telemetry contract (NRC2 — v2 with CRC16):
  *   NRC2:<pkt_id>,<ts_ms>,<alt_m>,<temp_c>,<press_hpa>,<lat>,<lon>,<rssi>,<flags>,<CRC16_HEX>\n
  *
  * Pin mapping — per physical circuit (verified 2026-05-30):
@@ -28,6 +28,10 @@
 #include <SD.h>
 #include <U8g2lib.h>
 #include <esp_task_wdt.h>
+
+#ifndef ENABLE_NRC_LIVE
+#define ENABLE_NRC_LIVE 0
+#endif
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  PIN DEFINITIONS — Heltec WiFi LoRa 32 V3 (verified against circuit)
@@ -90,6 +94,7 @@
 #define SENSOR_STALE_MS     3000       // 3s without baro reading = stale
 #define BASELINE_SAMPLES      20       // Average first 20 readings for baseline
 #define WDT_TIMEOUT_S          5       // Watchdog timeout in seconds
+#define LOG_FLUSH_EVERY        5       // Flush SD log every N samples
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  GLOBAL OBJECTS
@@ -103,7 +108,7 @@ SX1262 radio = new Module(LORA_NSS, LORA_DIO1, LORA_RST, LORA_BUSY, loraSPI);
 U8G2_SSD1306_128X64_NONAME_F_HW_I2C display(U8G2_R0, OLED_RST, OLED_SCL, OLED_SDA);
 
 // Sensors
-TwoWire sensorI2C(0);            // I2C bus 0 for BMP280 + LM75
+TwoWire sensorI2C(1);            // Separate I2C controller for BMP280 + LM75; OLED uses the default controller.
 Adafruit_BMP280 bmp(&sensorI2C);
 TinyGPSPlus gps;
 HardwareSerial SerialGPS(1);     // UART1 for GPS
@@ -124,6 +129,7 @@ float max_altitude = 0.0f;
 uint8_t launch_consecutive = 0;
 bool launched = false;
 bool apogee_detected = false;
+float apogee_altitude_m = NAN;
 
 uint32_t last_baro_ms = 0;
 uint32_t last_gps_ms = 0;
@@ -132,33 +138,7 @@ bool sd_ok = false;
 bool lora_ok = false;
 
 int16_t last_rssi = 0;   // Updated after each LoRa TX
-
-void handleUsbCommands() {
-    static char command[32];
-    static size_t index = 0;
-
-    while (Serial.available() > 0) {
-        char ch = static_cast<char>(Serial.read());
-        if (ch == '\r') continue;
-
-        if (ch == '\n') {
-            command[index] = '\0';
-            if (strcmp(command, "CMD:LAUNCH") == 0) {
-                launched = true;
-                launch_consecutive = LAUNCH_CONFIRM_COUNT;
-                Serial.println("ACK:LAUNCH,NRC");
-            }
-            index = 0;
-            continue;
-        }
-
-        if (index < sizeof(command) - 1) {
-            command[index++] = ch;
-        } else {
-            index = 0;
-        }
-    }
-}
+char log_filename[24] = "/nrc_flight_001.csv";
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  CRC16-CCITT — must match backend cansat-hardware.js crc16Ccitt()
@@ -190,12 +170,50 @@ float readLM75() {
     return (float)(raw >> 5) * 0.125f;
 }
 
+bool openFreshLogFile() {
+    for (uint16_t index = 1; index <= 999; index++) {
+        snprintf(log_filename, sizeof(log_filename), "/nrc_flight_%03u.csv", (unsigned)index);
+        if (SD.exists(log_filename)) continue;
+
+        logFile = SD.open(log_filename, FILE_WRITE);
+        if (!logFile) return false;
+
+        logFile.println(
+            "pkt_id,timestamp_ms,altitude_m,temp_c,lm75_temp_c,pressure_hpa,"
+            "lat,lon,gps_fix,flags,bmp_ok,sd_ok,max_altitude_m,"
+            "apogee_detected,apogee_altitude_m"
+        );
+        logFile.flush();
+        return true;
+    }
+    return false;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 //  OLED DISPLAY HELPERS
 // ═══════════════════════════════════════════════════════════════════════════
-void displayStatus(float alt, float maxAlt, uint8_t flags, uint32_t pktCount) {
+void displayStatus(float alt, float maxAlt, float apogeeAlt, uint8_t flags, uint32_t pktCount) {
     display.clearBuffer();
     display.setFont(u8g2_font_6x10_tf);
+
+    if (flags & FLAG_APOGEE) {
+        display.drawStr(0, 10, "NRC APOGEE");
+        display.setFont(u8g2_font_logisoso22_tf);
+        char apogeeLine[24];
+        float shownApogee = isfinite(apogeeAlt) ? apogeeAlt : maxAlt;
+        snprintf(apogeeLine, sizeof(apogeeLine), "%.0f m", shownApogee);
+        display.drawStr(0, 39, apogeeLine);
+
+        display.setFont(u8g2_font_6x10_tf);
+        char statusLine[32];
+        snprintf(statusLine, sizeof(statusLine), "P:%lu %s%s",
+            (unsigned long)pktCount,
+            (flags & FLAG_BARO_OK) ? "BAR " : "--- ",
+            (flags & FLAG_SD_OK) ? "SD" : "--");
+        display.drawStr(0, 58, statusLine);
+        display.sendBuffer();
+        return;
+    }
 
     // Line 1: Mission phase
     display.drawStr(0, 10, "NRC INVICTUS II");
@@ -221,16 +239,22 @@ void displayStatus(float alt, float maxAlt, uint8_t flags, uint32_t pktCount) {
     display.sendBuffer();
 }
 
+void displayBootStep(const char* line1, const char* line2 = "") {
+    display.clearBuffer();
+    display.setFont(u8g2_font_6x10_tf);
+    display.drawStr(0, 10, "NRC BOOTING...");
+    display.drawStr(0, 28, line1);
+    if (line2 && line2[0] != '\0') display.drawStr(0, 42, line2);
+    display.sendBuffer();
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 //  SETUP
 // ═══════════════════════════════════════════════════════════════════════════
 void setup() {
     Serial.begin(115200);
     delay(500);
-
-    // ── Watchdog: auto-reboot if loop() hangs > 5 seconds ────────────
-    esp_task_wdt_init(WDT_TIMEOUT_S, true);
-    esp_task_wdt_add(NULL);
+    Serial.println("[NRC] Booting...");
 
     // ── Power on OLED + Vext rail ────────────────────────────────────
     pinMode(VEXT_PIN, OUTPUT);
@@ -244,21 +268,33 @@ void setup() {
     display.drawStr(0, 10, "NRC BOOTING...");
     display.sendBuffer();
 
-    // ── LoRa SX1262 init ─────────────────────────────────────────────
+#if ENABLE_NRC_LIVE
+    // ── LoRa SX1262 init (bench/debug live telemetry) ────────────────
+    Serial.println("[NRC] Initializing LoRa SX1262...");
+    displayBootStep("INIT LORA");
     loraSPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_NSS);
     int state = radio.begin(LORA_FREQ, LORA_BW, LORA_SF, LORA_CR, LORA_SW, LORA_POWER, LORA_PREAMBLE);
     if (state == RADIOLIB_ERR_NONE) {
         lora_ok = true;
         Serial.println("[NRC] LoRa SX1262 OK @ 868 MHz");
+        displayBootStep("LORA OK");
     } else {
         Serial.printf("[NRC] LoRa FAILED (err %d)\n", state);
+        displayBootStep("LORA FAILED");
     }
+#else
+    Serial.println("[NRC] Live LoRa telemetry disabled (ENABLE_NRC_LIVE=0)");
+#endif
 
     // ── GPS on UART1 ─────────────────────────────────────────────────
+    Serial.println("[NRC] Initializing GPS UART1...");
+    displayBootStep("INIT GPS");
     SerialGPS.begin(9600, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
     Serial.println("[NRC] GPS UART1 started");
 
     // ── I2C bus for BMP280 + LM75 ────────────────────────────────────
+    Serial.println("[NRC] Initializing sensor I2C...");
+    displayBootStep("INIT I2C");
     sensorI2C.begin(I2C_SDA, I2C_SCL);
 
     // ── BMP280 barometer (addr 0x76: SDO→GND) ───────────────────────
@@ -275,22 +311,23 @@ void setup() {
         Serial.println("[NRC] BMP280 OK @ 0x76");
     } else {
         Serial.println("[NRC] BMP280 FAILED");
+        displayBootStep("BMP280 FAILED");
     }
 
     // ── LM75 probe ──────────────────────────────────────────────────
+    displayBootStep("CHECK LM75");
     float lm75_test = readLM75();
     Serial.printf("[NRC] LM75 %s (%.1f°C)\n",
         isfinite(lm75_test) ? "OK" : "FAILED", lm75_test);
 
     // ── SD Card on custom SPI bus ────────────────────────────────────
+    Serial.println("[NRC] Initializing SD card...");
+    displayBootStep("INIT SD");
     sdSPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
     if (SD.begin(SD_CS, sdSPI)) {
-        logFile = SD.open("/flight.csv", FILE_WRITE);
-        if (logFile) {
-            logFile.println("pkt_id,timestamp_ms,altitude_m,temp_c,pressure_hpa,lat,lon,rssi_dbm,flags");
-            logFile.flush();
+        if (openFreshLogFile()) {
             sd_ok = true;
-            Serial.println("[NRC] SD card OK");
+            Serial.printf("[NRC] SD card OK, logging to %s\n", log_filename);
         }
     } else {
         Serial.println("[NRC] SD card FAILED");
@@ -301,8 +338,9 @@ void setup() {
     display.setFont(u8g2_font_6x10_tf);
     display.drawStr(0, 10, "NRC INVICTUS II");
     char line[32];
-    snprintf(line, sizeof(line), "LoRa:%s BMP:%s",
-        lora_ok ? "OK" : "XX", baro_ok ? "OK" : "XX");
+    snprintf(line, sizeof(line), "LIVE:%s BMP:%s",
+        ENABLE_NRC_LIVE ? (lora_ok ? "OK" : "XX") : "OFF",
+        baro_ok ? "OK" : "XX");
     display.drawStr(0, 24, line);
     snprintf(line, sizeof(line), "SD:%s GPS:WAIT",
         sd_ok ? "OK" : "XX");
@@ -310,14 +348,18 @@ void setup() {
     display.drawStr(0, 52, "READY");
     display.sendBuffer();
 
-    Serial.println("[NRC] Setup complete — transmitting at 1 Hz");
+    // ── Watchdog: auto-reboot if loop() hangs > 5 seconds ────────────
+    esp_task_wdt_init(WDT_TIMEOUT_S, true);
+    esp_task_wdt_add(NULL);
+
+    Serial.println("[NRC] Setup complete — SD logging at 1 Hz");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  MAIN LOOP
 // ═══════════════════════════════════════════════════════════════════════════
 void loop() {
-    handleUsbCommands();
+    esp_task_wdt_reset();
 
     // ── Continuously feed GPS parser ─────────────────────────────────
     while (SerialGPS.available() > 0) {
@@ -332,7 +374,10 @@ void loop() {
 
         // ── Read barometer ───────────────────────────────────────────
         float temp = 0, press = 0, alt = 0;
+        float bmp_temp = NAN;
+        float lm75_temp = NAN;
         uint8_t flags = 0;
+        bool bmp_ok_this_sample = false;
 
         if (baro_ok) {
             float t = bmp.readTemperature();
@@ -340,7 +385,9 @@ void loop() {
 
             if (isfinite(t) && isfinite(p) && p > 100.0f) {
                 temp = t;
+                bmp_temp = t;
                 press = p;
+                bmp_ok_this_sample = true;
 
                 // Averaged baseline calibration (first N readings)
                 if (baseline_count < BASELINE_SAMPLES) {
@@ -359,18 +406,20 @@ void loop() {
         }
 
         // If BMP280 temp failed, try LM75 as fallback
-        if (temp == 0) {
-            float lm75_t = readLM75();
-            if (isfinite(lm75_t)) temp = lm75_t;
+        lm75_temp = readLM75();
+        if (!isfinite(bmp_temp) && isfinite(lm75_temp)) {
+            temp = lm75_temp;
         }
 
         // ── Read GPS ─────────────────────────────────────────────────
         double lat = 0, lon = 0;
+        bool gps_fix = false;
         if (gps.location.isValid() && gps.location.age() < 2000) {
             lat = gps.location.lat();
             lon = gps.location.lng();
             last_gps_ms = now;
             flags |= FLAG_GPS_FIX;
+            gps_fix = true;
         }
 
         // ── Launch detection (altitude-only, no IMU) ─────────────────
@@ -383,7 +432,10 @@ void loop() {
 
         // ── Apogee detection ─────────────────────────────────────────
         if (launched && !apogee_detected) {
-            if ((max_altitude - alt) > APOGEE_DROP_M) apogee_detected = true;
+            if ((max_altitude - alt) > APOGEE_DROP_M) {
+                apogee_detected = true;
+                apogee_altitude_m = max_altitude;
+            }
         }
         if (apogee_detected) flags |= FLAG_APOGEE;
 
@@ -391,7 +443,8 @@ void loop() {
         if ((now - last_baro_ms) > SENSOR_STALE_MS) flags |= FLAG_STALE_SENSOR;
         if (sd_ok && logFile) flags |= FLAG_SD_OK;
 
-        // ── Build NRC2 packet string ─────────────────────────────────
+#if ENABLE_NRC_LIVE
+        // ── Build NRC2 packet string (bench/debug live telemetry) ────
         char body[128];
         char buffer[160];
         snprintf(body, sizeof(body), "%u,%lu,%.2f,%.2f,%.2f,%.6f,%.6f,%d,%u",
@@ -411,17 +464,26 @@ void loop() {
 
         // ── USB Serial debug ─────────────────────────────────────────
         Serial.println(buffer);
+#endif
 
         // ── Log to SD card ───────────────────────────────────────────
         if (sd_ok && logFile) {
-            logFile.printf("%u,%lu,%.2f,%.2f,%.2f,%.6f,%.6f,%d,%u\n",
-                (unsigned)pkt_id, (unsigned long)now, alt, temp, press,
-                lat, lon, (int)last_rssi, (unsigned)flags);
-            if (pkt_id % 5 == 0) logFile.flush();  // Flush every 5 packets
+            char lm75Field[16] = "";
+            char apogeeField[16] = "";
+            if (isfinite(lm75_temp)) snprintf(lm75Field, sizeof(lm75Field), "%.2f", lm75_temp);
+            if (isfinite(apogee_altitude_m)) snprintf(apogeeField, sizeof(apogeeField), "%.2f", apogee_altitude_m);
+
+            logFile.printf("%u,%lu,%.2f,%.2f,%s,%.2f,%.6f,%.6f,%u,%u,%u,%u,%.2f,%u,%s\n",
+                (unsigned)pkt_id, (unsigned long)now, alt, temp, lm75Field, press,
+                lat, lon, gps_fix ? 1u : 0u, (unsigned)flags,
+                bmp_ok_this_sample ? 1u : 0u,
+                (sd_ok && logFile) ? 1u : 0u,
+                max_altitude, apogee_detected ? 1u : 0u, apogeeField);
+            if (pkt_id % LOG_FLUSH_EVERY == 0) logFile.flush();
         }
 
         // ── Update OLED ──────────────────────────────────────────────
-        displayStatus(alt, max_altitude, flags, pkt_id);
+        displayStatus(alt, max_altitude, apogee_altitude_m, flags, pkt_id);
 
         // ── Pet watchdog ─────────────────────────────────────────────
         esp_task_wdt_reset();

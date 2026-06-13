@@ -5,9 +5,22 @@
 
 const { insertEvent } = require('./db');
 
+const PHASE_GROUNDED = 'GROUNDED';
+const PHASE_ASCENDING = 'ASCENDING';
+const PHASE_APOGEE = 'APOGEE';
+const PHASE_DESCENDING = 'DESCENDING';
+const PHASE_LANDED = 'LANDED';
+
+const LAUNCH_ALTITUDE_DELTA_M = 10.0;
+const ASCENT_STEP_THRESHOLD_M = 1.0;
+const APOGEE_DROP_M = 5.0;
+const DESCENT_STEP_THRESHOLD_M = 1.0;
+const LANDED_VARIANCE_M = 1.0;
+const LANDED_WINDOW_SIZE = 10;
+
 function makeState() {
   return {
-    phase: 'IDLE',
+    phase: PHASE_GROUNDED,
     baseline_alt: null,
     max_alt: 0,
     launch_time: 0,
@@ -37,56 +50,37 @@ function processPacket(pkt, emitFn) {
   if (pkt.altitude_m > s.max_alt) s.max_alt = pkt.altitude_m;
 
   s.alt_history.push(pkt.altitude_m);
-  if (s.alt_history.length > 10) s.alt_history.shift();
+  if (s.alt_history.length > LANDED_WINDOW_SIZE) s.alt_history.shift();
 
   let newPhase = s.phase;
+  const recent = s.alt_history.slice(-3);
+  const altitudeGain = pkt.altitude_m - s.baseline_alt;
+  const risingByThreshold = recent.length >= 3 &&
+    (recent[1] - recent[0]) >= ASCENT_STEP_THRESHOLD_M &&
+    (recent[2] - recent[1]) >= ASCENT_STEP_THRESHOLD_M;
+  const fallingByThreshold = recent.length >= 2 &&
+    (recent[recent.length - 2] - recent[recent.length - 1]) >= DESCENT_STEP_THRESHOLD_M;
 
-  // IDLE → LAUNCHED: preferred path is firmware launch flag.
-  // Text-only sources such as NRC have no flags, so use altitude delta as fallback.
-  if (s.phase === 'IDLE') {
-    if ((pkt.flags & 0x01) !== 0) {
-      newPhase = 'LAUNCHED';
+  if (s.phase === PHASE_GROUNDED) {
+    if (altitudeGain >= LAUNCH_ALTITUDE_DELTA_M && risingByThreshold) {
+      newPhase = PHASE_ASCENDING;
       s.launch_time = packetTs;
-    } else if (s.alt_history.length >= 3) {
-      const recent = s.alt_history.slice(-3);
-      const altitudeGain = pkt.altitude_m - s.baseline_alt;
-      const trendingUp = recent[2] > recent[1] && recent[1] > recent[0];
-      if (altitudeGain > 10 && trendingUp) {
-        newPhase = 'ASCENDING';
-        s.launch_time = packetTs;
-      }
     }
   }
-  // LAUNCHED → ASCENDING: altitude increasing
-  else if (s.phase === 'LAUNCHED') {
-    if (s.alt_history.length >= 2 && pkt.altitude_m > s.alt_history[s.alt_history.length - 2]) {
-      newPhase = 'ASCENDING';
-    }
-    // Timeout guard: if 30s elapsed and altitude > 10m, force ASCENDING
-    if (s.launch_time && (packetTs - s.launch_time) > 30000 && pkt.altitude_m > 10) {
-      newPhase = 'ASCENDING';
-    }
-  }
-  // ASCENDING → APOGEE: firmware flag OR 5m drop from peak
-  else if (s.phase === 'ASCENDING') {
-    if ((pkt.flags & 0x02) !== 0 || (s.max_alt - pkt.altitude_m) > 5) {
-      newPhase = 'APOGEE';
+  else if (s.phase === PHASE_ASCENDING) {
+    if ((s.max_alt - pkt.altitude_m) >= APOGEE_DROP_M) {
+      newPhase = PHASE_APOGEE;
       s.apogee_time = packetTs;
     }
   }
-  // APOGEE → DESCENDING: altitude decreasing
-  else if (s.phase === 'APOGEE') {
-    if (s.alt_history.length >= 3) {
-      const isDecreasing = s.alt_history[s.alt_history.length - 1] < s.alt_history[s.alt_history.length - 2];
-      if (isDecreasing) newPhase = 'DESCENDING';
-    }
+  else if (s.phase === PHASE_APOGEE) {
+    if (fallingByThreshold) newPhase = PHASE_DESCENDING;
   }
-  // DESCENDING → LANDED: altitude variance < 1m over 10 packets
-  else if (s.phase === 'DESCENDING') {
-    if (s.alt_history.length === 10) {
+  else if (s.phase === PHASE_DESCENDING) {
+    if (s.alt_history.length === LANDED_WINDOW_SIZE) {
       const maxH = Math.max(...s.alt_history);
       const minH = Math.min(...s.alt_history);
-      if (maxH - minH <= 1.0) newPhase = 'LANDED';
+      if (maxH - minH <= LANDED_VARIANCE_M) newPhase = PHASE_LANDED;
     }
   }
 
@@ -112,7 +106,7 @@ function processPacket(pkt, emitFn) {
 function resetState(source) {
   if (states[source]) {
     states[source] = makeState();
-    console.log(`[PHASE] ${source} state reset to IDLE`);
+    console.log(`[PHASE] ${source} state reset to ${PHASE_GROUNDED}`);
   }
 }
 

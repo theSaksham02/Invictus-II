@@ -53,7 +53,7 @@ const SD_UPLOAD_MAX_ROWS = Math.max(
 );
 const TELEMETRY_SOURCES = new Set(['CANSAT', 'NRC']);
 const EXPORT_SOURCES = new Set(['CANSAT', 'NRC', 'ALL']);
-const LAUNCH_SOURCES = new Set(['CANSAT', 'NRC', 'ALL']);
+const LAUNCH_SOURCES = new Set(['CANSAT']);
 
 const upload = multer({
   dest: 'uploads/',
@@ -103,6 +103,14 @@ function parseBoundedInt(value, fallback, min, max, field) {
     throw new HttpError(400, `Invalid ${field} parameter`, { field, min, max });
   }
   return effective;
+}
+
+function parseRequiredBoundedInt(value, min, max, field) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isInteger(parsed) || parsed < min || parsed > max) {
+    throw new HttpError(400, `Invalid ${field} parameter`, { field, min, max });
+  }
+  return parsed;
 }
 
 function parseRoverInput(value, field) {
@@ -226,6 +234,34 @@ function parseSdPacketRow(row, lookup, raw, receivedAt, source) {
   ) ? packet : null;
 }
 
+function summarizeApogee(packets) {
+  if (!Array.isArray(packets) || packets.length === 0) return null;
+  let apogeePacket = null;
+  for (const packet of packets) {
+    if (!Number.isFinite(packet.altitude_m)) continue;
+    if (!apogeePacket || packet.altitude_m > apogeePacket.altitude_m) {
+      apogeePacket = packet;
+    }
+  }
+  if (!apogeePacket) return null;
+  return {
+    altitude_m: apogeePacket.altitude_m,
+    timestamp_ms: apogeePacket.timestamp_ms,
+    pkt_id: apogeePacket.pkt_id
+  };
+}
+
+function summarizeDurationSeconds(packets) {
+  if (!Array.isArray(packets) || packets.length === 0) return 0;
+  const times = packets
+    .map((packet) => packet.timestamp_ms)
+    .filter((timestamp) => Number.isFinite(timestamp));
+  if (times.length === 0) return 0;
+  const min = Math.min(...times);
+  const max = Math.max(...times);
+  return Math.max(0, (max - min) / 1000);
+}
+
 function asyncRoute(handler) {
   return (req, res, next) => {
     Promise.resolve(handler(req, res, next)).catch(next);
@@ -308,7 +344,7 @@ app.get('/api/health', (req, res) => {
 });
 
 app.post('/api/launch', asyncRoute(async (req, res) => {
-  const source = parseSource(req.body?.source, LAUNCH_SOURCES, 'ALL');
+  const source = parseSource(req.body?.source, LAUNCH_SOURCES, 'CANSAT');
   const command = await serial.sendLaunchCommand(source);
   const payload = {
     ok: command.ok,
@@ -380,6 +416,18 @@ app.get('/api/stats', (req, res) => {
   });
 });
 
+app.delete('/api/events', (req, res) => {
+  const source = parseSource(req.body?.source || req.query?.source, EXPORT_SOURCES, 'ALL');
+  const result = db.clearEvents(source);
+  const payload = {
+    ok: true,
+    source,
+    cleared: result.changes || 0
+  };
+  emitToAll('mission_log_cleared', payload);
+  res.json(payload);
+});
+
 app.post('/api/upload-sd', upload.single('file'), asyncRoute(async (req, res) => {
   if (!req.file) throw new HttpError(400, 'No file uploaded');
   const source = parseSource(req.body?.source || req.query?.source, new Set(['CANSAT', 'NRC']), 'CANSAT');
@@ -418,23 +466,45 @@ app.post('/api/upload-sd', upload.single('file'), asyncRoute(async (req, res) =>
 
   if (packets.length === 0) throw new HttpError(400, 'No valid telemetry rows found in uploaded CSV');
 
-  db.insertPacketsBulk(packets);
-  db.insertUpload({
+  const uploadResult = db.insertUpload({
+    source,
     filename: req.file.originalname,
     rows_inserted: packets.length,
     uploaded_at: now
   });
+  const uploadId = Number(uploadResult.lastInsertRowid || uploadResult.id || 0);
+  packets.forEach((packet) => {
+    packet.upload_id = uploadId || null;
+  });
+  db.insertPacketsBulk(packets);
 
   const response = {
     ok: true,
     source,
+    upload_id: uploadId || null,
     inserted: packets.length,
     skipped,
-    filename: req.file.originalname
+    duration_s: summarizeDurationSeconds(packets),
+    filename: req.file.originalname,
+    apogee: summarizeApogee(packets)
   };
   emitToAll('sd_upload_complete', response);
   res.status(201).json(response);
 }));
+
+app.get('/api/sd-uploads/:upload_id/packets', (req, res) => {
+  const uploadId = parseRequiredBoundedInt(req.params.upload_id, 1, Number.MAX_SAFE_INTEGER, 'upload_id');
+  const uploadRecord = db.getUpload(uploadId);
+  if (!uploadRecord) throw new HttpError(404, 'SD upload not found', { upload_id: uploadId });
+  const packets = db.getUploadPackets(uploadId);
+  res.json({
+    ok: true,
+    upload_id: uploadId,
+    source: uploadRecord.source,
+    count: packets.length,
+    packets
+  });
+});
 
 app.get('/api/export', (req, res) => {
   const source = parseSource(req.query.source, EXPORT_SOURCES, 'CANSAT');

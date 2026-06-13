@@ -3,999 +3,227 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>National Rocketry Championship — Mission Control</title>
-  <meta name="description" content="MACH-26 UKSEDS NRC 2025-26 real-time rocket telemetry ground station">
-  <!-- Site-wide transparent logo favicon. -->
+  <title>NRC Flight Review</title>
+  <meta name="description" content="NRC post-flight SD card review for Invictus II">
   <link rel="icon" type="image/png" href="/images/logo_w_tp.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="https://unpkg.com/uplot@1.6.30/dist/uPlot.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
-    /* ═══════════════════════════════════════════════════════════
-       SPACEX / STARSHIP MISSION CONTROL
-       ═══════════════════════════════════════════════════════════ */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    ::selection { background: #e5e5e5; color: #050505; }
-
     :root {
-      --bg-deep: #000000;
-      --bg-panel: #090909;
-      --bg-header: #000000;
-      
-      --border: #1f1f1f;
-      --border-hi: #333333;
-      
-      --spx-blue: #005288;
-      --spx-blue-light: #0076c0;
-      --nominal: #00ff00;
-      --warning: #ffb000;
-      --critical: #ff0000;
-      
-      --text-1: #ffffff;
-      --text-2: #cccccc;
-      --text-3: #666666;
-      
+      --bg: #000000;
+      --panel: #050505;
+      --panel-soft: #0a0a0a;
+      --line: #202020;
+      --line-strong: #3a3a3a;
+      --text: #ffffff;
+      --muted: #a0a0a0;
+      --dim: #6e6e6e;
+      --accent: #ffffff;
+      --accent-2: #ffffff;
+      --ok: #ffffff;
+      --bad: #ffffff;
       --sans: 'Inter', system-ui, sans-serif;
-      --mono: 'JetBrains Mono', 'Fira Code', monospace;
-      
-      --gap: 12px;
-      --r: 6px;
+      --mono: 'JetBrains Mono', monospace;
     }
-
-    html, body {
-      height: 100%;
-      overflow: hidden;
-      font-family: var(--sans);
-      background-color: var(--bg-deep);
-      color: var(--text-1);
-      -webkit-font-smoothing: antialiased;
-      text-transform: uppercase;
-      user-select: none;
+    html, body { min-height: 100%; background: var(--bg); color: var(--text); font-family: var(--sans); }
+    body {
+      padding: 22px;
+      background:
+        linear-gradient(90deg, rgba(255,255,255,0.035) 1px, transparent 1px) 0 0 / 96px 96px,
+        linear-gradient(180deg, rgba(255,255,255,0.03) 1px, transparent 1px) 0 0 / 96px 96px,
+        var(--bg);
     }
-
-    #app {
-      display: grid;
-      grid-template-rows: 50px 1fr 60px;
-      height: 100vh;
-      width: 100vw;
+    button, input { font: inherit; }
+    #app { max-width: 1320px; margin: 0 auto; min-height: calc(100vh - 44px); display: grid; grid-template-rows: auto 1fr; gap: 16px; }
+    .topbar {
+      display: flex; align-items: center; justify-content: space-between; gap: 16px;
+      min-height: 74px; padding: 0 0 18px; border-bottom: 1px solid var(--text);
     }
-
-    /* ═══════════════════════════════════════════════════════════
-       HEADER - MINIMALIST
-       ═══════════════════════════════════════════════════════════ */
-    #header {
-      display: grid;
-      grid-template-columns: 1fr auto 1fr;
-      align-items: center;
-      padding: 0 20px;
-      background: var(--bg-header);
-      border-bottom: 1px solid var(--border);
+    .brand { display: flex; flex-direction: column; gap: 8px; }
+    h1 { font-size: clamp(1.7rem, 2.7vw, 2.55rem); line-height: 0.95; letter-spacing: -0.02em; font-weight: 700; }
+    .subtitle { color: var(--muted); font-family: var(--mono); font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.14em; }
+    .actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+    .btn {
+      min-height: 42px; border: 1px solid var(--line-strong); border-radius: 2px; padding: 0 16px;
+      background: transparent; color: var(--text); cursor: pointer; font-size: 0.78rem; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.11em;
     }
-
-    .header-left, .header-right { display: flex; align-items: center; gap: 20px; }
-    .header-right { justify-self: end; }
-
-    #logo { font-weight: 600; font-size: 1rem; letter-spacing: 0.15em; color: var(--text-1); }
-
-    .source-tabs { display: flex; gap: 4px; }
-    .source-tab {
-      font-family: var(--sans); font-size: 0.65rem; font-weight: 600;
-      padding: 6px 14px; border: 1px solid var(--border); border-radius: var(--r);
-      cursor: pointer; background: transparent; color: var(--text-3); transition: all 0.2s; letter-spacing: 0.1em;
+    .btn.primary { background: var(--text); color: #050505; border-color: var(--text); }
+    .btn:disabled { color: var(--dim); border-color: var(--line); cursor: not-allowed; background: rgba(255,255,255,0.02); }
+    .btn:not(:disabled):hover { border-color: var(--text); background: rgba(255,255,255,0.08); }
+    .btn.primary:not(:disabled):hover { background: #d8d8d8; color: #000; }
+    main { display: grid; grid-template-columns: minmax(300px, 360px) minmax(0, 1fr); gap: 16px; min-height: 0; }
+    .panel {
+      border: 1px solid var(--line-strong); border-radius: 2px; background: rgba(5,5,5,0.94);
+      min-width: 0;
     }
-    .source-tab.active { background: var(--text-1); color: #000; border-color: var(--text-1); }
-
-    .phase-badge {
-      font-family: var(--sans); font-size: 0.8rem; font-weight: 600; padding: 4px 20px;
-      letter-spacing: 0.2em; border: 1px solid var(--text-3); color: var(--text-2); border-radius: var(--r);
+    .upload-panel { padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+    .dropzone {
+      border: 1px dashed var(--line-strong); border-radius: 2px; min-height: 206px; padding: 18px;
+      display: grid; place-items: center; text-align: center; background: var(--panel-soft);
+      transition: border-color 0.16s ease, background 0.16s ease;
     }
-    .phase-badge.launched { border-color: var(--warning); color: var(--warning); }
-    .phase-badge.apogee { border-color: var(--spx-blue-light); color: var(--spx-blue-light); }
-    .phase-badge.descending { border-color: var(--spx-blue-light); color: var(--spx-blue-light); }
-    .phase-badge.landed { border-color: var(--nominal); color: var(--nominal); }
-
-    .mission-timer { font-family: var(--mono); font-size: 1.1rem; font-weight: 500; color: var(--text-1); letter-spacing: 0.05em; font-variant-numeric: tabular-nums; }
-    .status-voice-control { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 0.6rem; color: var(--text-3); letter-spacing: 0.1em; }
-    .status-voice-switch { position: relative; width: 36px; height: 18px; display: inline-flex; cursor: pointer; }
-    .status-voice-switch input { position: absolute; opacity: 0; pointer-events: none; }
-    .status-voice-slider { position: absolute; inset: 0; border: 1px solid var(--border-hi); border-radius: 999px; background: transparent; transition: all 0.2s; }
-    .status-voice-slider::before { content: ''; position: absolute; width: 12px; height: 12px; left: 2px; top: 2px; border-radius: 50%; background: var(--text-3); transition: all 0.2s; }
-    .status-voice-switch input:checked + .status-voice-slider { border-color: var(--text-1); background: rgba(255,255,255,0.14); }
-    .status-voice-switch input:checked + .status-voice-slider::before { transform: translateX(18px); background: var(--text-1); }
-    .status-voice-switch input:focus-visible + .status-voice-slider { outline: 2px solid var(--text-1); outline-offset: 3px; }
-
-    /* ═══════════════════════════════════════════════════════════
-       DASHBOARD GRID
-       ═══════════════════════════════════════════════════════════ */
-    #dashboard {
-      display: grid;
-      grid-template-columns: 240px 1fr 340px;
-      gap: var(--gap);
-      padding: var(--gap);
-      min-height: 0;
+    .dropzone.dragover { border-color: var(--text); background: rgba(255,255,255,0.08); }
+    .drop-inner { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+    .upload-icon {
+      width: 48px; height: 48px; border: 1px solid var(--line-strong); border-radius: 2px;
+      display: grid; place-items: center; color: var(--accent);
     }
-
-    .panel { background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--r); position: relative; overflow: hidden; }
-
-    /* ═══════════════════════════════════════════════════════════
-       LEFT — PREFLIGHT & METRICS
-       ═══════════════════════════════════════════════════════════ */
-    #metrics-panel { display: flex; flex-direction: column; gap: var(--gap); min-height: 0; }
-    
-    .preflight-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 12px 16px; background: var(--bg-header); border-radius: var(--r); border: 1px solid var(--border); }
-    .pf-item { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 0.6rem; }
-    .pf-label { color: var(--text-3); }
-    .pf-val { color: var(--critical); font-weight: bold; }
-    .pf-val.ok { color: var(--nominal); }
-
-    .metric-card { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 8px 16px; }
-    .metric-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; }
-    .metric-label { font-family: var(--sans); font-size: 0.6rem; font-weight: 600; letter-spacing: 0.1em; color: var(--text-3); }
-    .metric-unit { font-family: var(--mono); font-size: 0.6rem; color: var(--text-3); }
-    .metric-value { font-family: var(--mono); font-weight: 500; font-size: 1.8rem; line-height: 1; color: var(--text-1); font-variant-numeric: tabular-nums; text-align: right; transition: color 0.16s ease; }
-    
-    #metric-alt .metric-value { font-size: 2.2rem; color: var(--text-1); }
-    #metric-alt #val-apogee { color: var(--text-2); }
-    .metric-value.trend-up, #metric-alt .metric-value.trend-up, #metric-alt #val-apogee.trend-up { color: var(--nominal); }
-    .metric-value.trend-down, #metric-alt .metric-value.trend-down, #metric-alt #val-apogee.trend-down { color: var(--critical); }
-    #metric-alt .metric-label { color: var(--spx-blue-light); }
-    .stability-badge { display: inline-block; font-family: var(--sans); font-size: 0.7rem; font-weight: 600; letter-spacing: 0.1em; color: var(--text-1); text-align: right; }
-
-    /* ═══════════════════════════════════════════════════════════
-       CENTER — 3D ROCKET + UPLOT SPARKLINES
-       ═══════════════════════════════════════════════════════════ */
-    #charts-panel { display: grid; grid-template-rows: 180px 1fr 36px; gap: var(--gap); min-height: 0; }
-
-    #rocket-card { background: radial-gradient(circle at 50% 50%, #0a0a0a 0%, #000000 100%); }
-    #rocket-canvas { width: 100%; height: 100%; display: block; }
-    #rocket-hud { position: absolute; top: 0; left: 0; right: 0; bottom: 0; pointer-events: none; padding: 20px; display: flex; flex-direction: column; justify-content: space-between; }
-    .hud-top, .hud-bottom { display: flex; justify-content: space-between; }
-    .hud-group { display: flex; flex-direction: column; }
-    .hud-group.right { align-items: flex-end; }
-    .hud-label { font-family: var(--sans); font-size: 0.55rem; color: var(--text-3); letter-spacing: 0.1em; }
-    .hud-val { font-family: var(--mono); font-size: 1.1rem; font-weight: 500; color: var(--text-1); font-variant-numeric: tabular-nums; margin-top: 2px;}
-
-    #alt-bar-track { position: absolute; right: 16px; top: 20px; bottom: 20px; width: 2px; background: var(--border-hi); }
-    #alt-bar-fill { position: absolute; bottom: 0; left: -1px; right: -1px; background: var(--text-1); transition: height 0.1s linear; }
-
-    /* Sparklines Grid */
-    #sparklines-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
-      grid-template-rows: 1fr 1fr;
-      gap: var(--gap);
-      min-height: 0;
+    .upload-icon svg { width: 25px; height: 25px; stroke: currentColor; stroke-width: 1.65; fill: none; }
+    .drop-title { font-size: 0.82rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.14em; }
+    .drop-meta { color: var(--muted); font-family: var(--mono); font-size: 0.68rem; line-height: 1.6; word-break: break-word; }
+    .status {
+      min-height: 40px; border-top: 1px solid var(--line-strong); padding-top: 14px;
+      color: var(--muted); font-family: var(--mono); font-size: 0.68rem; line-height: 1.55;
     }
-    .sparkline-card { display: flex; flex-direction: column; padding: 8px 12px; }
-    .sparkline-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
-    .sparkline-label { font-family: var(--sans); font-size: 0.55rem; font-weight: 600; color: var(--text-3); letter-spacing: 0.1em; }
-    .sparkline-cur { font-family: var(--mono); font-size: 0.75rem; font-weight: 500; color: var(--text-2); font-variant-numeric: tabular-nums; }
-    .sparkline-wrapper { flex: 1; position: relative; min-height: 0; }
-    
-    .uplot { font-family: var(--mono) !important; }
-    .u-legend { display: none; }
-
-    #stats-bar { display: flex; align-items: center; justify-content: space-between; padding: 0 16px; font-family: var(--sans); font-size: 0.65rem; font-weight: 600; letter-spacing: 0.1em; color: var(--text-3); }
-    #stats-bar span strong { color: var(--text-1); font-family: var(--mono); font-weight: 500; }
-
-    /* ═══════════════════════════════════════════════════════════
-       RIGHT — CAMERA, MAP, EVENTS, ACTIONS
-       ═══════════════════════════════════════════════════════════ */
-    #info-panel { display: grid; grid-template-rows: 200px 1fr 1.2fr auto; gap: var(--gap); min-height: 0; }
-
-    /* Camera Feed */
-    #camera-container { display: flex; flex-direction: column; }
-    .panel-header { font-family: var(--sans); font-size: 0.55rem; font-weight: 600; color: var(--text-3); padding: 8px 12px; border-bottom: 1px solid var(--border); letter-spacing: 0.15em; }
-    #cam-feed { flex: 1; background: #050505; position: relative; display: flex; justify-content: center; align-items: center; overflow: hidden; }
-    .cam-noise { position: absolute; inset: 0; pointer-events: none; opacity: 0.08; background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E"); }
-    .cam-scanline { position: absolute; inset: 0; pointer-events: none; opacity: 0.1; background: linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,0) 50%, rgba(0,0,0,0.2) 50%, rgba(0,0,0,0.2)); background-size: 100% 4px; }
-    .cam-overlay { position: absolute; font-family: var(--mono); font-size: 0.55rem; color: var(--text-1); z-index: 10; display: flex; flex-direction: column; gap: 2px; }
-    .cam-overlay span { display: block; opacity: 0.8; }
-    .cam-overlay strong { font-weight: 600; color: var(--spx-blue-light); }
-    .cam-overlay.top-left { top: 12px; left: 12px; }
-    .cam-overlay.top-right { top: 12px; right: 12px; align-items: flex-end; }
-    .cam-overlay.bottom-left { bottom: 12px; left: 12px; opacity: 0.6; }
-    .cam-overlay.bottom-right { bottom: 12px; right: 12px; text-align: right; }
-    .cam-overlay.rec { color: var(--critical); display: flex; flex-direction: row; align-items: center; gap: 6px; font-weight: 600; opacity: 1; }
-    .cam-overlay.rec::before { content: ''; width: 6px; height: 6px; background: var(--critical); border-radius: 50%; animation: blink 1.5s infinite; }
-    .cam-reticle { position: absolute; inset: 0; pointer-events: none; opacity: 0.15; display: flex; justify-content: center; align-items: center; }
-    .reticle-h { position: absolute; width: 60%; height: 1px; background: #fff; }
-    .reticle-v { position: absolute; width: 1px; height: 60%; background: #fff; }
-    .reticle-circle { position: absolute; width: 30px; height: 30px; border: 1px solid #fff; border-radius: 50%; }
-    .no-signal-text { font-family: var(--mono); font-size: 0.75rem; letter-spacing: 0.15em; color: var(--text-3); z-index: 5; animation: blink 2s infinite;}
-    
-    #gamepad-status { position: absolute; bottom: 8px; right: 8px; z-index: 1000; font-family: var(--mono); font-size: 0.5rem; padding: 4px 8px; background: rgba(0,0,0,0.8); border: 1px solid var(--critical); color: var(--critical); }
-    #gamepad-status.linked { border-color: var(--nominal); color: var(--nominal); }
-
-    /* Map & Radar */
-    #map-container { position: relative; filter: grayscale(100%) contrast(1.1) brightness(0.7); overflow: hidden; }
-    #map { height: 100%; width: 100%; background: #000; }
-    #map-coords { position: absolute; bottom: 8px; right: 8px; z-index: 1000; font-family: var(--mono); font-size: 0.6rem; color: var(--text-1); background: rgba(0,0,0,0.8); padding: 4px 8px; }
-    
-    .radar-sweep { position: absolute; top: 50%; left: 50%; width: 200%; height: 200%; background: conic-gradient(from 0deg, transparent 70%, rgba(0,255,0,0.3) 100%); transform-origin: 0 0; animation: sweep 2s infinite linear; pointer-events: none; display: none; z-index: 500; }
-    @keyframes sweep { from { transform: translate(-50%, -50%) rotate(0deg); } to { transform: translate(-50%, -50%) rotate(360deg); } }
-    .radar-sweep.active { display: block; }
-
-    /* Events */
-    #events-container { display: flex; flex-direction: column; }
-    #events-list { flex: 1; overflow-y: auto; padding: 8px 12px; font-family: var(--mono); }
-    #events-list::-webkit-scrollbar { width: 4px; }
-    #events-list::-webkit-scrollbar-thumb { background: var(--border-hi); border-radius: 4px; }
-    .event-row { display: flex; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 0.65rem; }
-    .event-time { color: var(--text-3); font-variant-numeric: tabular-nums; }
-    .event-type { color: var(--text-1); font-weight: 500; flex: 1; }
-    .event-alt { color: var(--text-2); font-variant-numeric: tabular-nums; }
-
-    /* Actions */
-    #actions-bar { display: flex; gap: var(--gap); }
-    .action-btn { flex: 1; font-family: var(--sans); font-size: 0.65rem; font-weight: 600; padding: 12px 0; background: transparent; border: 1px solid var(--text-3); color: var(--text-2); cursor: pointer; transition: all 0.2s; letter-spacing: 0.1em; border-radius: var(--r); }
-    .action-btn:hover, .action-btn:active { background: var(--text-1); color: #000; border-color: var(--text-1); }
-    .action-btn.launch-btn { background: #e03131; border-color: #ff5a5a; color: #fff; }
-    .action-btn.launch-btn:hover, .action-btn.launch-btn:active { background: #ff3b3b; border-color: #ff7777; box-shadow: 0 0 18px rgba(255,59,59,0.38); }
-    .launch-confirm { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 24px; background: rgba(0,0,0,0.72); backdrop-filter: blur(5px); }
-    .launch-confirm[hidden] { display: none; }
-    .launch-confirm-dialog { width: min(360px, 100%); border: 1px solid var(--border-hi); border-radius: var(--r); background: var(--bg-panel); box-shadow: 0 24px 60px rgba(0,0,0,0.58); padding: 22px; }
-    .launch-confirm-title { font-family: var(--mono); font-size: 1rem; font-weight: 800; color: var(--text-1); letter-spacing: 0.14em; text-align: center; margin-bottom: 20px; }
-    .launch-confirm-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    .launch-confirm-btn { min-height: 42px; border-radius: var(--r); border: 1px solid transparent; font-family: var(--sans); font-size: 0.72rem; font-weight: 800; letter-spacing: 0.12em; cursor: pointer; transition: transform 0.1s, box-shadow 0.2s, background 0.2s; }
-    .launch-confirm-btn:active { transform: translateY(1px); }
-    .launch-confirm-btn.abort { background: #c92a2a; border-color: #ff5a5a; color: #fff; }
-    .launch-confirm-btn.abort:hover { background: #f03e3e; box-shadow: 0 0 18px rgba(240,62,62,0.32); }
-    .launch-confirm-btn.proceed { background: #2f9e44; border-color: #69db7c; color: #fff; }
-    .launch-confirm-btn.proceed:hover { background: #37b24d; box-shadow: 0 0 18px rgba(55,178,77,0.32); }
-    
-    /* ═══════════════════════════════════════════════════════════
-       FOOTER - TIMELINE SCRUBBER
-       ═══════════════════════════════════════════════════════════ */
-    #timeline-bar { display: flex; align-items: center; gap: 16px; padding: 0 20px; background: var(--bg-header); border-top: 1px solid var(--border); }
-    #scrubber { flex: 1; -webkit-appearance: none; height: 4px; background: var(--border-hi); border-radius: 2px; outline: none; }
-    #scrubber::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; background: var(--text-1); border-radius: 50%; cursor: ew-resize; box-shadow: 0 0 10px rgba(255,255,255,0.5); }
-    .scrub-time { font-family: var(--mono); font-size: 0.8rem; color: var(--spx-blue-light); font-weight: bold; font-variant-numeric: tabular-nums; width: 80px; text-align: right; }
-    #btn-live { min-width: 108px; min-height: 34px; background: linear-gradient(180deg, var(--text-1), #cfd6dd); color: #000; font-family: var(--sans); font-size: 0.6rem; font-weight: 700; padding: 8px 16px; cursor: pointer; border-radius: var(--r); border: 1px solid #fff; transition: background 0.2s, border-color 0.2s, box-shadow 0.2s, transform 0.1s; letter-spacing: 0.1em; box-shadow: 0 1px 0 rgba(255,255,255,0.65) inset, 0 8px 18px rgba(0,0,0,0.35); }
-    #btn-live:hover { box-shadow: 0 1px 0 rgba(255,255,255,0.8) inset, 0 0 18px rgba(255,255,255,0.18), 0 8px 18px rgba(0,0,0,0.35); }
-    #btn-live:active { transform: translateY(1px); box-shadow: 0 1px 0 rgba(255,255,255,0.4) inset, 0 4px 12px rgba(0,0,0,0.3); }
-    #btn-live:focus-visible { outline: 2px solid var(--spx-blue-light); outline-offset: 2px; }
-    #btn-live.dim { background: transparent; color: var(--text-2); border-color: var(--border-hi); box-shadow: none; }
+    .status.ok { color: var(--ok); }
+    .status.bad { color: var(--bad); }
+    .summary-grid { display: grid; grid-template-columns: 1fr; gap: 8px; }
+    .summary-tile {
+      border: 1px solid var(--line); border-radius: 2px; padding: 14px 14px 13px; background: #030303;
+      display: grid; grid-template-columns: 1fr auto; align-items: baseline; gap: 12px;
+    }
+    .tile-label {
+      color: var(--muted); font-size: 0.62rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.15em;
+    }
+    .tile-value { font-family: var(--mono); font-size: 1.12rem; font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
+    .tile-value.accent { color: var(--accent); }
+    .review-panel { display: grid; grid-template-rows: auto 1fr auto; min-height: 640px; }
+    .chart-head {
+      padding: 18px 18px 16px; border-bottom: 1px solid var(--line-strong);
+      display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    }
+    .chart-title { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+    .chart-title h2 { font-size: 0.92rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.14em; }
+    .chart-title span { color: var(--muted); font-family: var(--mono); font-size: 0.68rem; overflow-wrap: anywhere; }
+    .chart-readout { font-family: var(--mono); color: var(--accent); font-size: 0.78rem; text-align: right; white-space: nowrap; letter-spacing: 0.05em; }
+    .chart-wrap { position: relative; min-height: 450px; padding: 18px; background: #020202; }
+    #altitude-chart { width: 100%; height: 100%; min-height: 450px; display: block; }
+    .empty-state {
+      position: absolute; inset: 18px; display: grid; place-items: center; text-align: center;
+      color: var(--dim); font-family: var(--mono); font-size: 0.74rem; border: 1px solid var(--line);
+      border-radius: 2px; background: #030303; letter-spacing: 0.16em;
+    }
+    .table-wrap { border-top: 1px solid var(--line-strong); max-height: 190px; overflow: auto; }
+    table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 0.68rem; }
+    th, td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
+    th:first-child, td:first-child { text-align: left; }
+    th { color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.11em; background: #030303; position: sticky; top: 0; }
+    td { color: var(--text); }
+    @media (max-width: 900px) {
+      body { padding: 14px; }
+      #app { min-height: calc(100vh - 28px); }
+      .topbar { align-items: flex-start; flex-direction: column; }
+      .actions { width: 100%; justify-content: stretch; }
+      .btn { flex: 1; }
+      main { grid-template-columns: 1fr; }
+      .chart-head { align-items: flex-start; flex-direction: column; }
+      .chart-readout { text-align: left; }
+      .review-panel { min-height: 520px; }
+      .chart-wrap, #altitude-chart { min-height: 360px; }
+      .summary-tile { grid-template-columns: 1fr; gap: 8px; }
+      .tile-value { text-align: left; font-size: 1.35rem; }
+    }
   </style>
 </head>
-
 <body>
   <div id="app">
-    <header id="header">
-      <div class="header-left">
-        <span id="logo">NRC</span>
+    <header class="topbar">
+      <div class="brand">
+        <h1>NRC Flight Review</h1>
+        <div class="subtitle">SD card recovery · altitude vs time</div>
       </div>
-      <div class="header-center">
-        <div class="phase-badge" id="phase-badge">SYSTEM IDLE</div>
-      </div>
-      <div class="header-right">
-        <div class="status-voice-control">
-          <span>STATUS VOICE</span>
-          <label class="status-voice-switch" for="status-voice-toggle" title="Toggle spoken status updates">
-            <input id="status-voice-toggle" type="checkbox" aria-label="Toggle status voice">
-            <span class="status-voice-slider" aria-hidden="true"></span>
-          </label>
-          <span id="status-voice-state">OFF</span>
-        </div>
-        <span class="mission-timer" id="mission-timer">00:00:00</span>
+      <div class="actions">
+        <button class="btn primary" id="select-btn" type="button">Select CSV</button>
+        <button class="btn" id="download-btn" type="button" disabled>Download Upload</button>
+        <input id="file-input" type="file" accept=".csv,text/csv" hidden>
       </div>
     </header>
 
-    <main id="dashboard">
-      <aside id="metrics-panel">
-        <div class="preflight-grid panel" style="margin-bottom: var(--gap);">
-           <div class="pf-item"><span class="pf-label">BMP280</span><span id="pf-bmp" class="pf-val">FLT</span></div>
-           <div class="pf-item"><span class="pf-label">LORA</span><span id="pf-lora" class="pf-val">FLT</span></div>
-           <div class="pf-item"><span class="pf-label">SD LOG</span><span id="pf-sd" class="pf-val">FLT</span></div>
-           <div class="pf-item"><span class="pf-label">GPS_FIX</span><span id="pf-gps" class="pf-val">FLT</span></div>
+    <main>
+      <aside class="panel upload-panel">
+        <section class="dropzone" id="dropzone">
+          <div class="drop-inner">
+            <div class="upload-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path d="M12 3v12"></path>
+                <path d="m7 8 5-5 5 5"></path>
+                <path d="M5 15v4h14v-4"></path>
+              </svg>
+            </div>
+            <div class="drop-title">Load NRC Flight CSV</div>
+            <div class="drop-meta" id="file-meta">No upload loaded</div>
+          </div>
+        </section>
+
+        <div class="summary-grid">
+          <div class="summary-tile">
+            <div class="tile-label">Apogee</div>
+            <div class="tile-value accent" id="sum-apogee">--.- m</div>
+          </div>
+          <div class="summary-tile">
+            <div class="tile-label">Apogee Time</div>
+            <div class="tile-value" id="sum-apogee-time">T+--.- s</div>
+          </div>
+          <div class="summary-tile">
+            <div class="tile-label">Rows</div>
+            <div class="tile-value" id="sum-rows">0</div>
+          </div>
+          <div class="summary-tile">
+            <div class="tile-label">Duration</div>
+            <div class="tile-value" id="sum-duration">--.- s</div>
+          </div>
         </div>
 
-        <div class="metric-card panel" id="metric-alt">
-          <div class="metric-header"><span class="metric-label">ALTITUDE</span><span class="metric-unit">M</span></div>
-          <div class="metric-value" id="val-alt">0000.0</div>
-          <div class="metric-header" style="margin-top: 12px; margin-bottom: 0;"><span class="metric-label">APOGEE</span><span class="metric-unit">M</span></div>
-          <div class="metric-value" id="val-apogee" style="font-size: 1.2rem;">0000.0</div>
-        </div>
-        <div class="metric-card panel">
-          <div class="metric-header"><span class="metric-label">VELOCITY</span><span class="metric-unit">M/S</span></div>
-          <div class="metric-value" id="val-vvel">+00.0</div>
-        </div>
-        <div class="metric-card panel">
-          <div class="metric-header"><span class="metric-label">ACCELERATION</span><span class="metric-unit">M/S²</span></div>
-          <div class="metric-value" id="val-accel">+00.0</div>
-        </div>
-        <div class="metric-card panel">
-          <div class="metric-header"><span class="metric-label">STABILITY</span></div>
-          <div class="stability-badge" id="val-stability">CALCULATING</div>
-        </div>
-        <div class="metric-card panel">
-          <div class="metric-header"><span class="metric-label">PRESSURE</span><span class="metric-unit">HPA</span></div>
-          <div class="metric-value" id="val-press">1013.2</div>
-        </div>
-        <div class="metric-card panel">
-          <div class="metric-header"><span class="metric-label">TEMPERATURE</span><span class="metric-unit">°C</span></div>
-          <div class="metric-value" id="val-temp">00.0</div>
-        </div>
+        <div class="status" id="status">Waiting for recovered NRC SD data.</div>
       </aside>
 
-      <section id="charts-panel">
-        <div id="rocket-card" class="panel">
-          <canvas id="rocket-canvas"></canvas>
-          <div id="alt-bar-track"><div id="alt-bar-fill" style="height:0%"></div></div>
-          <div id="rocket-hud">
-            <div class="hud-top">
-              <div class="hud-group"><div class="hud-label">PITCH</div><div class="hud-val" id="hud-pitch">0.00°</div></div>
-              <div class="hud-group right"><div class="hud-label">ROLL RATE</div><div class="hud-val" id="hud-gyro">0.00°/S</div></div>
-            </div>
-            <div class="hud-bottom">
-              <div class="hud-group"><div class="hud-label">RSSI</div><div class="hud-val" id="val-rssi" style="color:var(--text-2)">-00 DBM</div></div>
-              <div class="hud-group right"><div class="hud-label">G-FORCE</div><div class="hud-val" id="hud-gforce">1.00 G</div></div>
-            </div>
+      <section class="panel review-panel">
+        <div class="chart-head">
+          <div class="chart-title">
+            <h2>Altitude Trace</h2>
+            <span id="upload-label">No upload selected</span>
           </div>
+          <div class="chart-readout" id="chart-readout">APOGEE --.- M</div>
         </div>
-
-        <div id="sparklines-grid">
-          <div class="sparkline-card panel">
-            <div class="sparkline-header"><span class="sparkline-label">ALTITUDE VS TIME</span><span class="sparkline-cur" id="cur-alt">0000.0</span></div>
-            <div class="sparkline-wrapper" id="spark-alt"></div>
-          </div>
-          <div class="sparkline-card panel">
-            <div class="sparkline-header"><span class="sparkline-label">TEMPERATURE VS TIME</span><span class="sparkline-cur" id="cur-temp">00.0</span></div>
-            <div class="sparkline-wrapper" id="spark-temp"></div>
-          </div>
-          <div class="sparkline-card panel">
-            <div class="sparkline-header"><span class="sparkline-label">PRESSURE VS TIME</span><span class="sparkline-cur" id="cur-press">0000.0</span></div>
-            <div class="sparkline-wrapper" id="spark-press"></div>
-          </div>
-          <div class="sparkline-card panel">
-            <div class="sparkline-header"><span class="sparkline-label">VELOCITY VS TIME</span><span class="sparkline-cur" id="cur-vvel">00.0</span></div>
-            <div class="sparkline-wrapper" id="spark-vvel"></div>
-          </div>
-          <div class="sparkline-card panel">
-            <div class="sparkline-header"><span class="sparkline-label">ACCELERATION VS TIME</span><span class="sparkline-cur" id="cur-accel">+00.0</span></div>
-            <div class="sparkline-wrapper" id="spark-accel"></div>
-          </div>
-          <div class="sparkline-card panel">
-            <div class="sparkline-header"><span class="sparkline-label">RSSI VS TIME</span><span class="sparkline-cur" id="cur-rssi">-00</span></div>
-            <div class="sparkline-wrapper" id="spark-rssi"></div>
-          </div>
+        <div class="chart-wrap">
+          <canvas id="altitude-chart"></canvas>
+          <div class="empty-state" id="empty-state">CSV REQUIRED</div>
         </div>
-
-        <div id="stats-bar" class="panel">
-          <span>MAX ALTITUDE: <strong id="stat-max-alt">0000.0</strong></span>
-          <span>PACKETS RECEIVED: <strong id="stat-pkts">0000</strong></span>
-          <span id="stat-mode" style="color: var(--text-2);">SYSTEM ONLINE</span>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Packet</th>
+                <th>T+ seconds</th>
+                <th>Altitude m</th>
+                <th>Temp C</th>
+                <th>Pressure hPa</th>
+              </tr>
+            </thead>
+            <tbody id="packet-table"></tbody>
+          </table>
         </div>
       </section>
-
-      <aside id="info-panel">
-        <div id="camera-container" class="panel">
-          <div class="panel-header" style="display:flex; justify-content:space-between; align-items:center;">
-            <span>LIVE STREAM // NATIONAL ROCKETRY CHAMPIONSHIP</span>
-            <button onclick="promptStreamUrl()" style="background:transparent;border:1px solid var(--border-hi);color:var(--text-3);font-family:var(--mono);font-size:0.5rem;padding:2px 8px;cursor:pointer;border-radius:4px;letter-spacing:0.1em;">SET URL</button>
-          </div>
-          <div id="cam-feed">
-            <iframe id="stream-frame" width="100%" height="100%" frameborder="0" allow="autoplay; encrypted-media" allowfullscreen style="display:none;"></iframe>
-            <div id="stream-placeholder" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:8px;">
-              <span style="font-family:var(--mono);font-size:0.7rem;color:var(--text-3);letter-spacing:0.1em;">NO STREAM CONFIGURED</span>
-              <span style="font-family:var(--mono);font-size:0.5rem;color:var(--text-3);">CLICK "SET URL" TO ADD YOUTUBE LIVE LINK</span>
-            </div>
-          </div>
-        </div>
-        <div id="map-container" class="panel">
-          <div id="map"></div>
-          <div class="radar-sweep" id="radar"></div>
-          <div id="map-coords"><span id="coord-lat">00.00000</span>, <span id="coord-lon">00.00000</span></div>
-        </div>
-        <div id="events-container" class="panel">
-          <div class="panel-header">MISSION LOG</div>
-          <div id="events-list"></div>
-        </div>
-        <div id="actions-bar">
-          <button class="action-btn launch-btn" id="btn-launch" onclick="showLaunchConfirm()">LAUNCH</button>
-          <button class="action-btn" id="btn-upload" onclick="uploadSD()">UPLOAD SD</button>
-          <button class="action-btn" id="btn-export" onclick="exportCSV()">EXPORT CSV</button>
-          <input type="file" id="file-sd" accept=".csv" hidden>
-        </div>
-      </aside>
     </main>
-
-    <footer id="timeline-bar">
-      <span class="scrub-time" id="scrub-display">LIVE</span>
-      <input type="range" id="scrubber" min="0" max="0" value="0">
-      <button id="btn-live">SYNC LIVE</button>
-    </footer>
   </div>
-
-  <div class="launch-confirm" id="launch-confirm" role="dialog" aria-modal="true" aria-labelledby="launch-confirm-title" hidden>
-    <div class="launch-confirm-dialog">
-      <div class="launch-confirm-title" id="launch-confirm-title">CONFIRM LAUNCH</div>
-      <div class="launch-confirm-actions">
-        <button class="launch-confirm-btn abort" type="button" onclick="hideLaunchConfirm()">ABORT</button>
-        <button class="launch-confirm-btn proceed" type="button" onclick="startLaunchSequence()">PROCEED</button>
-      </div>
-    </div>
-  </div>
-
-  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-  <script src="https://unpkg.com/uplot@1.6.30/dist/uPlot.iife.min.js"></script>
 
   <script>
     (() => {
       'use strict';
-      const $ = id => document.getElementById(id);
-      let statusVoiceEnabled = localStorage.getItem('STATUS_VOICE') === 'true';
 
-      function renderStatusVoiceToggle() {
-        const toggle = $('status-voice-toggle');
-        const state = $('status-voice-state');
-        if (!toggle || !state) return;
-        toggle.checked = statusVoiceEnabled;
-        state.textContent = statusVoiceEnabled ? 'ON' : 'OFF';
-      }
+      const $ = (id) => document.getElementById(id);
+      const fileInput = $('file-input');
+      const selectBtn = $('select-btn');
+      const downloadBtn = $('download-btn');
+      const dropzone = $('dropzone');
+      const canvas = $('altitude-chart');
+      const ctx = canvas.getContext('2d');
+      let activePackets = [];
+      let activeUpload = null;
 
-      function setupStatusVoiceToggle() {
-        const toggle = $('status-voice-toggle');
-        if (!toggle) return;
-        renderStatusVoiceToggle();
-        toggle.addEventListener('change', () => {
-          statusVoiceEnabled = toggle.checked;
-          localStorage.setItem('STATUS_VOICE', statusVoiceEnabled ? 'true' : 'false');
-          renderStatusVoiceToggle();
-          if (!statusVoiceEnabled && 'speechSynthesis' in window) speechSynthesis.cancel();
-        });
-      }
-      setupStatusVoiceToggle();
-
-      // AUDIO & TTS ENGINE
-      let actx = null, osc = null, gainNode = null, audioInit = false;
-      function initAudio() {
-        if(audioInit) return;
-        const AudioContext = window.AudioContext || window.webkitAudioContext;
-        if(!AudioContext) return;
-        actx = new AudioContext();
-        osc = actx.createOscillator();
-        gainNode = actx.createGain();
-        osc.type = 'sine'; osc.frequency.value = 50; gainNode.gain.value = 0;
-        osc.connect(gainNode); gainNode.connect(actx.destination);
-        osc.start();
-        audioInit = true;
-      }
-      function updateEngineHum(accel) {
-        if(!actx || actx.state !== 'running') return;
-        const f = 50 + Math.max(0, accel - 1) * 40;
-        osc.frequency.setTargetAtTime(f, actx.currentTime, 0.1);
-        gainNode.gain.setTargetAtTime(0.04, actx.currentTime, 0.1);
-      }
-      function silenceHum() {
-        if(!actx || actx.state !== 'running') return;
-        gainNode.gain.setTargetAtTime(0, actx.currentTime, 0.1);
-      }
-      function playPing() {
-        if(!actx) return;
-        const o = actx.createOscillator(), g = actx.createGain();
-        o.type = 'triangle'; o.frequency.value = 880;
-        o.connect(g); g.connect(actx.destination);
-        g.gain.setValueAtTime(0.5, actx.currentTime);
-        g.gain.exponentialRampToValueAtTime(0.01, actx.currentTime + 1);
-        o.start(); o.stop(actx.currentTime + 1);
-      }
-      function speak(text) {
-        if(!statusVoiceEnabled) return;
-        if('speechSynthesis' in window) {
-           const u = new SpeechSynthesisUtterance(text);
-           u.rate = 1.1; u.pitch = 0.9;
-           speechSynthesis.speak(u);
-        }
-      }
-      document.body.addEventListener('click', initAudio, {once: true});
-
-      // STATE
-      const pad = (num, length, decimals = 1) => {
-        if(isNaN(num)) return "----.-";
-        let str = parseFloat(num).toFixed(decimals);
-        const isNeg = str.startsWith('-');
-        if(isNeg) str = str.substring(1);
-        while(str.split('.')[0].length < length) str = '0' + str;
-        return (isNeg ? '-' : '+') + str;
-      };
-      const isRealNumber = value => Number.isFinite(value);
-      const padOrNA = (value, length, decimals = 1) => isRealNumber(value) ? pad(value, length, decimals) : 'N/A';
-
-      const sourceByPath = { '/nrc': 'NRC', '/mach-x': 'CANSAT', '/ort': 'CANSAT' };
-      const currentPath = window.location.pathname.replace(/\/$/, '');
-      let source = sourceByPath[currentPath] || (currentPath.endsWith('/nrc.html') ? 'NRC' : 'CANSAT');
-      let maxAlt = { CANSAT: 0, NRC: 0 };
-      let pktCount = { CANSAT: 0, NRC: 0 };
-      let firstReceivedAt = null;
-      let currentPhase = { CANSAT: 'IDLE', NRC: 'IDLE' };
-      const flightPhases = new Set(['IDLE', 'LAUNCHED', 'ASCENDING', 'APOGEE', 'DESCENDING', 'LANDED']);
-      const gyroHistory = [];
-      let signalState = {
-        mode: 'hardware',
-        CANSAT: { connected: false, lost: true },
-        NRC: { connected: false, lost: true }
-      };
-      
-      const historyDB = { CANSAT: [], NRC: [] };
-      const metricTrendValues = {};
-      let isScrubbing = false;
-      let scrubIndex = 0;
-
-      function updateMetricValue(id, value, text) {
-        const el = $(id);
-        if (!el) return;
-        const numericValue = Number(value);
-        const trendKey = `${source}:${id}`;
-        const previousValue = metricTrendValues[trendKey];
-        el.textContent = text;
-        el.classList.remove('trend-up', 'trend-down');
-        if (Number.isFinite(numericValue) && Number.isFinite(previousValue)) {
-          if (numericValue > previousValue) el.classList.add('trend-up');
-          if (numericValue < previousValue) el.classList.add('trend-down');
-        }
-        if (Number.isFinite(numericValue)) metricTrendValues[trendKey] = numericValue;
-      }
-
-      // UPLOT
-      let upAlt, upTemp, upPress, upVvel, upAccel, upRssi;
-      function makeUplot(id, color, yLabel, yUnit, yDecimals = 2) {
-        const el = $(id);
-        const opts = {
-          width: el.clientWidth, height: el.clientHeight || 40,
-          axes: [
-            {
-              show: true,
-              stroke: '#343a40',
-              grid: { show: true, stroke: '#1c2026', width: 1 },
-              values: (u, vals) => vals.map(v => `${Math.round(v)} s`),
-              label: 'TIME (s)',
-              labelSize: 18,
-              size: 28
-            },
-            {
-              show: true,
-              stroke: '#343a40',
-              grid: { show: true, stroke: '#1c2026', width: 1 },
-              values: (u, vals) => vals.map(v => `${Number(v).toFixed(yDecimals)} ${yUnit}`),
-              label: yLabel,
-              labelSize: 18,
-              size: 52
-            }
-          ],
-          legend: { show: false },
-          cursor: { show: false },
-          scales: { x: { time: false }, y: { auto: true } },
-          series: [{}, { stroke: color, width: 2, fill: color + '1e', scale: 'y' }]
-        };
-        return new uPlot(opts, [[],[]], el);
-      }
-
-      function smoothSeries(values, alpha = 0.22) {
-        if (!values.length) return values;
-        const out = [values[0]];
-        for (let i = 1; i < values.length; i++) {
-          const prev = out[i - 1];
-          out.push(prev + alpha * (values[i] - prev));
-        }
-        return out;
-      }
-
-      function smoothNullableSeries(values, alpha = 0.22) {
-        if (!values.length) return values;
-        const out = [];
-        let previous = null;
-        for (const value of values) {
-          if (!isRealNumber(value)) {
-            out.push(null);
-            continue;
-          }
-          previous = previous === null ? value : previous + alpha * (value - previous);
-          out.push(previous);
-        }
-        return out;
-      }
-
-      function extractActiveMissionPackets(packets) {
-        if (!Array.isArray(packets) || packets.length === 0) return [];
-        let missionStartIdx = 0;
-        for (let i = 1; i < packets.length; i++) {
-          const prev = packets[i - 1];
-          const cur = packets[i];
-          const pktReset = Number.isFinite(prev?.pkt_id) && Number.isFinite(cur?.pkt_id) && cur.pkt_id < prev.pkt_id;
-          const timeReset = Number.isFinite(prev?.timestamp_ms) && Number.isFinite(cur?.timestamp_ms) && cur.timestamp_ms < prev.timestamp_ms;
-          if (pktReset || timeReset) missionStartIdx = i;
-        }
-        return packets.slice(missionStartIdx);
-      }
-      setTimeout(() => {
-        upAlt = makeUplot('spark-alt', '#ffffff', 'ALTITUDE', 'm', 1);
-        upTemp = makeUplot('spark-temp', '#f5d27a', 'TEMPERATURE', 'C', 1);
-        upPress = makeUplot('spark-press', '#2dd4bf', 'PRESSURE', 'hPa', 0);
-        upVvel = makeUplot('spark-vvel', '#a78bfa', 'VELOCITY', 'm/s', 1);
-        upAccel = makeUplot('spark-accel', '#ff6b35', 'ACCELERATION', 'm/s²', 1);
-        upRssi = makeUplot('spark-rssi', '#9ec5ff', 'RSSI', 'dBm', 0);
-      }, 100);
-
-      window.addEventListener('resize', () => {
-        const resizeUplot = (up, id) => { if(up && $(id)) up.setSize({width: $(id).clientWidth, height: $(id).clientHeight}); };
-        resizeUplot(upAlt, 'spark-alt'); resizeUplot(upTemp, 'spark-temp');
-        resizeUplot(upPress, 'spark-press'); resizeUplot(upVvel, 'spark-vvel');
-        resizeUplot(upAccel, 'spark-accel'); resizeUplot(upRssi, 'spark-rssi');
-      });
-
-      function syncCharts() {
-        const arr = extractActiveMissionPackets(historyDB[source]);
-        if(!arr.length || !upAlt) return;
-        let endIdx = isScrubbing ? scrubIndex : arr.length - 1;
-        const slice = arr.slice(0, endIdx + 1);
-        
-        const t0 = arr[0]?.timestamp_ms || 0;
-        const xs = slice.map(p => ((p.timestamp_ms || t0) - t0) / 1000);
-        const altRaw = slice.map(p => (p.altitude_m || 0));
-        const tempRaw = slice.map(p => Number.isFinite(p.temp_c) ? p.temp_c : 0);
-        const pressRaw = slice.map(p => Number.isFinite(p.pressure_hpa) ? p.pressure_hpa : 0);
-        const velRaw = slice.map((p, i) => {
-          if(i===0) return 0;
-          const dt = (p.timestamp_ms - slice[i-1].timestamp_ms)/1000;
-          return dt > 0 ? (p.altitude_m - slice[i-1].altitude_m)/dt : 0;
-        });
-        const accelRaw = slice.map(p => isRealNumber(p.accel_z) ? (p.accel_z - 1) * 9.81 : null);
-        const rssiRaw = slice.map(p => Number.isFinite(p.rssi_dbm) ? p.rssi_dbm : 0);
-
-        const altData = smoothSeries(altRaw, 0.14);
-        const tempData = smoothSeries(tempRaw, 0.2);
-        const pressData = smoothSeries(pressRaw, 0.2);
-        const velData = smoothSeries(velRaw, 0.2);
-        const accelData = smoothNullableSeries(accelRaw, 0.2);
-        const rssiData = smoothSeries(rssiRaw, 0.25);
-
-        upAlt.setData([xs, altData]);
-        upTemp.setData([xs, tempData]);
-        upPress.setData([xs, pressData]);
-        upVvel.setData([xs, velData]);
-        upAccel.setData([xs, accelData]);
-        upRssi.setData([xs, rssiData]);
-      }
-
-      // LEAFLET MAP DUAL-LAYER
-      const map = L.map('map', { zoomControl: false, attributionControl: false }).setView([52.5, -1.9], 16);
-      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19 }).addTo(map);
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png', { maxZoom: 19 }).addTo(map);
-      
-      let mapMarker = null;
-      let elzMarker = null; // Expected Landing Zone disabled until real drift data is available.
-      const trail = L.polyline([], { color: '#ffffff', weight: 2, opacity: 0.8 }).addTo(map);
-
-      function updateMap(pkt) {
-        if (!pkt.lat || !pkt.lon) return;
-        const pos = [pkt.lat, pkt.lon];
-        if (mapMarker) mapMarker.setLatLng(pos);
-        else mapMarker = L.circleMarker(pos, { radius: 3, color: '#fff', fillColor: '#fff', fillOpacity: 1, weight: 1 }).addTo(map);
-        
-        if (elzMarker) {
-          map.removeLayer(elzMarker);
-          elzMarker = null;
-        }
-
-        if (!isScrubbing) { trail.addLatLng(pos); map.panTo(pos); }
-        $('coord-lat').textContent = pkt.lat.toFixed(5); $('coord-lon').textContent = pkt.lon.toFixed(5);
-        if($('cam-lat')) $('cam-lat').textContent = pkt.lat.toFixed(5);
-        if($('cam-lon')) $('cam-lon').textContent = pkt.lon.toFixed(5);
-      }
-
-      function renderTrail() {
-         const arr = historyDB[source];
-         const endIdx = isScrubbing ? scrubIndex : arr.length - 1;
-         const pts = arr.slice(0, endIdx + 1).filter(p=>p.lat).map(p=>[p.lat, p.lon]);
-         trail.setLatLngs(pts);
-      }
-
-      // THREE.JS
-      const rktCard = $('rocket-card');
-      const rktCanvas = $('rocket-canvas');
-      let rktRollRate = 0, rktPitchTarget = 0, rktPitchCurrent = 0, rktAccelTarget = 1, rktAccelCurrent = 1;
-      
-      if (typeof window.THREE !== 'undefined' && rktCard && rktCanvas) {
-        const scene = new THREE.Scene();
-        scene.fog = new THREE.FogExp2(0x000000, 0.05);
-        const camera = new THREE.PerspectiveCamera(40, rktCard.clientWidth / rktCard.clientHeight, 0.1, 100);
-        const renderer = new THREE.WebGLRenderer({ canvas: rktCanvas, alpha: true, antialias: true, powerPreference: 'high-performance' });
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-        
-        const resize = () => { camera.aspect = rktCard.clientWidth / rktCard.clientHeight; camera.updateProjectionMatrix(); renderer.setSize(rktCard.clientWidth, rktCard.clientHeight); };
-        window.addEventListener('resize', resize); resize();
-
-        const rocketGroup = new THREE.Group();
-        const coreMat = new THREE.MeshPhongMaterial({ color: 0x111111, specular: 0x555555, shininess: 30 });
-        const wireMat = new THREE.MeshBasicMaterial({ color: 0xffffff, wireframe: true, transparent: true, opacity: 0.15 });
-        
-        const buildPart = (geo, y) => {
-          const core = new THREE.Mesh(geo, coreMat);
-          const wire = new THREE.Mesh(geo, wireMat);
-          wire.scale.set(1.01, 1.01, 1.01);
-          const part = new THREE.Group();
-          part.add(core); part.add(wire);
-          part.position.y = y;
-          return part;
-        };
-
-        // Reordered Y positions to point nose UP
-        rocketGroup.add(buildPart(new THREE.CylinderGeometry(0.2, 0.2, 3, 16, 4), 0));     // Body
-        
-        const nose = buildPart(new THREE.ConeGeometry(0.2, 0.8, 16, 3), 1.9);
-        rocketGroup.add(nose);
-        
-        rocketGroup.add(buildPart(new THREE.CylinderGeometry(0.15, 0.2, 0.4, 16, 2), -1.7)); // Engine (Bottom)
-
-        for(let i=0; i<4; i++) {
-          const fin = buildPart(new THREE.BoxGeometry(0.04, 0.6, 0.5), 0);
-          fin.position.y = -1.3; // Fins near bottom
-          fin.position.z = 0.3;
-          const pivot = new THREE.Group(); pivot.add(fin); pivot.rotation.y = (i * Math.PI) / 2;
-          rocketGroup.add(pivot);
-        }
-        scene.add(rocketGroup);
-
-        const gridHelper = new THREE.GridHelper(40, 40, 0x333333, 0x111111); gridHelper.position.y = -3; scene.add(gridHelper);
-        scene.add(new THREE.AmbientLight(0x222222, 2.0));
-        const dirLight = new THREE.DirectionalLight(0xffffff, 2); dirLight.position.set(5, 5, 5); scene.add(dirLight);
-
-        camera.position.set(2.5, 1, 6); camera.lookAt(0, 0, 0);
-        const clock = new THREE.Clock();
-
-        const animate = () => {
-          requestAnimationFrame(animate);
-          const time = clock.getElapsedTime();
-          rktPitchCurrent += (rktPitchTarget - rktPitchCurrent) * 0.08;
-          rktAccelCurrent += (rktAccelTarget - rktAccelCurrent) * 0.1;
-          rocketGroup.rotation.x = rktPitchCurrent;
-          rocketGroup.rotation.z += rktRollRate * 0.015;
-          rocketGroup.position.y = Math.sin(time * 1.5) * 0.08;
-
-          const speed = Math.max(0.01, rktAccelCurrent * 0.1);
-          gridHelper.position.z += speed; if (gridHelper.position.z > 1) gridHelper.position.z -= 1;
-
-          camera.position.x += (2.5 - camera.position.x) * 0.1;
-          camera.position.y += (1 - camera.position.y) * 0.1;
-          renderer.render(scene, camera);
-        };
-        animate();
-
-        window.update3D = (pkt) => {
-          const hasGyro = isRealNumber(pkt.gyro_x);
-          const hasAccel = isRealNumber(pkt.accel_z);
-          rktRollRate = hasGyro ? pkt.gyro_x : 0;
-          rktPitchTarget = hasGyro ? Math.min(Math.PI/2, Math.abs(pkt.gyro_x)*0.01) : 0;
-          rktAccelTarget = hasAccel ? pkt.accel_z : 1;
-        };
-      } else { window.update3D = () => {}; }
-
-      // PREFLIGHT CHECKLIST
-      function isTelemetrySourceActive(src) {
-        const state = signalState[src] || {};
-        return state.connected && !state.lost;
-      }
-
-      function updatePreflight(pkt) {
-        const flags = pkt?.flags || 0;
-        const active = isTelemetrySourceActive(pkt?.source || source);
-        const up = (id, ok) => {
-           const el = $(id); if (el) { el.textContent = ok ? 'OK' : 'FLT'; el.className = 'pf-val ' + (ok ? 'ok' : ''); }
-        };
-        up('pf-bmp', active && (flags & 0x08) && Number.isFinite(pkt?.pressure_hpa) && Number.isFinite(pkt?.altitude_m));
-        up('pf-lora', active);
-        up('pf-sd', active && (flags & 0x20));
-        up('pf-gps', active && (flags & 0x04) && Number.isFinite(pkt?.lat) && Number.isFinite(pkt?.lon));
-      }
-
-      // UI UPDATER
-      function updateUIState(pkt) {
-        if(!pkt) return;
-        const src = pkt.source || source;
-        updateMetricValue('val-alt', pkt.altitude_m, pad(pkt.altitude_m, 4));
-        if($('cam-alt')) $('cam-alt').textContent = parseFloat(pkt.altitude_m).toFixed(1) + 'M';
-        if (pkt.altitude_m > maxAlt[src]) maxAlt[src] = pkt.altitude_m;
-        updateMetricValue('val-apogee', maxAlt[src], pad(maxAlt[src], 4));
-        $('stat-max-alt').textContent = pad(maxAlt[src], 4);
-        $('alt-bar-fill').style.height = `${Math.min(100, (pkt.altitude_m / Math.max(maxAlt[src], 10)) * 100)}%`;
-
-        updateMetricValue('val-temp', pkt.temp_c, pad(pkt.temp_c, 2));
-        updateMetricValue('val-press', pkt.pressure_hpa, pad(pkt.pressure_hpa, 4));
-        const hasAccel = isRealNumber(pkt.accel_z);
-        const hasGyro = isRealNumber(pkt.gyro_x);
-        const accel = hasAccel ? (pkt.accel_z - 1.0) * 9.81 : null;
-        updateMetricValue('val-accel', accel, padOrNA(accel, 2));
-        $('cur-accel').textContent = padOrNA(accel, 2);
-        $('hud-gforce').textContent = hasAccel ? parseFloat(pkt.accel_z).toFixed(2) + ' G' : 'N/A';
-        $('val-rssi').textContent = (pkt.rssi_dbm || '-00') + ' DBM';
-        $('cur-rssi').textContent = (pkt.rssi_dbm ?? '-00');
-        
-        $('hud-gyro').textContent = hasGyro ? pad(pkt.gyro_x, 2) + '°/S' : 'N/A';
-        $('hud-pitch').textContent = hasAccel ? parseFloat(pkt.accel_z > 1.5 ? 90 : 0).toFixed(2) + '°' : 'N/A';
-
-        $('cur-alt').textContent = pad(pkt.altitude_m, 4);
-        $('cur-temp').textContent = pad(pkt.temp_c, 2);
-        $('cur-press').textContent = pad(pkt.pressure_hpa, 4);
-
-        const sb = $('val-stability');
-        if (hasGyro) {
-          gyroHistory.push(Math.abs(pkt.gyro_x)); if (gyroHistory.length > 10) gyroHistory.shift();
-          const rms = Math.sqrt(gyroHistory.reduce((a, v) => a + v * v, 0) / gyroHistory.length);
-          if (rms < 10) { sb.textContent = 'NOMINAL'; sb.style.color = 'var(--text-1)'; }
-          else { sb.textContent = 'WARNING'; sb.style.color = 'var(--warning)'; }
-        } else {
-          sb.textContent = 'N/A';
-          sb.style.color = 'var(--text-3)';
-        }
-
-        // Velocity calc
-        const arr = historyDB[src];
-        const idx = arr.indexOf(pkt);
-        if (idx > 0) {
-           const dt = (pkt.timestamp_ms - arr[idx-1].timestamp_ms)/1000;
-           const vvel = dt > 0 ? (pkt.altitude_m - arr[idx-1].altitude_m)/dt : 0;
-           updateMetricValue('val-vvel', vvel, pad(vvel, 2));
-           $('cur-vvel').textContent = pad(vvel, 2);
-        }
-
-        window.update3D(pkt);
-        updateMap(pkt);
-        syncCharts();
-        updatePreflight(pkt);
-
-        if(!isScrubbing && hasAccel) updateEngineHum(pkt.accel_z);
-        else silenceHum();
-
-        $('scrub-display').textContent = 'T+' + (pkt.timestamp_ms/1000).toFixed(1) + 'S';
-      }
-
-      function processPacket(pkt) {
-        if (!pkt || isNaN(pkt.altitude_m)) return;
-        const src = pkt.source || source;
-        historyDB[src].push(pkt);
-        if(pkt.pkt_id) pktCount[src] = Math.max(pktCount[src], pkt.pkt_id);
-        $('stat-pkts').textContent = String(pktCount[src]).padStart(4, '0');
-
-        $('scrubber').max = historyDB[source].length - 1;
-        if (!isScrubbing) {
-           scrubIndex = historyDB[source].length - 1;
-           $('scrubber').value = scrubIndex;
-           updateUIState(pkt);
-        }
-        if (!firstReceivedAt) firstReceivedAt = pkt.received_at || Date.now();
-      }
-
-      // SCRUBBER
-      $('scrubber').addEventListener('input', (e) => {
-         isScrubbing = true;
-         $('btn-live').classList.add('dim');
-         scrubIndex = parseInt(e.target.value);
-         const pkt = historyDB[source][scrubIndex];
-         if(pkt) { updateUIState(pkt); renderTrail(); }
-      });
-      $('btn-live').addEventListener('click', () => {
-         isScrubbing = false;
-         $('btn-live').classList.remove('dim');
-         const arr = historyDB[source];
-         if(arr.length) {
-            scrubIndex = arr.length - 1;
-            $('scrubber').value = scrubIndex;
-            updateUIState(arr[scrubIndex]);
-            renderTrail();
-         }
-      });
-
-      window.showLaunchConfirm = () => {
-        const modal = $('launch-confirm');
-        if (!modal) return;
-        modal.hidden = false;
-        const proceed = modal.querySelector('.proceed');
-        if (proceed) proceed.focus();
-      };
-
-      window.hideLaunchConfirm = () => {
-        const modal = $('launch-confirm');
-        if (!modal) return;
-        modal.hidden = true;
-        const launch = $('btn-launch');
-        if (launch) launch.focus();
-      };
-
-      document.addEventListener('keydown', (event) => {
-        if (event.key === 'Escape' && !$('launch-confirm')?.hidden) hideLaunchConfirm();
-      });
-
-      window.startLaunchSequence = async () => {
-        hideLaunchConfirm();
-        setModeBadge('SENDING LAUNCH COMMAND', 'var(--warning)');
-        const proceed = document.querySelector('.launch-confirm-btn.proceed');
-        if (proceed) proceed.disabled = true;
-
-        let payload = null;
-        try {
-          const res = await fetch(apiUrl('/api/launch'), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ source })
-          });
-          payload = await res.json().catch(() => null);
-          if (!res.ok && !payload?.partial) {
-            const errorText = payload?.results?.map(r => `${r.source}: ${r.error || r.status}`).join(' | ') || `launch ${res.status}`;
-            throw new Error(errorText);
-          }
-        } catch (error) {
-          setModeBadge('LAUNCH COMMAND FAILED', 'var(--critical)');
-          addEvent({
-            source,
-            event_type: 'LAUNCH_FAILED',
-            altitude_m: 0,
-            timestamp_ms: 0,
-            received_at: Date.now()
-          });
-          if (proceed) proceed.disabled = false;
-          return;
-        }
-
-        const now = Date.now();
-        const latest = historyDB[source][historyDB[source].length - 1] || {};
-        firstReceivedAt = now;
-        $('mission-timer').textContent = '00:00:00';
-        updatePhase('LAUNCHED', source);
-        addEvent({
-          source,
-          event_type: 'LAUNCHED',
-          altitude_m: Number.isFinite(latest.altitude_m) ? latest.altitude_m : 0,
-          timestamp_ms: Number.isFinite(latest.timestamp_ms) ? latest.timestamp_ms : 0,
-          received_at: now
-        });
-        setModeBadge(payload?.partial ? 'LAUNCH PARTIAL' : 'LAUNCH COMMAND SENT', payload?.partial ? 'var(--warning)' : 'var(--text-1)');
-        $('btn-launch').textContent = 'LAUNCH';
-        if (proceed) proceed.disabled = false;
-      };
-
-      // EVENTS
-      function addEvent(evt) {
-        const list = $('events-list');
-        const row = document.createElement('div'); row.className = 'event-row';
-        const d = new Date(evt.received_at || Date.now());
-        row.innerHTML = `<span class="event-time">${d.toISOString().substr(11,8)}</span><span class="event-type">${evt.event_type}</span><span class="event-alt">${parseFloat(evt.altitude_m||0).toFixed(1)}M</span>`;
-        list.insertBefore(row, list.firstChild);
-
-        if(!isScrubbing) {
-           if(evt.event_type === 'LAUNCHED') speak('Liftoff detected.');
-           else if(evt.event_type === 'APOGEE') { playPing(); speak(`Apogee detected. Altitude ${Math.round(evt.altitude_m)} meters. Descent nominal.`); }
-           else if(evt.event_type === 'LANDED') speak('Target landed. Radar active.');
-        }
-      }
-
-      function updatePhase(phase, src) {
-        if (!flightPhases.has(phase)) return;
-        if(src) currentPhase[src] = phase;
-        if(src && src !== source) return;
-        const b = $('phase-badge');
-        b.textContent = `${phase}`;
-        b.className = 'phase-badge ' + phase.toLowerCase();
-        
-        if(phase === 'DESCENDING' || phase === 'LANDED') $('radar').classList.add('active');
-        else $('radar').classList.remove('active');
-      }
-
-      setInterval(() => {
-        if (!firstReceivedAt) return;
-        const e = Math.floor((Date.now() - firstReceivedAt) / 1000);
-        $('mission-timer').textContent = `${String(Math.floor(e/3600)).padStart(2,'0')}:${String(Math.floor((e%3600)/60)).padStart(2,'0')}:${String(e%60).padStart(2,'0')}`;
-      }, 1000);
-
-      // Removed switchSource as source is hardcoded
-
-      // GAMEPAD API
-      let gamepadIndex = null;
-      let lastControlTime = 0;
       const backendOrigin = (() => {
         const isHttp = window.location.protocol === 'http:' || window.location.protocol === 'https:';
         if (!isHttp) return 'http://localhost:3000';
@@ -1003,123 +231,250 @@
         return window.location.origin;
       })();
       const apiUrl = (path) => backendOrigin + path;
-      const roverHeaders = () => {
-        const headers = {'Content-Type':'application/json'};
-        const token = localStorage.getItem('ROVER_CONTROL_TOKEN');
-        if (token) headers['x-rover-token'] = token;
-        return headers;
-      };
 
-      async function refreshSignalState() {
-        try {
-          const res = await fetch(apiUrl('/api/health'));
-          if (!res.ok) throw new Error(`health ${res.status}`);
-          const data = await res.json();
-          signalState = data.signal || signalState;
-          const latest = historyDB[source][historyDB[source].length - 1];
-          updatePreflight(latest || null);
-        } catch (error) {
-          signalState = { ...signalState, mode: 'hardware' };
-          updatePreflight(null);
+      function setStatus(message, type = '') {
+        const el = $('status');
+        el.textContent = message;
+        el.className = `status ${type}`.trim();
+      }
+
+      function formatNumber(value, decimals = 1) {
+        return Number.isFinite(value) ? value.toFixed(decimals) : '--.-';
+      }
+
+      function flightSeconds(packet, firstTimestamp) {
+        return ((packet.timestamp_ms || firstTimestamp) - firstTimestamp) / 1000;
+      }
+
+      function findApogee(packets) {
+        return packets.reduce((best, packet) => {
+          if (!Number.isFinite(packet.altitude_m)) return best;
+          return !best || packet.altitude_m > best.altitude_m ? packet : best;
+        }, null);
+      }
+
+      function summarizePackets(packets, upload) {
+        const firstTimestamp = packets[0]?.timestamp_ms || 0;
+        const lastTimestamp = packets[packets.length - 1]?.timestamp_ms || firstTimestamp;
+        const apogee = findApogee(packets);
+        const apogeeTime = apogee ? flightSeconds(apogee, firstTimestamp) : NaN;
+        const duration = Math.max(0, (lastTimestamp - firstTimestamp) / 1000);
+
+        $('sum-apogee').textContent = `${formatNumber(apogee?.altitude_m)} m`;
+        $('sum-apogee-time').textContent = `T+${formatNumber(apogeeTime)} s`;
+        $('sum-rows').textContent = String(packets.length);
+        $('sum-duration').textContent = `${formatNumber(upload?.duration_s ?? duration)} s`;
+        $('chart-readout').textContent = `APOGEE ${formatNumber(apogee?.altitude_m)} M`;
+      }
+
+      function sizeCanvas() {
+        const rect = canvas.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = Math.max(1, Math.floor(rect.width * dpr));
+        canvas.height = Math.max(1, Math.floor(rect.height * dpr));
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        return { width: rect.width, height: rect.height };
+      }
+
+      function drawChart(packets) {
+        const { width, height } = sizeCanvas();
+        ctx.clearRect(0, 0, width, height);
+        if (!packets.length) return;
+
+        const padding = { left: 58, right: 24, top: 28, bottom: 44 };
+        const plotW = Math.max(1, width - padding.left - padding.right);
+        const plotH = Math.max(1, height - padding.top - padding.bottom);
+        const firstTimestamp = packets[0].timestamp_ms || 0;
+        const xs = packets.map((packet) => flightSeconds(packet, firstTimestamp));
+        const ys = packets.map((packet) => packet.altitude_m);
+        const maxX = Math.max(1, ...xs);
+        const minY = Math.min(0, ...ys);
+        const maxY = Math.max(10, ...ys);
+        const yRange = Math.max(1, maxY - minY);
+        const xPos = (x) => padding.left + (x / maxX) * plotW;
+        const yPos = (y) => padding.top + (1 - ((y - minY) / yRange)) * plotH;
+
+        ctx.strokeStyle = '#242424';
+        ctx.lineWidth = 1;
+        ctx.font = '11px JetBrains Mono, monospace';
+        ctx.fillStyle = '#777777';
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'middle';
+        for (let i = 0; i <= 4; i++) {
+          const y = padding.top + (plotH / 4) * i;
+          const value = maxY - (yRange / 4) * i;
+          ctx.beginPath();
+          ctx.moveTo(padding.left, y);
+          ctx.lineTo(width - padding.right, y);
+          ctx.stroke();
+          ctx.fillText(value.toFixed(0), padding.left - 10, y);
         }
-      }
-
-      refreshSignalState();
-      setInterval(refreshSignalState, 1000);
-
-      function pollGamepad() {
-        const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-        const padObj = Array.from(pads).find(p => p && p.connected);
-        const statusEl = $('gamepad-status');
-        
-        if(padObj) {
-          if(gamepadIndex === null) { gamepadIndex = padObj.index; statusEl.textContent = 'PAD: LINKED'; statusEl.className = 'linked'; speak('Controller linked.'); }
-          let left = -padObj.axes[1] * 100;
-          let right = -padObj.axes[3] * 100;
-          if(Math.abs(left) < 10) left = 0; if(Math.abs(right) < 10) right = 0;
-          const now = Date.now();
-          if(now - lastControlTime > 100) {
-            fetch(apiUrl('/api/rover/control'), { method: 'POST', headers: roverHeaders(), body: JSON.stringify({ left, right }) }).catch(()=>{});
-            lastControlTime = now;
-          }
-        } else {
-          if(gamepadIndex !== null) {
-            fetch(apiUrl('/api/rover/stop'), { method: 'POST', headers: roverHeaders() }).catch(()=>{});
-            gamepadIndex = null; statusEl.textContent = 'PAD: DISCONNECTED'; statusEl.className = '';
-          }
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        for (let i = 0; i <= 4; i++) {
+          const x = padding.left + (plotW / 4) * i;
+          const value = (maxX / 4) * i;
+          ctx.beginPath();
+          ctx.moveTo(x, padding.top);
+          ctx.lineTo(x, height - padding.bottom);
+          ctx.stroke();
+          ctx.fillText(`${value.toFixed(0)}s`, x, height - padding.bottom + 12);
         }
-        requestAnimationFrame(pollGamepad);
+
+        const gradient = ctx.createLinearGradient(0, padding.top, 0, height - padding.bottom);
+        gradient.addColorStop(0, 'rgba(255, 255, 255, 0.20)');
+        gradient.addColorStop(1, 'rgba(255, 255, 255, 0.02)');
+        ctx.beginPath();
+        xs.forEach((x, index) => {
+          const px = xPos(x);
+          const py = yPos(ys[index]);
+          if (index === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        });
+        ctx.lineTo(xPos(xs[xs.length - 1]), height - padding.bottom);
+        ctx.lineTo(xPos(xs[0]), height - padding.bottom);
+        ctx.closePath();
+        ctx.fillStyle = gradient;
+        ctx.fill();
+
+        ctx.beginPath();
+        xs.forEach((x, index) => {
+          const px = xPos(x);
+          const py = yPos(ys[index]);
+          if (index === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        });
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        const apogee = findApogee(packets);
+        if (apogee) {
+          const t = flightSeconds(apogee, firstTimestamp);
+          const ax = xPos(t);
+          const ay = yPos(apogee.altitude_m);
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.58)';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(ax, padding.top);
+          ctx.lineTo(ax, height - padding.bottom);
+          ctx.stroke();
+          ctx.fillStyle = '#ffffff';
+          ctx.beginPath();
+          ctx.arc(ax, ay, 5, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#ffffff';
+          ctx.font = '12px JetBrains Mono, monospace';
+          ctx.textAlign = ax > width - 180 ? 'right' : 'left';
+          ctx.textBaseline = 'bottom';
+          ctx.fillText(`APOGEE ${apogee.altitude_m.toFixed(1)}M @ T+${t.toFixed(1)}S`, ax + (ax > width - 180 ? -10 : 10), ay - 10);
+        }
+
+        ctx.fillStyle = '#888888';
+        ctx.font = '11px JetBrains Mono, monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+        ctx.fillText('TIME SINCE BOOT', padding.left + plotW / 2, height - 4);
+        ctx.save();
+        ctx.translate(14, padding.top + plotH / 2);
+        ctx.rotate(-Math.PI / 2);
+        ctx.fillText('ALTITUDE M', 0, 0);
+        ctx.restore();
       }
-      requestAnimationFrame(pollGamepad);
 
-      // SOCKET.IO
-      let socket = null;
-      function setModeBadge(text, color) { $('stat-mode').textContent = text; $('stat-mode').style.color = color; }
-
-      function attachSocketHandlers(s) {
-        s.on('connect', () => {
-          setModeBadge('SYSTEM ONLINE', 'var(--text-1)');
-          s.emit('subscribe_source', { source });
-          s.emit('request_history', { source, limit: 1000 });
-        });
-        s.on('disconnect', () => setModeBadge('OFFLINE', 'var(--critical)'));
-        s.on('history', data => {
-          if (!data) return;
-          let pkts = data.cansat || data.nrc ? (source === 'CANSAT' ? data.cansat : data.nrc) : data.packets;
-          if (data.events && data.events.length) {
-             $('events-list').innerHTML = ''; data.events.forEach(e => addEvent(e));
-             const srcEvts = data.events.filter(e => e.source === source && flightPhases.has(e.event_type));
-             if (srcEvts.length) updatePhase(srcEvts[srcEvts.length - 1].event_type, source);
-          }
-          if (pkts && pkts.length) {
-             pkts = extractActiveMissionPackets(pkts);
-             historyDB[source] = [];
-             pkts.forEach(p => processPacket(p));
-          }
-        });
-        s.on('packet', payload => {
-          const pkt = payload && payload.data ? payload.data : payload;
-          if (!pkt || isNaN(pkt.altitude_m)) return;
-          processPacket(pkt);
-        });
-        s.on('mission_event', evt => { addEvent(evt); updatePhase(evt.event_type, evt.source); });
-        s.on('launch_command', payload => {
-          if (!payload) return;
-          const result = Array.isArray(payload.results) ? payload.results.find(r => r.source === source) : null;
-          if (result && !result.ok) setModeBadge(`LAUNCH ${result.status.toUpperCase()}`, 'var(--warning)');
-        });
-        s.on('server_error', payload => setModeBadge(payload?.message || 'SERVER ERROR', 'var(--critical)'));
+      function renderTable(packets) {
+        const firstTimestamp = packets[0]?.timestamp_ms || 0;
+        $('packet-table').innerHTML = packets.slice(-12).map((packet) => `
+          <tr>
+            <td>${packet.pkt_id ?? ''}</td>
+            <td>${formatNumber(flightSeconds(packet, firstTimestamp))}</td>
+            <td>${formatNumber(packet.altitude_m)}</td>
+            <td>${formatNumber(packet.temp_c)}</td>
+            <td>${formatNumber(packet.pressure_hpa, 2)}</td>
+          </tr>
+        `).join('');
       }
 
-      if (typeof window.io === 'function') {
-        socket = io(backendOrigin, { transports: ['websocket', 'polling'] });
-        attachSocketHandlers(socket);
-      } else { setModeBadge('NO SOCKET', 'var(--warning)'); }
+      function renderUpload(upload, packets) {
+        activeUpload = upload;
+        activePackets = packets;
+        $('empty-state').style.display = packets.length ? 'none' : 'grid';
+        $('file-meta').textContent = upload?.filename || `Upload #${upload?.upload_id || '--'}`;
+        $('upload-label').textContent = upload?.filename ? `${upload.filename} · upload ${upload.upload_id}` : `Upload ${upload?.upload_id || '--'}`;
+        downloadBtn.disabled = packets.length === 0;
+        summarizePackets(packets, upload);
+        renderTable(packets);
+        drawChart(packets);
+      }
 
-      // SD UPLOAD
-      window.uploadSD = () => $('file-sd').click();
-      $('file-sd').addEventListener('change', e => {
-        const file = e.target.files[0];
+      async function fetchUploadPackets(uploadId) {
+        const res = await fetch(apiUrl(`/api/sd-uploads/${uploadId}/packets`));
+        const payload = await res.json().catch(() => null);
+        if (!res.ok) throw new Error(payload?.error || `packets ${res.status}`);
+        return payload.packets || [];
+      }
+
+      async function uploadFile(file) {
         if (!file) return;
-        const fd = new FormData(); fd.append('file', file); fd.append('source', source);
-        $('btn-upload').textContent = 'UPLOADING...';
-        fetch(apiUrl('/api/upload-sd'), { method: 'POST', body: fd }).finally(() => { $('btn-upload').textContent = 'UPLOAD SD'; e.target.value = ''; });
+        const form = new FormData();
+        form.append('source', 'NRC');
+        form.append('file', file);
+        selectBtn.disabled = true;
+        setStatus('Uploading SD CSV...');
+        try {
+          const res = await fetch(apiUrl('/api/upload-sd'), { method: 'POST', body: form });
+          const payload = await res.json().catch(() => null);
+          if (!res.ok) throw new Error(payload?.error || `upload ${res.status}`);
+          const packets = await fetchUploadPackets(payload.upload_id);
+          renderUpload({ ...payload, filename: payload.filename || file.name }, packets);
+          setStatus(`Loaded ${payload.inserted} rows from ${file.name}.`, 'ok');
+        } catch (error) {
+          setStatus(`Upload failed: ${error.message}`, 'bad');
+        } finally {
+          selectBtn.disabled = false;
+          fileInput.value = '';
+        }
+      }
+
+      function csvEscape(value) {
+        if (value === null || value === undefined) return '';
+        const text = String(value);
+        return /[,"\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+      }
+
+      function downloadActiveUpload() {
+        if (!activePackets.length) return;
+        const columns = ['pkt_id', 'timestamp_ms', 'altitude_m', 'temp_c', 'pressure_hpa', 'lat', 'lon', 'flags'];
+        const csv = [
+          columns.join(','),
+          ...activePackets.map((packet) => columns.map((column) => csvEscape(packet[column])).join(','))
+        ].join('\n');
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `nrc-upload-${activeUpload?.upload_id || 'flight'}.csv`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+      }
+
+      selectBtn.addEventListener('click', () => fileInput.click());
+      fileInput.addEventListener('change', (event) => uploadFile(event.target.files[0]));
+      downloadBtn.addEventListener('click', downloadActiveUpload);
+      dropzone.addEventListener('dragover', (event) => {
+        event.preventDefault();
+        dropzone.classList.add('dragover');
       });
-      window.exportCSV = () => window.open(apiUrl('/api/export?source=' + source), '_blank');
-
-      window.promptStreamUrl = () => {
-        const url = prompt('Enter YouTube Live stream URL:');
-        if (!url) return;
-        const frame = $('stream-frame');
-        const placeholder = $('stream-placeholder');
-        let embedUrl = url;
-        const ytMatch = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/live\/)([^&?]+)/);
-        if (ytMatch) embedUrl = 'https://www.youtube.com/embed/' + ytMatch[1] + '?autoplay=1&mute=1';
-        frame.src = embedUrl;
-        frame.style.display = 'block';
-        placeholder.style.display = 'none';
-      };
-
+      dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+      dropzone.addEventListener('drop', (event) => {
+        event.preventDefault();
+        dropzone.classList.remove('dragover');
+        uploadFile(event.dataTransfer.files[0]);
+      });
+      window.addEventListener('resize', () => drawChart(activePackets));
+      sizeCanvas();
     })();
   </script>
 </body>

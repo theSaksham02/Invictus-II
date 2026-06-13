@@ -27,7 +27,8 @@ db.exec(`
     rssi_dbm INTEGER,
     flags INTEGER,
     raw TEXT,
-    received_at INTEGER NOT NULL
+    received_at INTEGER NOT NULL,
+    upload_id INTEGER
   );
 
   CREATE INDEX IF NOT EXISTS idx_source_time ON packets(source, received_at);
@@ -44,24 +45,35 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS sd_uploads (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source TEXT NOT NULL DEFAULT 'CANSAT',
     filename TEXT,
     rows_inserted INTEGER,
     uploaded_at INTEGER NOT NULL
   );
 `);
 
+function ensureColumn(table, column, definition) {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all();
+  if (columns.some((row) => row.name === column)) return;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+}
+
+ensureColumn('packets', 'upload_id', 'INTEGER');
+ensureColumn('sd_uploads', 'source', "TEXT NOT NULL DEFAULT 'CANSAT'");
+db.exec(`CREATE INDEX IF NOT EXISTS idx_packets_upload_id ON packets(upload_id);`);
+
 const statements = {
   insertPacket: db.prepare(`
-    INSERT INTO packets (source, pkt_id, timestamp_ms, altitude_m, temp_c, pressure_hpa, accel_z, gyro_x, lat, lon, rssi_dbm, flags, raw, received_at)
-    VALUES (@source, @pkt_id, @timestamp_ms, @altitude_m, @temp_c, @pressure_hpa, @accel_z, @gyro_x, @lat, @lon, @rssi_dbm, @flags, @raw, @received_at)
+    INSERT INTO packets (source, pkt_id, timestamp_ms, altitude_m, temp_c, pressure_hpa, accel_z, gyro_x, lat, lon, rssi_dbm, flags, raw, received_at, upload_id)
+    VALUES (@source, @pkt_id, @timestamp_ms, @altitude_m, @temp_c, @pressure_hpa, @accel_z, @gyro_x, @lat, @lon, @rssi_dbm, @flags, @raw, @received_at, @upload_id)
   `),
   insertEvent: db.prepare(`
     INSERT INTO mission_events (source, event_type, altitude_m, timestamp_ms, received_at)
     VALUES (@source, @event_type, @altitude_m, @timestamp_ms, @received_at)
   `),
   insertUpload: db.prepare(`
-    INSERT INTO sd_uploads (filename, rows_inserted, uploaded_at)
-    VALUES (@filename, @rows_inserted, @uploaded_at)
+    INSERT INTO sd_uploads (source, filename, rows_inserted, uploaded_at)
+    VALUES (@source, @filename, @rows_inserted, @uploaded_at)
   `),
   getRecentPackets: db.prepare(`
     SELECT * FROM packets
@@ -85,6 +97,19 @@ const statements = {
     LIMIT 1
   `),
   getEvents: db.prepare(`SELECT * FROM mission_events ORDER BY received_at ASC`),
+  getUpload: db.prepare(`
+    SELECT * FROM sd_uploads
+    WHERE id = ?
+  `),
+  getUploadPackets: db.prepare(`
+    SELECT * FROM packets
+    WHERE upload_id = ?
+    ORDER BY timestamp_ms ASC, pkt_id ASC, id ASC
+  `),
+  deleteEvents: db.prepare(`
+    DELETE FROM mission_events
+    WHERE (? = 'ALL' OR source = ?)
+  `),
   exportPackets: db.prepare(`
     SELECT id, source, pkt_id, timestamp_ms, altitude_m, temp_c, pressure_hpa, accel_z, gyro_x, lat, lon, rssi_dbm, flags, received_at
     FROM packets
@@ -123,7 +148,8 @@ function toPacketRow(packet) {
     rssi_dbm: packet.rssi_dbm,
     flags: packet.flags,
     raw: packet.raw,
-    received_at: packet.received_at
+    received_at: packet.received_at,
+    upload_id: packet.upload_id ?? null
   };
 }
 
@@ -150,6 +176,14 @@ function insertEvent(event) {
 
 function insertUpload(upload) {
   return runOrThrow('insertUpload', () => statements.insertUpload.run(upload));
+}
+
+function getUpload(id) {
+  return runOrThrow('getUpload', () => statements.getUpload.get(id) || null);
+}
+
+function getUploadPackets(id) {
+  return runOrThrow('getUploadPackets', () => statements.getUploadPackets.all(id));
 }
 
 function getHistory(source, limit = DEFAULT_HISTORY_LIMIT, since = 0) {
@@ -185,6 +219,10 @@ function getAllEvents() {
   return runOrThrow('getAllEvents', () => statements.getEvents.all());
 }
 
+function clearEvents(source = 'ALL') {
+  return runOrThrow('clearEvents', () => statements.deleteEvents.run(source, source));
+}
+
 function exportCsv(source) {
   return runOrThrow('exportCsv', () => statements.exportPackets.all(source, source));
 }
@@ -199,10 +237,13 @@ module.exports = {
   insertPacketsBulk,
   insertEvent,
   insertUpload,
+  getUpload,
+  getUploadPackets,
   getHistory,
   getLatest,
   getStats,
   getAllEvents,
+  clearEvents,
   exportCsv,
   close,
   MAX_HISTORY_LIMIT
