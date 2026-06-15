@@ -297,8 +297,8 @@ void setup() {
     displayBootStep("INIT I2C");
     sensorI2C.begin(I2C_SDA, I2C_SCL);
 
-    // ── BMP280 barometer (addr 0x76: SDO→GND) ───────────────────────
-    if (bmp.begin(0x76)) {
+    // ── BMP280 barometer (try 0x76 first, then 0x77) ──────────────────
+    if (bmp.begin(0x76) || bmp.begin(0x77)) {
         bmp.setSampling(
             Adafruit_BMP280::MODE_NORMAL,
             Adafruit_BMP280::SAMPLING_X8,       // temp oversampling
@@ -308,9 +308,9 @@ void setup() {
         );
         baro_ok = true;
         last_baro_ms = millis();
-        Serial.println("[NRC] BMP280 OK @ 0x76");
+        Serial.println("[NRC] BMP280 OK");
     } else {
-        Serial.println("[NRC] BMP280 FAILED");
+        Serial.println("[NRC] BMP280 FAILED @ 0x76 AND 0x77");
         displayBootStep("BMP280 FAILED");
     }
 
