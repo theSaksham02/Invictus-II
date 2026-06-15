@@ -198,7 +198,7 @@
               <tr>
                 <th>Packet</th>
                 <th>T+ seconds</th>
-                <th>Altitude m</th>
+                <th>Altitude ft</th>
                 <th>Temp C</th>
                 <th>Pressure hPa</th>
               </tr>
@@ -260,11 +260,11 @@
         const apogeeTime = apogee ? flightSeconds(apogee, firstTimestamp) : NaN;
         const duration = Math.max(0, (lastTimestamp - firstTimestamp) / 1000);
 
-        $('sum-apogee').textContent = `${formatNumber(apogee?.altitude_m)} m`;
+        $('sum-apogee').textContent = `${formatNumber(apogee?.altitude_m * 3.28084)} ft`;
         $('sum-apogee-time').textContent = `T+${formatNumber(apogeeTime)} s`;
         $('sum-rows').textContent = String(packets.length);
         $('sum-duration').textContent = `${formatNumber(upload?.duration_s ?? duration)} s`;
-        $('chart-readout').textContent = `APOGEE ${formatNumber(apogee?.altitude_m)} M`;
+        $('chart-readout').textContent = `APOGEE ${formatNumber(apogee?.altitude_m * 3.28084)} FT`;
       }
 
       function sizeCanvas() {
@@ -286,7 +286,7 @@
         const plotH = Math.max(1, height - padding.top - padding.bottom);
         const firstTimestamp = packets[0].timestamp_ms || 0;
         const xs = packets.map((packet) => flightSeconds(packet, firstTimestamp));
-        const ys = packets.map((packet) => packet.altitude_m);
+        const ys = packets.map((packet) => packet.altitude_m * 3.28084);
         const maxX = Math.max(1, ...xs);
         const minY = Math.min(0, ...ys);
         const maxY = Math.max(10, ...ys);
@@ -352,7 +352,7 @@
         if (apogee) {
           const t = flightSeconds(apogee, firstTimestamp);
           const ax = xPos(t);
-          const ay = yPos(apogee.altitude_m);
+          const ay = yPos(apogee.altitude_m * 3.28084);
           ctx.strokeStyle = 'rgba(255, 255, 255, 0.58)';
           ctx.lineWidth = 1;
           ctx.beginPath();
@@ -367,7 +367,7 @@
           ctx.font = '12px JetBrains Mono, monospace';
           ctx.textAlign = ax > width - 180 ? 'right' : 'left';
           ctx.textBaseline = 'bottom';
-          ctx.fillText(`APOGEE ${apogee.altitude_m.toFixed(1)}M @ T+${t.toFixed(1)}S`, ax + (ax > width - 180 ? -10 : 10), ay - 10);
+          ctx.fillText(`APOGEE ${(apogee.altitude_m * 3.28084).toFixed(1)}FT @ T+${t.toFixed(1)}S`, ax + (ax > width - 180 ? -10 : 10), ay - 10);
         }
 
         ctx.fillStyle = '#888888';
@@ -378,7 +378,7 @@
         ctx.save();
         ctx.translate(14, padding.top + plotH / 2);
         ctx.rotate(-Math.PI / 2);
-        ctx.fillText('ALTITUDE M', 0, 0);
+        ctx.fillText('ALTITUDE FT', 0, 0);
         ctx.restore();
       }
 
@@ -388,7 +388,7 @@
           <tr>
             <td>${packet.pkt_id ?? ''}</td>
             <td>${formatNumber(flightSeconds(packet, firstTimestamp))}</td>
-            <td>${formatNumber(packet.altitude_m)}</td>
+            <td>${formatNumber(packet.altitude_m * 3.28084)}</td>
             <td>${formatNumber(packet.temp_c)}</td>
             <td>${formatNumber(packet.pressure_hpa, 2)}</td>
           </tr>

@@ -179,9 +179,9 @@ bool openFreshLogFile() {
         if (!logFile) return false;
 
         logFile.println(
-            "pkt_id,timestamp_ms,altitude_m,temp_c,lm75_temp_c,pressure_hpa,"
-            "lat,lon,gps_fix,flags,bmp_ok,sd_ok,max_altitude_m,"
-            "apogee_detected,apogee_altitude_m"
+            "pkt_id,timestamp_ms,altitude_m,altitude_ft,temp_c,lm75_temp_c,pressure_hpa,"
+            "lat,lon,gps_fix,flags,bmp_ok,sd_ok,max_altitude_m,max_altitude_ft,"
+            "apogee_detected,apogee_altitude_m,apogee_altitude_ft"
         );
         logFile.flush();
         return true;
@@ -218,14 +218,14 @@ void displayStatus(float alt, float maxAlt, float apogeeAlt, uint8_t flags, uint
     // Line 1: Mission phase
     display.drawStr(0, 10, "NRC INVICTUS II");
 
-    // Line 2: Current altitude
+    // Line 2: Current altitude in feet
     char line[32];
-    snprintf(line, sizeof(line), "ALT: %.1f m", alt);
+    snprintf(line, sizeof(line), "ALT: %.1f ft", alt * 3.28084f);
     display.drawStr(0, 24, line);
 
-    // Line 3: Max altitude (apogee) — THIS is what judges read
+    // Line 3: Max altitude (apogee) in feet — THIS is what judges read
     display.setFont(u8g2_font_9x18B_tf);
-    snprintf(line, sizeof(line), "MAX:%.0fm", maxAlt);
+    snprintf(line, sizeof(line), "MAX:%.0fft", maxAlt * 3.28084f);
     display.drawStr(0, 44, line);
 
     // Line 4: Status flags
@@ -473,12 +473,14 @@ void loop() {
             if (isfinite(lm75_temp)) snprintf(lm75Field, sizeof(lm75Field), "%.2f", lm75_temp);
             if (isfinite(apogee_altitude_m)) snprintf(apogeeField, sizeof(apogeeField), "%.2f", apogee_altitude_m);
 
-            logFile.printf("%u,%lu,%.2f,%.2f,%s,%.2f,%.6f,%.6f,%u,%u,%u,%u,%.2f,%u,%s\n",
-                (unsigned)pkt_id, (unsigned long)now, alt, temp, lm75Field, press,
+            char apogeeFieldFt[16] = "";
+            if (isfinite(apogee_altitude_m)) snprintf(apogeeFieldFt, sizeof(apogeeFieldFt), "%.2f", apogee_altitude_m * 3.28084f);
+            logFile.printf("%u,%lu,%.2f,%.2f,%.2f,%s,%.2f,%.6f,%.6f,%u,%u,%u,%u,%.2f,%.2f,%u,%s,%s\n",
+                (unsigned)pkt_id, (unsigned long)now, alt, alt * 3.28084f, temp, lm75Field, press,
                 lat, lon, gps_fix ? 1u : 0u, (unsigned)flags,
                 bmp_ok_this_sample ? 1u : 0u,
                 (sd_ok && logFile) ? 1u : 0u,
-                max_altitude, apogee_detected ? 1u : 0u, apogeeField);
+                max_altitude, max_altitude * 3.28084f, apogee_detected ? 1u : 0u, apogeeField, apogeeFieldFt);
             if (pkt_id % LOG_FLUSH_EVERY == 0) logFile.flush();
         }
 
