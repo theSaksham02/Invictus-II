@@ -201,7 +201,7 @@ void displayStatus(float alt, float maxAlt, float apogeeAlt, uint8_t flags, uint
         display.setFont(u8g2_font_logisoso22_tf);
         char apogeeLine[24];
         float shownApogee = isfinite(apogeeAlt) ? apogeeAlt : maxAlt;
-        snprintf(apogeeLine, sizeof(apogeeLine), "%.0f m", shownApogee);
+        snprintf(apogeeLine, sizeof(apogeeLine), "%.0f ft", shownApogee * 3.28084f);
         display.drawStr(0, 39, apogeeLine);
 
         display.setFont(u8g2_font_6x10_tf);
