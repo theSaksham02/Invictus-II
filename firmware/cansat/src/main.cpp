@@ -109,30 +109,56 @@ float readLM75(uint8_t address) {
 }
 
 void writeMPU6500(uint8_t reg, uint8_t data) {
+    SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
     digitalWrite(MPU6500_CS, LOW);
-    SPI.transfer(reg);
+    SPI.transfer(reg & 0x7F); // Write bit is 0
     SPI.transfer(data);
     digitalWrite(MPU6500_CS, HIGH);
+    SPI.endTransaction();
+}
+
+uint8_t readRegisterMPU6500(uint8_t reg) {
+    SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
+    digitalWrite(MPU6500_CS, LOW);
+    SPI.transfer(reg | 0x80); // Read bit is 1
+    uint8_t val = SPI.transfer(0xFF);
+    digitalWrite(MPU6500_CS, HIGH);
+    SPI.endTransaction();
+    return val;
 }
 
 void readMPU6500() {
+    if (!(flags & FLAG_IMU_OK)) return;
+
+    SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
     digitalWrite(MPU6500_CS, LOW);
     SPI.transfer(0x3B | 0x80); // Read from ACCEL_XOUT_H
-    int16_t ax = (SPI.transfer(0) << 8) | SPI.transfer(0);
-    int16_t ay = (SPI.transfer(0) << 8) | SPI.transfer(0);
-    int16_t az = (SPI.transfer(0) << 8) | SPI.transfer(0);
-    int16_t temp = (SPI.transfer(0) << 8) | SPI.transfer(0);
-    int16_t gx = (SPI.transfer(0) << 8) | SPI.transfer(0);
-    digitalWrite(MPU6500_CS, HIGH);
     
-    accel_z = az / 16384.0f * 9.81f; // +/- 2g scale
-    gyro_x = gx / 131.0f;            // +/- 250dps scale
-    
-    if (az != 0 && az != -1) {
-        flags |= FLAG_IMU_OK;
-    } else {
-        flags &= ~FLAG_IMU_OK;
+    uint8_t buf[14];
+    for (int i = 0; i < 14; i++) {
+        buf[i] = SPI.transfer(0xFF);
     }
+    digitalWrite(MPU6500_CS, HIGH);
+    SPI.endTransaction();
+
+    // Check if the read buffer is all 0x00 or all 0xFF (communication failure)
+    bool allZero = true;
+    bool allFF = true;
+    for (int i = 0; i < 14; i++) {
+        if (buf[i] != 0x00) allZero = false;
+        if (buf[i] != 0xFF) allFF = false;
+    }
+
+    if (allZero || allFF) {
+        flags &= ~FLAG_IMU_OK;
+        return;
+    }
+
+    int16_t az = (buf[4] << 8) | buf[5];
+    int16_t gx = (buf[8] << 8) | buf[9];
+
+    accel_z = az * (2.0f * 9.80665f / 32768.0f);
+    gyro_x = gx * (250.0f / 32768.0f);
 }
 
 void recoverI2CBus() {
@@ -180,7 +206,8 @@ void setup() {
     // Perform I2C bus recovery and initialize Wire
     recoverI2CBus();
     
-    IWatchdog.begin(3000); // 3 seconds
+    // IWatchdog timeout is in microseconds (3,000,000 us = 3 seconds)
+    IWatchdog.begin(3000000); 
 
     // Initialize watchdog timestamps
     lastBmpUpdateMs = millis();
@@ -204,9 +231,19 @@ void setup() {
     pinMode(SD_CS, OUTPUT);
     digitalWrite(SD_CS, HIGH);
     
-    // Wake MPU6500
-    writeMPU6500(0x6B, 0x00);
-    delay(10);
+    // Verify MPU6500 is alive and communicating before waking it up
+    uint8_t who = readRegisterMPU6500(0x75);
+    Serial.print("MPU6500: WHO_AM_I = 0x");
+    Serial.println(who, HEX);
+    if (who == 0x70 || who == 0x71 || who == 0x72 || who == 0x73 || who == 0x98 || who == 0x68) {
+        // Wake MPU6500
+        writeMPU6500(0x6B, 0x00);
+        delay(10);
+        flags |= FLAG_IMU_OK;
+    } else {
+        flags &= ~FLAG_IMU_OK;
+        Serial.println("MPU6500: Failed WHO_AM_I test!");
+    }
 
     // Init Radio
     radio_ok = rf95.init();

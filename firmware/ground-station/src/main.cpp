@@ -45,16 +45,42 @@ void setup() {
     digitalWrite(RFM95_RST, HIGH);
     delay(10);
 
-    if (!rf95.init()) {
-        Serial.println("GCS:ERROR RFM95W init failed, restarting...");
+    bool radio_ok = false;
+    for (int i = 0; i < 3; i++) {
+        radio_ok = rf95.init();
+        if (radio_ok) break;
+        Serial.printf("GCS:WARN RFM95W init attempt %d failed\n", i + 1);
         delay(500);
-        ESP.restart();
     }
     
-    if (!rf95.setFrequency(RFM95_FREQ)) {
-        Serial.println("GCS:ERROR RFM95W frequency set failed, restarting...");
+    if (!radio_ok) {
+        Serial.println("GCS:FATAL RFM95W init failed completely. Halting...");
+        pinMode(2, OUTPUT);
+        while (1) {
+            digitalWrite(2, HIGH);
+            delay(250);
+            digitalWrite(2, LOW);
+            delay(250);
+        }
+    }
+    
+    bool freq_ok = false;
+    for (int i = 0; i < 3; i++) {
+        freq_ok = rf95.setFrequency(RFM95_FREQ);
+        if (freq_ok) break;
+        Serial.printf("GCS:WARN RFM95W frequency set attempt %d failed\n", i + 1);
         delay(500);
-        ESP.restart();
+    }
+    
+    if (!freq_ok) {
+        Serial.println("GCS:FATAL RFM95W frequency set failed completely. Halting...");
+        pinMode(2, OUTPUT);
+        while (1) {
+            digitalWrite(2, HIGH);
+            delay(250);
+            digitalWrite(2, LOW);
+            delay(250);
+        }
     }
     // Setting High Power, but GS is mostly receiving
     rf95.setTxPower(20, false);
