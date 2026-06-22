@@ -22,6 +22,17 @@
 
 RH_RF95 rf95(RFM95_CS, RFM95_IRQ);
 
+uint16_t crc16Ccitt(const uint8_t* data, size_t len) {
+    uint16_t crc = 0xFFFF;
+    for (size_t i = 0; i < len; i++) {
+        crc ^= static_cast<uint16_t>(data[i]) << 8;
+        for (uint8_t bit = 0; bit < 8; bit++) {
+            crc = (crc & 0x8000) ? static_cast<uint16_t>((crc << 1) ^ 0x1021) : static_cast<uint16_t>(crc << 1);
+        }
+    }
+    return crc;
+}
+
 void setup() {
     Serial.begin(GCS_SERIAL_BAUD);
     
@@ -61,8 +72,37 @@ void loop() {
                 buf[sizeof(buf) - 1] = '\0';
             }
             
-            // Forward the raw ASCII frame over USB Serial with the RSSI prefix
-            Serial.printf("[RSSI:%d] %s", rf95.lastRssi(), (char*)buf);
+            // MACHX2 payload has 15 fields separated by 14 commas, plus a CRC separated by the 15th comma.
+            // We want to replace the 14th field (rssi) with rf95.lastRssi() and recompute CRC.
+            char* ptr = (char*)buf;
+            int commas = 0;
+            char* rssi_start = nullptr;
+            
+            while(*ptr) {
+                if(*ptr == ',') {
+                    commas++;
+                    if(commas == 13) rssi_start = ptr + 1;
+                }
+                ptr++;
+            }
+            
+            if (rssi_start && commas >= 14) {
+                char* flags_start = strchr(rssi_start, ',');
+                if (flags_start) {
+                    unsigned int flags = atoi(flags_start + 1);
+                    *rssi_start = '\0'; // Truncate at the comma before rssi
+                    
+                    char newPayload[256];
+                    snprintf(newPayload, sizeof(newPayload), "%s%d,%u", (char*)buf, rf95.lastRssi(), flags);
+                    
+                    uint16_t crc = crc16Ccitt((uint8_t*)(newPayload + 7), strlen(newPayload) - 7);
+                    Serial.printf("%s,%04X\n", newPayload, crc);
+                    continue;
+                }
+            }
+            
+            // Fallback: forward the raw ASCII frame over USB Serial if parsing fails
+            Serial.print((char*)buf);
         }
     }
 }

@@ -63,8 +63,8 @@ bool radio_ok = false;
 
 // Sensor data cache
 float alt_m = 0.0, press_hpa = 0.0, temp_bmp = 0.0;
-float temp_lm75[4] = {0.0, 0.0, 0.0, 0.0};
-float accel_z = 1.0, gyro_x = 0.0;
+float temp_lm75[4] = {0};
+float accel_z = 0.0, gyro_x = 0.0;
 float gps_lat = 0.0, gps_lon = 0.0;
 int rssi_dbm = 0;
 
@@ -83,14 +83,41 @@ uint16_t crc16Ccitt(const uint8_t* data, size_t len) {
 float readLM75(uint8_t address) {
     Wire.beginTransmission(address);
     Wire.write(0x00); // Temperature register
-    if (Wire.endTransmission() != 0) return 0.0f;
+    if (Wire.endTransmission() != 0) return -999.0f;
     
     Wire.requestFrom(address, (uint8_t)2);
     if (Wire.available() == 2) {
         uint16_t val = (Wire.read() << 8) | Wire.read();
         return (float)((int16_t)val >> 5) * 0.125f;
     }
-    return 0.0f;
+    return -999.0f;
+}
+
+void writeMPU6500(uint8_t reg, uint8_t data) {
+    digitalWrite(MPU6500_CS, LOW);
+    SPI.transfer(reg);
+    SPI.transfer(data);
+    digitalWrite(MPU6500_CS, HIGH);
+}
+
+void readMPU6500() {
+    digitalWrite(MPU6500_CS, LOW);
+    SPI.transfer(0x3B | 0x80); // Read from ACCEL_XOUT_H
+    int16_t ax = (SPI.transfer(0) << 8) | SPI.transfer(0);
+    int16_t ay = (SPI.transfer(0) << 8) | SPI.transfer(0);
+    int16_t az = (SPI.transfer(0) << 8) | SPI.transfer(0);
+    int16_t temp = (SPI.transfer(0) << 8) | SPI.transfer(0);
+    int16_t gx = (SPI.transfer(0) << 8) | SPI.transfer(0);
+    digitalWrite(MPU6500_CS, HIGH);
+    
+    accel_z = az / 16384.0f * 9.81f; // +/- 2g scale
+    gyro_x = gx / 131.0f;            // +/- 250dps scale
+    
+    if (az != 0 && az != -1) {
+        flags |= FLAG_IMU_OK;
+    } else {
+        flags &= ~FLAG_IMU_OK;
+    }
 }
 
 // ─── Setup ───────────────────────────────────────────────────────────────────
@@ -102,9 +129,8 @@ void setup() {
     Serial.begin(115200);
     SerialGPS.begin(9600);
     Wire.begin();
-    Wire.setTimeout(10); // Prevent I2C lockup
     
-    IWatchdog.begin(4000000); // 4 seconds
+    IWatchdog.begin(3000); // 3 seconds
 
     // SPI Setup
     SPI.setMOSI(PB15);
@@ -114,6 +140,10 @@ void setup() {
 
     pinMode(MPU6500_CS, OUTPUT);
     digitalWrite(MPU6500_CS, HIGH); // Deselect MPU6500 to free SPI bus
+    
+    // Wake MPU6500
+    writeMPU6500(0x6B, 0x00);
+    delay(10);
 
     // Init Radio
     radio_ok = rf95.init();
@@ -189,23 +219,26 @@ void loop() {
         if ((flags & FLAG_LAUNCHED) && !(flags & FLAG_APOGEE) && (maxAltitude - alt_m) > 20.0) {
             flags |= FLAG_APOGEE;
         }
+        
+        // Read IMU
+        readMPU6500();
 
-        // 2. Format MACHX2 packet string (without CRC and \n)
-        char packetBuf[256];
-        int written = snprintf(packetBuf, sizeof(packetBuf), 
-            "MACHX2:%lu,%lu,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.6f,%.6f,%d,%u",
+        // 2. Format MACHX2 body string (without MACHX2:, CRC and \n)
+        char bodyBuf[256];
+        int written = snprintf(bodyBuf, sizeof(bodyBuf), 
+            "%lu,%lu,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.6f,%.6f,%d,%u",
             pkt_id, now, alt_m, press_hpa, temp_bmp, 
             temp_lm75[0], temp_lm75[1], temp_lm75[2], temp_lm75[3],
             accel_z, gyro_x, gps_lat, gps_lon, rssi_dbm, flags
         );
         
-        if (written >= 0 && written < (int)sizeof(packetBuf)) {
-            // 3. Compute CRC16 CCITT over the payload ONLY (skip 'MACHX2:')
-            uint16_t crc = crc16Ccitt((uint8_t*)(packetBuf + 7), strlen(packetBuf) - 7);
+        if (written >= 0 && written < (int)sizeof(bodyBuf)) {
+            // 3. Compute CRC16 CCITT over the payload ONLY
+            uint16_t crc = crc16Ccitt((uint8_t*)bodyBuf, strlen(bodyBuf));
             
-            // 4. Append CRC and newline
+            // 4. Append Prefix, Body, CRC and newline
             char finalPacket[256];
-            int finalWritten = snprintf(finalPacket, sizeof(finalPacket), "%s,%04X\n", packetBuf, crc);
+            int finalWritten = snprintf(finalPacket, sizeof(finalPacket), "MACHX2:%s,%04X\n", bodyBuf, crc);
             
             if (finalWritten >= 0 && finalWritten < (int)sizeof(finalPacket)) {
                 // 5. Send over LoRa

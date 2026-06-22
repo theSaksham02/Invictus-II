@@ -49,23 +49,9 @@ function createMachxSerial({
       const parser = machxPort.pipe(new ReadlineParser({ delimiter: '\n' }));
       parser.on('data', (line) => {
         const trimmed = typeof line === 'string' ? line.trim() : '';
-        
-        let targetLine = trimmed;
-        let groundStationRssi = null;
-        
-        const rssiMatch = trimmed.match(/^\[RSSI:(-?\d+)\]\s*(MACHX2:.*)/);
-        if (rssiMatch) {
-          groundStationRssi = Number(rssiMatch[1]);
-          targetLine = rssiMatch[2];
-        }
-
-        if (!targetLine.startsWith('MACHX2:')) return;
-        const parsed = parseMachX(targetLine);
-        
+        if (!trimmed.startsWith('MACHX2:')) return;
+        const parsed = parseMachX(line);
         if (parsed) {
-          if (groundStationRssi !== null) {
-            parsed.rssi_dbm = groundStationRssi;
-          }
           handlePacket(parsed);
         } else {
           diagnostics.MACHX.parse_errors++;
