@@ -11,16 +11,31 @@ const PHASE_APOGEE = 'APOGEE';
 const PHASE_DESCENDING = 'DESCENDING';
 const PHASE_LANDED = 'LANDED';
 
-const LAUNCH_ALTITUDE_DELTA_M = 15.0;
+const PHASE_PAD = 'PAD';
+const PHASE_LAUNCHED = 'LAUNCHED';
+const PHASE_ASCENT = 'ASCENT';
+const PHASE_DESCENT = 'DESCENT';
+const PHASE_MAIN = 'MAIN';
+
+const LEGACY_LAUNCH_ALTITUDE_DELTA_M = 5.0;
+const MACHX_LAUNCH_ALTITUDE_DELTA_M = 15.0;
+
 const ASCENT_STEP_THRESHOLD_M = 1.0;
-const APOGEE_DROP_M = 20.0;
+
+const LEGACY_APOGEE_DROP_M = 5.0;
+const MACHX_APOGEE_DROP_M = 20.0;
+
 const DESCENT_STEP_THRESHOLD_M = 1.0;
+const MAIN_DEPLOY_ALTITUDE_M = 500.0;
+
 const LANDED_VARIANCE_M = 1.0;
 const LANDED_WINDOW_SIZE = 10;
 
-function makeState() {
+function makeState(source) {
+  const isLegacy = source === 'NRC' || source === 'CANSAT';
   return {
-    phase: PHASE_GROUNDED,
+    isLegacy,
+    phase: isLegacy ? PHASE_GROUNDED : PHASE_PAD,
     baseline_alt: null,
     max_alt: 0,
     launch_time: 0,
@@ -31,10 +46,10 @@ function makeState() {
 }
 
 const states = {
-  CANSAT: makeState(),  // MachX competition — STM32 + RFM69HCW 433MHz — 43-byte binary v2
-  NRC:    makeState(),  // NRC competition  — Heltec LoRa V3 868MHz    — ASCII CSV NRC2:
-  MACHX:  makeState(),  // MATCHA           — TBD                      — TBD
-  SUGAR:  makeState(),  // SUGAR CanSat     — TBD                      — TBD
+  CANSAT: makeState('CANSAT'),
+  NRC:    makeState('NRC'),
+  MACHX:  makeState('MACHX'),
+  SUGAR:  makeState('SUGAR'),
 };
 
 function processPacket(pkt, emitFn) {
@@ -61,26 +76,62 @@ function processPacket(pkt, emitFn) {
   const fallingByThreshold = recent.length >= 2 &&
     (recent[recent.length - 2] - recent[recent.length - 1]) >= DESCENT_STEP_THRESHOLD_M;
 
-  if (s.phase === PHASE_GROUNDED) {
-    if (altitudeGain >= LAUNCH_ALTITUDE_DELTA_M && risingByThreshold) {
-      newPhase = PHASE_ASCENDING;
-      s.launch_time = packetTs;
+  if (s.isLegacy) {
+    if (s.phase === PHASE_GROUNDED) {
+      if (altitudeGain >= LEGACY_LAUNCH_ALTITUDE_DELTA_M && risingByThreshold) {
+        newPhase = PHASE_ASCENDING;
+        s.launch_time = packetTs;
+      }
     }
-  }
-  else if (s.phase === PHASE_ASCENDING) {
-    if ((s.max_alt - pkt.altitude_m) >= APOGEE_DROP_M) {
-      newPhase = PHASE_APOGEE;
-      s.apogee_time = packetTs;
+    else if (s.phase === PHASE_ASCENDING) {
+      if ((s.max_alt - pkt.altitude_m) >= LEGACY_APOGEE_DROP_M) {
+        newPhase = PHASE_APOGEE;
+        s.apogee_time = packetTs;
+      }
     }
-  }
-  else if (s.phase === PHASE_APOGEE) {
-    if (fallingByThreshold) newPhase = PHASE_DESCENDING;
-  }
-  else if (s.phase === PHASE_DESCENDING) {
-    if (s.alt_history.length === LANDED_WINDOW_SIZE) {
-      const maxH = Math.max(...s.alt_history);
-      const minH = Math.min(...s.alt_history);
-      if (maxH - minH <= LANDED_VARIANCE_M) newPhase = PHASE_LANDED;
+    else if (s.phase === PHASE_APOGEE) {
+      if (fallingByThreshold) newPhase = PHASE_DESCENDING;
+    }
+    else if (s.phase === PHASE_DESCENDING) {
+      if (s.alt_history.length === LANDED_WINDOW_SIZE) {
+        const maxH = Math.max(...s.alt_history);
+        const minH = Math.min(...s.alt_history);
+        if (maxH - minH <= LANDED_VARIANCE_M) newPhase = PHASE_LANDED;
+      }
+    }
+  } else {
+    // MACHX / SUGAR Logic
+    if (s.phase === PHASE_PAD) {
+      if (altitudeGain >= MACHX_LAUNCH_ALTITUDE_DELTA_M) {
+        newPhase = PHASE_LAUNCHED;
+        s.launch_time = packetTs;
+      }
+    }
+    else if (s.phase === PHASE_LAUNCHED) {
+      if (risingByThreshold) {
+        newPhase = PHASE_ASCENT;
+      }
+    }
+    else if (s.phase === PHASE_ASCENT) {
+      if ((s.max_alt - pkt.altitude_m) >= MACHX_APOGEE_DROP_M) {
+        newPhase = PHASE_APOGEE;
+        s.apogee_time = packetTs;
+      }
+    }
+    else if (s.phase === PHASE_APOGEE) {
+      if (fallingByThreshold) newPhase = PHASE_DESCENT;
+    }
+    else if (s.phase === PHASE_DESCENT) {
+      if (pkt.altitude_m <= s.baseline_alt + MAIN_DEPLOY_ALTITUDE_M) {
+        newPhase = PHASE_MAIN;
+      }
+    }
+    else if (s.phase === PHASE_MAIN) {
+      if (s.alt_history.length === LANDED_WINDOW_SIZE) {
+        const maxH = Math.max(...s.alt_history);
+        const minH = Math.min(...s.alt_history);
+        if (maxH - minH <= LANDED_VARIANCE_M) newPhase = PHASE_LANDED;
+      }
     }
   }
 
@@ -102,11 +153,10 @@ function processPacket(pkt, emitFn) {
   }
 }
 
-// Reset a source FSM (e.g. pre-launch re-arming)
 function resetState(source) {
   if (states[source]) {
-    states[source] = makeState();
-    console.log(`[PHASE] ${source} state reset to ${PHASE_GROUNDED}`);
+    states[source] = makeState(source);
+    console.log(`[PHASE] ${source} state reset to ${states[source].phase}`);
   }
 }
 

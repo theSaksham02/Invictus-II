@@ -102,3 +102,44 @@ test('NRC progresses through APOGEE, DESCENDING, and LANDED from altitude change
     'LANDED'
   ]);
 });
+
+test('MACHX progresses through PAD, LAUNCHED, ASCENT, APOGEE, DESCENT, MAIN, and LANDED', () => {
+  resetState('MACHX');
+  const events = [];
+  const emit = (event, payload) => events.push({ event, payload });
+
+  [
+    [1, 1000, 0],
+    [2, 2000, 16], // LAUNCHED (>= 15m)
+    [3, 3000, 30],
+    [4, 4000, 45], // ASCENT (rising by threshold)
+    [5, 5000, 3000],
+    [6, 6000, 3010], // APOGEE altitude
+    [7, 7000, 2980], // Drop by >20m = APOGEE state
+    [8, 8000, 2960],
+    [9, 9000, 2940], // DESCENT state
+    [10, 10000, 499], // MAIN state (<= 500m)
+    [11, 11000, 1.0],
+    [12, 12000, 1.1],
+    [13, 13000, 1.0],
+    [14, 14000, 1.2],
+    [15, 15000, 1.0],
+    [16, 16000, 1.0],
+    [17, 17000, 1.1],
+    [18, 18000, 1.0],
+    [19, 19000, 1.0],
+    [20, 20000, 1.0] // LANDED
+  ].forEach(([pktId, timestampMs, altitudeM]) => {
+    processPacket(packet('MACHX', pktId, timestampMs, altitudeM), emit);
+  });
+
+  assert.equal(states.MACHX.phase, 'LANDED');
+  assert.deepEqual(events.map(({ payload }) => payload.event_type), [
+    'LAUNCHED',
+    'ASCENT',
+    'APOGEE',
+    'DESCENT',
+    'MAIN',
+    'LANDED'
+  ]);
+});

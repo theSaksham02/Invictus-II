@@ -209,6 +209,10 @@ function parseSdPacketRow(row, lookup, raw, receivedAt, source) {
     timestamp_ms: Number.parseInt(getCsvValue(row, lookup, ['timestamp_ms', 'time_ms', 'timestamp']), 10),
     altitude_m: Number.parseFloat(getCsvValue(row, lookup, ['altitude_m', 'alt_m', 'altitude'])),
     temp_c: Number.parseFloat(getCsvValue(row, lookup, ['temp_c', 'temperature_c', 'temperature'])),
+    temp_c_1: parseOptionalCsvFloat(row, lookup, ['temp_c_1', 'temperature_c_1']),
+    temp_c_2: parseOptionalCsvFloat(row, lookup, ['temp_c_2', 'temperature_c_2']),
+    temp_c_3: parseOptionalCsvFloat(row, lookup, ['temp_c_3', 'temperature_c_3']),
+    temp_c_4: parseOptionalCsvFloat(row, lookup, ['temp_c_4', 'temperature_c_4']),
     pressure_hpa: Number.parseFloat(getCsvValue(row, lookup, ['pressure_hpa', 'pressure'])),
     accel_z: accelZ,
     gyro_x: gyroX,
@@ -509,7 +513,7 @@ app.get('/api/sd-uploads/:upload_id/packets', (req, res) => {
 app.get('/api/export', (req, res) => {
   const source = parseSource(req.query.source, EXPORT_SOURCES, 'CANSAT');
   const rows = db.exportCsv(source);
-  const columns = ['id', 'source', 'pkt_id', 'timestamp_ms', 'altitude_m', 'temp_c', 'pressure_hpa', 'accel_z', 'gyro_x', 'lat', 'lon', 'rssi_dbm', 'flags', 'received_at'];
+  const columns = ['id', 'source', 'pkt_id', 'timestamp_ms', 'altitude_m', 'temp_c', 'temp_c_1', 'temp_c_2', 'temp_c_3', 'temp_c_4', 'pressure_hpa', 'accel_z', 'gyro_x', 'lat', 'lon', 'rssi_dbm', 'flags', 'received_at'];
   const csv = [columns.join(',')]
     .concat(rows.map((row) => columns.map((column) => csvEscape(row[column])).join(',')))
     .join('\n');

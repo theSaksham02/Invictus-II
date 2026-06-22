@@ -1,4 +1,5 @@
-const { ReadlineParser } = require('serialport');
+const { SerialPort } = require('serialport');
+const { ReadlineParser } = require('@serialport/parser-readline');
 const { parseMachX } = require('./parser');
 
 function closePort(port) {

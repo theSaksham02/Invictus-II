@@ -92,8 +92,12 @@
       letter-spacing: 0.2em; border: 1px solid var(--text-3); color: var(--text-2); border-radius: var(--r);
     }
     .phase-badge.launched { border-color: var(--warning); color: var(--warning); }
+    .phase-badge.ascending { border-color: var(--spx-blue-light); color: var(--spx-blue-light); }
+    .phase-badge.ascent { border-color: var(--spx-blue-light); color: var(--spx-blue-light); }
     .phase-badge.apogee { border-color: var(--spx-blue-light); color: var(--spx-blue-light); }
     .phase-badge.descending { border-color: var(--spx-blue-light); color: var(--spx-blue-light); }
+    .phase-badge.descent { border-color: var(--spx-blue-light); color: var(--spx-blue-light); }
+    .phase-badge.main { border-color: var(--spx-blue-light); color: var(--spx-blue-light); }
     .phase-badge.landed { border-color: var(--nominal); color: var(--nominal); }
 
     .mission-timer { font-family: var(--mono); font-size: 1.1rem; font-weight: 500; color: var(--text-1); letter-spacing: 0.05em; font-variant-numeric: tabular-nums; }
@@ -504,8 +508,8 @@
       let maxAlt = { CANSAT: 0, NRC: 0, MACHX: 0, SUGAR: 0 };
       let pktCount = { CANSAT: 0, NRC: 0 };
       let firstReceivedAt = null;
-      let currentPhase = { CANSAT: 'IDLE', NRC: 'IDLE' };
-      const flightPhases = new Set(['IDLE', 'LAUNCHED', 'ASCENDING', 'APOGEE', 'DESCENDING', 'LANDED']);
+      let currentPhase = { CANSAT: 'IDLE', NRC: 'IDLE', MACHX: 'IDLE', SUGAR: 'IDLE' };
+      const flightPhases = new Set(['IDLE', 'GROUNDED', 'PAD', 'LAUNCHED', 'ASCENDING', 'ASCENT', 'APOGEE', 'DESCENDING', 'DESCENT', 'MAIN', 'LANDED']);
       const gyroHistory = [];
       let signalState = {
         mode: 'hardware',
@@ -991,7 +995,7 @@
         b.textContent = `${phase}`;
         b.className = 'phase-badge ' + phase.toLowerCase();
         
-        if(phase === 'DESCENDING' || phase === 'LANDED') $('radar').classList.add('active');
+        if(phase === 'DESCENDING' || phase === 'DESCENT' || phase === 'MAIN' || phase === 'LANDED') $('radar').classList.add('active');
         else $('radar').classList.remove('active');
       }
 
