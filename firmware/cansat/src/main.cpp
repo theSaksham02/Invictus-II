@@ -320,6 +320,8 @@ void loop() {
                         temp_lm75[i] = t;
                         lastLm75UpdateMs[i] = now;
                         lm75Success[i] = true;
+                    } else {
+                        temp_lm75[i] = -999.0f;
                     }
                 }
 
@@ -364,7 +366,7 @@ void loop() {
                         sensorStale = true;
                     }
                 }
-                if (!gps.location.isValid() || gps.location.age() > 5000) {
+                if ((flags & FLAG_LAUNCHED) && (!gps.location.isValid() || gps.location.age() > 5000)) {
                     sensorStale = true;
                 }
                 if (!(flags & FLAG_IMU_OK)) {

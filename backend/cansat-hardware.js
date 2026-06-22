@@ -181,7 +181,10 @@ function deriveSensorHealth(packet) {
         pins: CIRCUIT.buses.i2c.pins
       },
       lm75: {
-        ok: Number.isFinite(packet.temp_c_1) && Number.isFinite(packet.temp_c_2) && Number.isFinite(packet.temp_c_3) && Number.isFinite(packet.temp_c_4),
+        ok: Number.isFinite(packet.temp_c_1) && packet.temp_c_1 > -900 &&
+            Number.isFinite(packet.temp_c_2) && packet.temp_c_2 > -900 &&
+            Number.isFinite(packet.temp_c_3) && packet.temp_c_3 > -900 &&
+            Number.isFinite(packet.temp_c_4) && packet.temp_c_4 > -900,
         bus: 'i2c',
         pins: CIRCUIT.buses.i2c.pins
       },

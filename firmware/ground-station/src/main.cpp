@@ -124,6 +124,19 @@ void loop() {
                 
                 if (commas == 15) {
                     char* incoming_crc_str = comma_ptrs[14] + 1;
+                    bool crc_str_ok = (strlen(incoming_crc_str) == 4);
+                    for (int i = 0; i < 4 && crc_str_ok; i++) {
+                        char c = incoming_crc_str[i];
+                        if (!((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f'))) {
+                            crc_str_ok = false;
+                        }
+                    }
+                    
+                    if (!crc_str_ok) {
+                        Serial.println("GCS:WARN malformed crc format (must be 4 hex chars)");
+                        return;
+                    }
+                    
                     uint16_t incoming_crc = (uint16_t)strtol(incoming_crc_str, nullptr, 16);
                     
                     // Verify CRC on the body (from buf + 7 to the 15th comma)

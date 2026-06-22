@@ -66,3 +66,33 @@ test('parseMachX validates firmware-style CRC properly', () => {
   assert.equal(parsed.rssi_dbm, -85);
   assert.equal(parsed.flags, 1);
 });
+
+test('parseMachX rejects packets with malformed comma counts', () => {
+  // 14 commas instead of 15
+  const malformedBody = "1,2000,15.50,1013.25,25.00,26.00,26.10,25.90,26.20,9.81,0.01,45.000000,-120.000000,-85";
+  const crcHex = crc16Ccitt(Buffer.from(malformedBody, 'utf8')).toString(16).padStart(4, '0').toUpperCase();
+  const packet = `MACHX2:${malformedBody},${crcHex}\n`;
+
+  const parsed = parseMachX(packet);
+  assert.equal(parsed, null, 'should reject payload with incorrect number of commas');
+});
+
+test('parseMachX rejects packets with bad CRC', () => {
+  const body = "1,2000,15.50,1013.25,25.00,26.00,26.10,25.90,26.20,9.81,0.01,45.000000,-120.000000,-85,1";
+  const packet = `MACHX2:${body},0000\n`; // Wrong CRC
+
+  const parsed = parseMachX(packet);
+  assert.equal(parsed, null, 'should reject payload with wrong CRC');
+});
+
+test('parseMachX rejects non-MACHX lines', () => {
+  const packet = "SOMERANDOMPREFIX:1,2,3,4,5\n";
+  const parsed = parseMachX(packet);
+  assert.equal(parsed, null, 'should reject non-MACHX prefix line');
+});
+
+test('parseMachX rejects truncated lines', () => {
+  const packet = "MACHX2:1,2000,15.50\n";
+  const parsed = parseMachX(packet);
+  assert.equal(parsed, null, 'should reject truncated/incomplete line');
+});
