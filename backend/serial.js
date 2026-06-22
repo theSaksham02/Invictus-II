@@ -68,7 +68,8 @@ function triggerSignalLost(source, emitFn, now) {
   const state = sourceState[source];
   if (state.lastSeenAt === null || state.lost) return;
   const gapMs = now - state.lastSeenAt;
-  if (gapMs <= SIGNAL_TIMEOUT_MS) return;
+  const timeoutLimit = (source === 'MACHX' || source === 'SUGAR') ? 15000 : SIGNAL_TIMEOUT_MS;
+  if (gapMs <= timeoutLimit) return;
 
   state.lost = true;
   safeEmit(emitFn, 'signal_lost', { source, last_seen_ms: state.lastSeenAt, gap_ms: gapMs });

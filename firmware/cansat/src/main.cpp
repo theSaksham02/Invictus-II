@@ -57,6 +57,15 @@ uint32_t lastTxMs = 0;
 const uint32_t TX_INTERVAL_MS = 1000;
 const uint32_t SENSOR_TIMEOUT_MS = 3000;
 
+// TDM State Machine Definitions
+enum TdmState {
+    TDM_STATE_GPS_LISTEN,
+    TDM_STATE_LORA_TX
+};
+TdmState tdmState = TDM_STATE_GPS_LISTEN;
+uint32_t tdmStateStartMs = 0;
+const uint32_t GPS_LISTEN_TIMEOUT_MS = 2000;
+
 float baselinePressure = 1013.25f;
 uint8_t baselineSamples = 0;
 float maxAltitude = 0.0f;
@@ -227,150 +236,188 @@ void setup() {
             flags |= FLAG_SD_OK;
         }
     }
+
+    // Put LoRa to sleep at boot to unblind GPS immediately
+    if (radio_ok) {
+        rf95.sleep();
+    }
+    tdmStateStartMs = millis();
 }
 
 // ─── Main Loop ───────────────────────────────────────────────────────────────
 void loop() {
     uint32_t now = millis();
     
+    // Always feed GPS parser
     while (SerialGPS.available() > 0) {
         gps.encode(SerialGPS.read());
     }
 
-    if (now - lastTxMs >= TX_INTERVAL_MS) {
-        lastTxMs += TX_INTERVAL_MS;
-        if (now - lastTxMs >= TX_INTERVAL_MS) lastTxMs = now; // Prevent spiral of death
-        
-        // 1. Read Sensors
-        bool bmpReadSuccess = false;
-        if (flags & FLAG_BMP_OK && bmp.performReading()) {
-            temp_bmp = bmp.temperature;
-            press_hpa = bmp.pressure / 100.0f;
+    switch (tdmState) {
+        case TDM_STATE_GPS_LISTEN: {
+            // Check if we received a fresh GPS lock update OR if we timed out (2 seconds)
+            bool gpsReady = (gps.location.isUpdated() && gps.location.age() < 1000);
+            bool timeout = (now - tdmStateStartMs >= GPS_LISTEN_TIMEOUT_MS);
             
-            if (baselineSamples < 20) {
-                baselinePressure = ((baselinePressure * baselineSamples) + press_hpa) / (baselineSamples + 1);
-                baselineSamples++;
-            }
-            alt_m = bmp.readAltitude(baselinePressure);
-            if (alt_m > maxAltitude) maxAltitude = alt_m;
-            bmpReadSuccess = true;
-            lastBmpUpdateMs = now;
-        }
-        
-        bool lm75Success[4] = {false};
-        for (int i = 0; i < 4; i++) {
-            float t = readLM75(LM75_ADDRS[i]);
-            if (t != -999.0f) {
-                temp_lm75[i] = t;
-                lastLm75UpdateMs[i] = now;
-                lm75Success[i] = true;
-            }
-        }
-
-        // I2C Bus recovery trigger: if BMP and all LM75s fail consecutively
-        static int consecutiveI2cFails = 0;
-        if (!bmpReadSuccess && !lm75Success[0] && !lm75Success[1] && !lm75Success[2] && !lm75Success[3]) {
-            consecutiveI2cFails++;
-            if (consecutiveI2cFails >= 3) {
-                recoverI2CBus();
-                consecutiveI2cFails = 0;
-            }
-        } else {
-            consecutiveI2cFails = 0;
-        }
-        
-        if (gps.location.isValid() && gps.location.age() < 2000) {
-            gps_lat = gps.location.lat();
-            gps_lon = gps.location.lng();
-            flags |= FLAG_GPS_FIX;
-        } else {
-            flags &= ~FLAG_GPS_FIX;
-        }
-        
-        // Pseudo-logic for mission phase
-        if (!(flags & FLAG_LAUNCHED) && alt_m > 15.0) {
-            flags |= FLAG_LAUNCHED;
-        }
-        if ((flags & FLAG_LAUNCHED) && !(flags & FLAG_APOGEE) && (maxAltitude - alt_m) > 20.0) {
-            flags |= FLAG_APOGEE;
-        }
-        
-        // Read IMU
-        readMPU6500();
-
-        // Stale sensor watchdog (stale if older than 3 seconds, or IMU not ok)
-        bool sensorStale = false;
-        if (now - lastBmpUpdateMs > SENSOR_TIMEOUT_MS) {
-            sensorStale = true;
-        }
-        for (int i = 0; i < 4; i++) {
-            if (now - lastLm75UpdateMs[i] > SENSOR_TIMEOUT_MS) {
-                sensorStale = true;
-            }
-        }
-        if (!gps.location.isValid() || gps.location.age() > 5000) {
-            sensorStale = true;
-        }
-        if (!(flags & FLAG_IMU_OK)) {
-            sensorStale = true;
-        }
-
-        if (sensorStale) {
-            flags |= FLAG_STALE_SENSOR;
-        } else {
-            flags &= ~FLAG_STALE_SENSOR;
-        }
-
-        // 2. Format MACHX2 body string (without MACHX2:, CRC and \n)
-        char bodyBuf[256];
-        int written = snprintf(bodyBuf, sizeof(bodyBuf), 
-            "%lu,%lu,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.6f,%.6f,%d,%u",
-            pkt_id, now, alt_m, press_hpa, temp_bmp, 
-            temp_lm75[0], temp_lm75[1], temp_lm75[2], temp_lm75[3],
-            accel_z, gyro_x, gps_lat, gps_lon, rssi_dbm, flags
-        );
-        
-        if (written >= 0 && written < (int)sizeof(bodyBuf)) {
-            // 3. Compute CRC16 CCITT over the payload ONLY
-            uint16_t crc = crc16Ccitt((uint8_t*)bodyBuf, strlen(bodyBuf));
-            
-            // 4. Append Prefix, Body, CRC and newline
-            char finalPacket[256];
-            int finalWritten = snprintf(finalPacket, sizeof(finalPacket), "MACHX2:%s,%04X\n", bodyBuf, crc);
-            
-            if (finalWritten >= 0 && finalWritten < (int)sizeof(finalPacket)) {
-                // 5. Send over LoRa
-                if (radio_ok) {
-                    rf95.send((uint8_t*)finalPacket, strlen(finalPacket));
-                    rf95.waitPacketSent(100);
+            if (gpsReady || timeout) {
+                // 1. Read Sensors
+                bool bmpReadSuccess = false;
+                if (flags & FLAG_BMP_OK && bmp.performReading()) {
+                    temp_bmp = bmp.temperature;
+                    press_hpa = bmp.pressure / 100.0f;
+                    
+                    if (baselineSamples < 20) {
+                        baselinePressure = ((baselinePressure * baselineSamples) + press_hpa) / (baselineSamples + 1);
+                        baselineSamples++;
+                    }
+                    alt_m = bmp.readAltitude(baselinePressure);
+                    if (alt_m > maxAltitude) maxAltitude = alt_m;
+                    bmpReadSuccess = true;
+                    lastBmpUpdateMs = now;
                 }
                 
-                // 6. Log to SD with bounded/periodic flushing
-                if (flags & FLAG_SD_OK) {
-                    logFile.print(finalPacket);
-                    
-                    static uint32_t lastFlushMs = 0;
-                    static uint32_t flushIntervalMs = 10000; // start at 10 seconds
-                    if (now - lastFlushMs >= flushIntervalMs) {
-                        uint32_t flushStart = millis();
-                        logFile.flush();
-                        uint32_t flushDuration = millis() - flushStart;
-                        lastFlushMs = now;
-                        
-                        if (flushDuration > 50) {
-                            // Degrade flush interval to 30s if SD is slow
-                            flushIntervalMs = 30000;
-                        } else {
-                            flushIntervalMs = 10000;
-                        }
+                bool lm75Success[4] = {false};
+                for (int i = 0; i < 4; i++) {
+                    float t = readLM75(LM75_ADDRS[i]);
+                    if (t != -999.0f) {
+                        temp_lm75[i] = t;
+                        lastLm75UpdateMs[i] = now;
+                        lm75Success[i] = true;
                     }
                 }
+
+                // I2C Bus recovery trigger: if BMP and all LM75s fail consecutively
+                static int consecutiveI2cFails = 0;
+                if (!bmpReadSuccess && !lm75Success[0] && !lm75Success[1] && !lm75Success[2] && !lm75Success[3]) {
+                    consecutiveI2cFails++;
+                    if (consecutiveI2cFails >= 3) {
+                        recoverI2CBus();
+                        consecutiveI2cFails = 0;
+                    }
+                } else {
+                    consecutiveI2cFails = 0;
+                }
                 
-                Serial.print(finalPacket); // Local debug
+                if (gps.location.isValid() && gps.location.age() < 2000) {
+                    gps_lat = gps.location.lat();
+                    gps_lon = gps.location.lng();
+                    flags |= FLAG_GPS_FIX;
+                } else {
+                    flags &= ~FLAG_GPS_FIX;
+                }
+                
+                // Pseudo-logic for mission phase
+                if (!(flags & FLAG_LAUNCHED) && alt_m > 15.0) {
+                    flags |= FLAG_LAUNCHED;
+                }
+                if ((flags & FLAG_LAUNCHED) && !(flags & FLAG_APOGEE) && (maxAltitude - alt_m) > 20.0) {
+                    flags |= FLAG_APOGEE;
+                }
+                
+                // Read IMU
+                readMPU6500();
+
+                // Stale sensor watchdog (stale if older than 3 seconds, or IMU not ok)
+                bool sensorStale = false;
+                if (now - lastBmpUpdateMs > SENSOR_TIMEOUT_MS) {
+                    sensorStale = true;
+                }
+                for (int i = 0; i < 4; i++) {
+                    if (now - lastLm75UpdateMs[i] > SENSOR_TIMEOUT_MS) {
+                        sensorStale = true;
+                    }
+                }
+                if (!gps.location.isValid() || gps.location.age() > 5000) {
+                    sensorStale = true;
+                }
+                if (!(flags & FLAG_IMU_OK)) {
+                    sensorStale = true;
+                }
+
+                if (sensorStale) {
+                    flags |= FLAG_STALE_SENSOR;
+                } else {
+                    flags &= ~FLAG_STALE_SENSOR;
+                }
+
+                // 2. Format MACHX2 body string (without MACHX2:, CRC and \n)
+                char bodyBuf[256];
+                int written = snprintf(bodyBuf, sizeof(bodyBuf), 
+                    "%lu,%lu,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.6f,%.6f,%d,%u",
+                    pkt_id, now, alt_m, press_hpa, temp_bmp, 
+                    temp_lm75[0], temp_lm75[1], temp_lm75[2], temp_lm75[3],
+                    accel_z, gyro_x, gps_lat, gps_lon, rssi_dbm, flags
+                );
+                
+                if (written >= 0 && written < (int)sizeof(bodyBuf)) {
+                    // 3. Compute CRC16 CCITT over the payload ONLY
+                    uint16_t crc = crc16Ccitt((uint8_t*)bodyBuf, strlen(bodyBuf));
+                    
+                    // 4. Append Prefix, Body, CRC and newline
+                    char finalPacket[256];
+                    int finalWritten = snprintf(finalPacket, sizeof(finalPacket), "MACHX2:%s,%04X\n", bodyBuf, crc);
+                    
+                    if (finalWritten >= 0 && finalWritten < (int)sizeof(finalPacket)) {
+                        // 5. Wake up LoRa and Send
+                        if (radio_ok) {
+                            rf95.setModeIdle(); // Wake up from sleep mode
+                            rf95.send((uint8_t*)finalPacket, strlen(finalPacket));
+                        }
+                        
+                        // 6. Log to SD with bounded/periodic flushing
+                        if (flags & FLAG_SD_OK) {
+                            logFile.print(finalPacket);
+                            
+                            static uint32_t lastFlushMs = 0;
+                            static uint32_t flushIntervalMs = 10000; // start at 10 seconds
+                            if (now - lastFlushMs >= flushIntervalMs) {
+                                uint32_t flushStart = millis();
+                                logFile.flush();
+                                uint32_t flushDuration = millis() - flushStart;
+                                lastFlushMs = now;
+                                
+                                if (flushDuration > 50) {
+                                    // Degrade flush interval to 30s if SD is slow
+                                    flushIntervalMs = 30000;
+                                } else {
+                                    flushIntervalMs = 10000;
+                                }
+                            }
+                        }
+                        
+                        Serial.print(finalPacket); // Local debug
+                    }
+                }
+                pkt_id++;
+                
+                // Transition to monitoring transmission state
+                tdmState = TDM_STATE_LORA_TX;
+                tdmStateStartMs = now;
             }
+            break;
         }
-        pkt_id++;
         
-        IWatchdog.reload();
+        case TDM_STATE_LORA_TX: {
+            // Check if transmission is complete (non-blocking 10ms wait check)
+            bool txDone = true;
+            if (radio_ok) {
+                txDone = rf95.waitPacketSent(10);
+            }
+            
+            // If TX is complete OR 200ms safety timeout has expired
+            if (txDone || (now - tdmStateStartMs >= 200)) {
+                // Put radio back to sleep to unblind GPS
+                if (radio_ok) {
+                    rf95.sleep();
+                }
+                
+                // Return to GPS listening state
+                tdmState = TDM_STATE_GPS_LISTEN;
+                tdmStateStartMs = now;
+            }
+            break;
+        }
     }
+    
+    IWatchdog.reload();
 }
