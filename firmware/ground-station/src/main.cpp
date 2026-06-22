@@ -61,8 +61,8 @@ void loop() {
                 buf[sizeof(buf) - 1] = '\0';
             }
             
-            // Forward the raw ASCII frame over USB Serial to the Node.js backend
-            Serial.print((char*)buf);
+            // Forward the raw ASCII frame over USB Serial with the RSSI prefix
+            Serial.printf("[RSSI:%d] %s", rf95.lastRssi(), (char*)buf);
         }
     }
 }

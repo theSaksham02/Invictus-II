@@ -6,13 +6,13 @@ const { processPacket } = require('./phase-tracker');
 const { createNrcSerial } = require('./nrc-serial');
 const { createMachxSerial } = require('./machx-serial');
 
-const CANSAT_PORT = process.env.SERIAL_PORT_CANSAT || '/dev/ttyUSB0';
-const NRC_PORT    = process.env.SERIAL_PORT_NRC    || '/dev/ttyUSB1';
+const CANSAT_PORT = process.env.SERIAL_PORT_CANSAT || '/dev/ttyUSB1';
+const NRC_PORT    = process.env.SERIAL_PORT_NRC    || '/dev/ttyUSB2';
 const CANSAT_CMD_PORT = process.env.SERIAL_PORT_CANSAT_CMD || '';
 const CANSAT_BAUD = parseInt(process.env.SERIAL_BAUD_CANSAT || '115200', 10);
 const NRC_BAUD    = parseInt(process.env.SERIAL_BAUD_NRC || '115200', 10);
 const CANSAT_CMD_BAUD = parseInt(process.env.SERIAL_BAUD_CANSAT_CMD || String(CANSAT_BAUD), 10);
-const MACHX_PORT = process.env.SERIAL_PORT_MACHX || '/dev/ttyUSB2';
+const MACHX_PORT = process.env.SERIAL_PORT_MACHX || '/dev/ttyUSB0';
 const MACHX_BAUD = parseInt(process.env.SERIAL_BAUD_MACHX || '115200', 10);
 const ENABLE_NRC_LIVE = process.env.ENABLE_NRC_LIVE === 'true';
 const ENABLE_MACHX_LIVE = process.env.ENABLE_MACHX_LIVE !== 'false';

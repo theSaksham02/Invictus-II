@@ -2,7 +2,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { parseCansat, parseNrc } = require('../parser');
+const { parseCansat, parseNrc, parseMachX } = require('../parser');
+const { crc16Ccitt } = require('../cansat-hardware');
 
 const FIXTURE_DIR = path.join(__dirname, 'fixtures', 'hardware');
 const SKIP_REASON = 'No real PCB hardware parser fixtures captured yet. Run tests/capture-hardware-fixtures.js with connected PCBs.';
@@ -49,4 +50,19 @@ test('parseCansat accepts captured CanSat PCB frames', (t) => {
     assert.equal(Number.isFinite(parsed.accel_z), true);
     assert.equal(Number.isFinite(parsed.gyro_x), true);
   }
+});
+test('parseMachX validates firmware-style CRC properly', () => {
+  const body = "1,2000,15.50,1013.25,25.00,26.00,26.10,25.90,26.20,9.81,0.01,45.000000,-120.000000,-85,1";
+  const crcHex = crc16Ccitt(Buffer.from(body, 'utf8')).toString(16).padStart(4, '0').toUpperCase();
+  const packet = `MACHX2:${body},${crcHex}\n`;
+
+  const parsed = parseMachX(packet);
+  assert.ok(parsed, 'parseMachX should successfully parse valid payload');
+  assert.equal(parsed.source, 'MACHX');
+  assert.equal(parsed.pkt_id, 1);
+  assert.equal(parsed.altitude_m, 15.5);
+  assert.equal(parsed.temp_c_1, 26.0);
+  assert.equal(parsed.temp_c_4, 26.2);
+  assert.equal(parsed.rssi_dbm, -85);
+  assert.equal(parsed.flags, 1);
 });

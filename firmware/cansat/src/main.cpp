@@ -59,6 +59,7 @@ float baselinePressure = 1013.25f;
 uint8_t baselineSamples = 0;
 float maxAltitude = 0.0f;
 uint8_t flags = 0;
+bool radio_ok = false;
 
 // Sensor data cache
 float alt_m = 0.0, press_hpa = 0.0, temp_bmp = 0.0;
@@ -82,23 +83,28 @@ uint16_t crc16Ccitt(const uint8_t* data, size_t len) {
 float readLM75(uint8_t address) {
     Wire.beginTransmission(address);
     Wire.write(0x00); // Temperature register
-    if (Wire.endTransmission() != 0) return NAN;
+    if (Wire.endTransmission() != 0) return 0.0f;
     
     Wire.requestFrom(address, (uint8_t)2);
     if (Wire.available() == 2) {
         uint16_t val = (Wire.read() << 8) | Wire.read();
         return (float)((int16_t)val >> 5) * 0.125f;
     }
-    return NAN;
+    return 0.0f;
 }
 
 // ─── Setup ───────────────────────────────────────────────────────────────────
 void setup() {
+    #if defined(HAL_AFIO_MODULE_ENABLED)
+    __HAL_AFIO_REMAP_SWJ_NOJTAG(); // Free PA15 (JTAG) for RFM95 CS, keep SWD
+    #endif
+
     Serial.begin(115200);
     SerialGPS.begin(9600);
     Wire.begin();
+    Wire.setTimeout(10); // Prevent I2C lockup
     
-    // IWatchdog.begin(4000000);
+    IWatchdog.begin(4000000); // 4 seconds
 
     // SPI Setup
     SPI.setMOSI(PB15);
@@ -106,10 +112,17 @@ void setup() {
     SPI.setSCLK(PB13);
     SPI.begin();
 
+    pinMode(MPU6500_CS, OUTPUT);
+    digitalWrite(MPU6500_CS, HIGH); // Deselect MPU6500 to free SPI bus
+
     // Init Radio
-    if (rf95.init()) {
-        rf95.setFrequency(RFM95_FREQ);
-        rf95.setTxPower(20, false); // High power LoRa
+    radio_ok = rf95.init();
+    if (radio_ok) {
+        if (!rf95.setFrequency(RFM95_FREQ)) {
+            radio_ok = false;
+        } else {
+            rf95.setTxPower(20, false); // High power LoRa
+        }
     }
 
     // Init BMP388
@@ -179,33 +192,39 @@ void loop() {
 
         // 2. Format MACHX2 packet string (without CRC and \n)
         char packetBuf[256];
-        snprintf(packetBuf, sizeof(packetBuf), 
+        int written = snprintf(packetBuf, sizeof(packetBuf), 
             "MACHX2:%lu,%lu,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.6f,%.6f,%d,%u",
             pkt_id, now, alt_m, press_hpa, temp_bmp, 
             temp_lm75[0], temp_lm75[1], temp_lm75[2], temp_lm75[3],
             accel_z, gyro_x, gps_lat, gps_lon, rssi_dbm, flags
         );
         
-        // 3. Compute CRC16 CCITT over the string
-        uint16_t crc = crc16Ccitt((uint8_t*)packetBuf, strlen(packetBuf));
-        
-        // 4. Append CRC and newline
-        char finalPacket[256];
-        snprintf(finalPacket, sizeof(finalPacket), "%s,%04X\n", packetBuf, crc);
-        
-        // 5. Send over LoRa
-        rf95.send((uint8_t*)finalPacket, strlen(finalPacket));
-        rf95.waitPacketSent(100);
-        
-        // 6. Log to SD
-        if (flags & FLAG_SD_OK) {
-            logFile.print(finalPacket);
-            logFile.flush();
+        if (written >= 0 && written < (int)sizeof(packetBuf)) {
+            // 3. Compute CRC16 CCITT over the payload ONLY (skip 'MACHX2:')
+            uint16_t crc = crc16Ccitt((uint8_t*)(packetBuf + 7), strlen(packetBuf) - 7);
+            
+            // 4. Append CRC and newline
+            char finalPacket[256];
+            int finalWritten = snprintf(finalPacket, sizeof(finalPacket), "%s,%04X\n", packetBuf, crc);
+            
+            if (finalWritten >= 0 && finalWritten < (int)sizeof(finalPacket)) {
+                // 5. Send over LoRa
+                if (radio_ok) {
+                    rf95.send((uint8_t*)finalPacket, strlen(finalPacket));
+                    rf95.waitPacketSent(100);
+                }
+                
+                // 6. Log to SD
+                if (flags & FLAG_SD_OK) {
+                    logFile.print(finalPacket);
+                    logFile.flush();
+                }
+                
+                Serial.print(finalPacket); // Local debug
+            }
         }
-        
-        Serial.print(finalPacket); // Local debug
         pkt_id++;
         
-        // IWatchdog.reload();
+        IWatchdog.reload();
     }
 }
