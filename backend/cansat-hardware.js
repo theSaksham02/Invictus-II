@@ -169,6 +169,41 @@ function deriveSensorHealth(packet) {
     };
   }
 
+  if (packet?.source === 'MACHX' || packet?.source === 'SUGAR') {
+    return {
+      bmp388: {
+        ok: flags.bmp_ok && Number.isFinite(packet.pressure_hpa) && Number.isFinite(packet.altitude_m),
+        bus: 'i2c',
+        pins: CIRCUIT.buses.i2c.pins
+      },
+      lm75: {
+        ok: Number.isFinite(packet.temp_c_1) && Number.isFinite(packet.temp_c_2) && Number.isFinite(packet.temp_c_3) && Number.isFinite(packet.temp_c_4),
+        bus: 'i2c',
+        pins: CIRCUIT.buses.i2c.pins
+      },
+      mpu6500: {
+        ok: flags.mpu_ok && Number.isFinite(packet.accel_z) && Number.isFinite(packet.gyro_x),
+        bus: 'avionics_spi',
+        pins: CIRCUIT.buses.avionics_spi.pins
+      },
+      neo8m: {
+        ok: flags.gps_fix && Number.isFinite(packet.lat) && Number.isFinite(packet.lon),
+        bus: 'gps_uart',
+        pins: CIRCUIT.buses.gps_uart.pins
+      },
+      sd_card: {
+        ok: flags.sd_ok,
+        bus: 'sd_spi',
+        pins: CIRCUIT.buses.sd_spi.pins
+      },
+      rfm95w: {
+        ok: Number.isInteger(packet.rssi_dbm) && packet.rssi_dbm >= TELEMETRY_LIMITS.rssi_dbm.min,
+        bus: 'avionics_spi',
+        pins: CIRCUIT.buses.avionics_spi.pins
+      }
+    };
+  }
+
   return {
     bmp388: {
       ok: flags.bmp_ok && Number.isFinite(packet.pressure_hpa) && Number.isFinite(packet.altitude_m),
@@ -211,6 +246,24 @@ function packetWarnings(packet) {
     }
     if (Number.isInteger(packet?.rssi_dbm) && packet.rssi_dbm < -110) {
       warnings.push('LoRa RSSI is very weak; expect packet loss.');
+    }
+    return warnings;
+  }
+
+  if (packet?.source === 'MACHX' || packet?.source === 'SUGAR') {
+    if (!flags.bmp_ok) warnings.push('BMP388 flag is not set; altitude, pressure, and temperature may be fallback values.');
+    if (!flags.mpu_ok) warnings.push('MPU-6500 flag is not set; acceleration and gyro data may be fallback values.');
+    if (!flags.gps_fix) warnings.push('NEO-8M GPS fix flag is not set; latitude and longitude may be stale or zero.');
+    if (!flags.sd_ok) warnings.push('SD card flag is not set; onboard recovery log may be unavailable.');
+
+    if (Number.isFinite(packet?.pressure_hpa) && packet.pressure_hpa < 300) {
+      warnings.push('Pressure is unusually low for the expected flight envelope.');
+    }
+    if (Number.isInteger(packet?.rssi_dbm) && packet.rssi_dbm < -110) {
+      warnings.push('RFM95W LoRa RSSI is very weak; expect packet loss.');
+    }
+    if (!Number.isFinite(packet.temp_c_1) || !Number.isFinite(packet.temp_c_2) || !Number.isFinite(packet.temp_c_3) || !Number.isFinite(packet.temp_c_4)) {
+      warnings.push('One or more LM75 temperature sensors failed to report.');
     }
     return warnings;
   }

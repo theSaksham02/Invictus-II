@@ -51,9 +51,9 @@ const SD_UPLOAD_MAX_ROWS = Math.max(
   Number.parseInt(process.env.SD_UPLOAD_MAX_ROWS || '50000', 10) || 50000,
   100
 );
-const TELEMETRY_SOURCES = new Set(['CANSAT', 'NRC']);
-const EXPORT_SOURCES = new Set(['CANSAT', 'NRC', 'ALL']);
-const LAUNCH_SOURCES = new Set(['CANSAT']);
+const TELEMETRY_SOURCES = new Set(['CANSAT', 'NRC', 'MACHX', 'SUGAR']);
+const EXPORT_SOURCES = new Set(['CANSAT', 'NRC', 'ALL', 'MACHX', 'SUGAR']);
+const LAUNCH_SOURCES = new Set(['CANSAT', 'MACHX']);
 
 const upload = multer({
   dest: 'uploads/',

@@ -200,4 +200,53 @@ function parseNrc(line) {
   }
 }
 
-module.exports = { isValidTelemetryShape, parseCansat, parseNrc };
+function parseMachX(line) {
+  if (typeof line !== 'string') return null;
+  const trimmed = line.trim();
+  if (!trimmed.startsWith('MACHX2:')) return null;
+
+  const body = trimmed.substring(7);
+  const lastComma = body.lastIndexOf(',');
+  if (lastComma < 0) return null;
+  const bodyWithoutCrc = body.slice(0, lastComma);
+  const crcField = body.slice(lastComma + 1).trim();
+  if (!/^[0-9a-fA-F]{4}$/.test(crcField)) return null;
+  const expectedCrc = Number.parseInt(crcField, 16);
+  if (!Number.isInteger(expectedCrc)) return null;
+  const actualCrc = crc16Ccitt(Buffer.from(bodyWithoutCrc, 'utf8'));
+  if (expectedCrc !== actualCrc) return null;
+
+  const nums = parseNrcNumberList(bodyWithoutCrc);
+  if (!nums || nums.length !== 15) return null;
+
+  try {
+    if (nums.some((value) => Number.isNaN(value))) return null;
+
+    const parsed = {
+      source: 'MACHX',
+      protocol_version: 2,
+      pkt_id: Math.trunc(nums[0]),
+      timestamp_ms: Math.trunc(nums[1]),
+      altitude_m: nums[2],
+      pressure_hpa: nums[3],
+      temp_c: nums[4],
+      temp_c_1: nums[5],
+      temp_c_2: nums[6],
+      temp_c_3: nums[7],
+      temp_c_4: nums[8],
+      accel_z: nums[9],
+      gyro_x: nums[10],
+      lat: nums[11],
+      lon: nums[12],
+      rssi_dbm: Math.trunc(nums[13]),
+      flags: Math.trunc(nums[14]),
+      raw: trimmed,
+      received_at: Date.now()
+    };
+    return isValidTelemetryShape(parsed) ? enrichPacket(parsed) : null;
+  } catch {
+    return null;
+  }
+}
+
+module.exports = { isValidTelemetryShape, parseCansat, parseNrc, parseMachX };

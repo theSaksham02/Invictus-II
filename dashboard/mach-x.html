@@ -498,10 +498,10 @@
         return (isNeg ? '-' : '+') + str;
       };
 
-      const sourceByPath = { '/nrc': 'NRC', '/mach-x': 'CANSAT', '/ort': 'CANSAT' };
-      const currentPath = window.location.pathname.replace(/\/$/, '');
-      let source = sourceByPath[currentPath] || (currentPath.endsWith('/nrc.html') ? 'NRC' : 'CANSAT');
-      let maxAlt = { CANSAT: 0, NRC: 0 };
+      const sourceByPath = { '/nrc': 'NRC', '/mach-x': 'MACHX', '/ort': 'CANSAT' };
+      const currentPath = window.location.pathname;
+      let source = sourceByPath[currentPath] || (currentPath.endsWith('/nrc.html') ? 'NRC' : 'MACHX');
+      let maxAlt = { CANSAT: 0, NRC: 0, MACHX: 0, SUGAR: 0 };
       let pktCount = { CANSAT: 0, NRC: 0 };
       let firstReceivedAt = null;
       let currentPhase = { CANSAT: 'IDLE', NRC: 'IDLE' };
@@ -559,8 +559,13 @@
         return packets.slice(missionStartIdx);
       }
 
-      function makeUplot(id, color, yLabel, yUnit, yDecimals = 1) {
+      function makeUplot(id, color, yLabel, yUnit, yDecimals = 1, extraSeriesCount = 0) {
         const el = $(id);
+        const series = [{}, { stroke: color, width: 2, fill: color + '1a' }];
+        const extraColors = ['#ff4b4b', '#4bccff', '#ff4bcc', '#4bff4b'];
+        for (let i = 0; i < extraSeriesCount; i++) {
+          series.push({ stroke: extraColors[i % extraColors.length], width: 1 });
+        }
         const opts = {
           width: el.clientWidth, height: el.clientHeight || 40,
           axes: [
@@ -570,13 +575,14 @@
           ],
           legend: { show: false }, cursor: { show: false },
           scales: { x: { time: false }, y: { auto: true } },
-          series: [{}, { stroke: color, width: 2, fill: color + '1a' }]
+          series: series
         };
-        return new uPlot(opts, [[],[]], el);
+        const initData = Array(2 + extraSeriesCount).fill().map(() => []);
+        return new uPlot(opts, initData, el);
       }
       setTimeout(() => {
         upAlt = makeUplot('spark-alt', '#ffffff', 'ALT', 'm', 1);
-        upTemp = makeUplot('spark-temp', '#f5d27a', 'TEMP', 'C', 1);
+        upTemp = makeUplot('spark-temp', '#f5d27a', 'TEMP', 'C', 1, 4);
         upPress = makeUplot('spark-press', '#2dd4bf', 'PRESS', 'hPa', 0);
         upVvel = makeUplot('spark-vvel', '#a78bfa', 'VEL', 'm/s', 1);
         upAccel = makeUplot('spark-accel', '#ff6b35', 'ACCEL', 'm/s²', 1);
@@ -600,6 +606,10 @@
         const xs = slice.map(p => ((p.timestamp_ms || t0) - t0) / 1000);
         const altRaw = slice.map(p => p.altitude_m || 0);
         const tempRaw = slice.map(p => Number.isFinite(p.temp_c) ? p.temp_c : 0);
+        const temp1Raw = slice.map(p => Number.isFinite(p.temp_c_1) ? p.temp_c_1 : tempRaw[tempRaw.length-1]);
+        const temp2Raw = slice.map(p => Number.isFinite(p.temp_c_2) ? p.temp_c_2 : tempRaw[tempRaw.length-1]);
+        const temp3Raw = slice.map(p => Number.isFinite(p.temp_c_3) ? p.temp_c_3 : tempRaw[tempRaw.length-1]);
+        const temp4Raw = slice.map(p => Number.isFinite(p.temp_c_4) ? p.temp_c_4 : tempRaw[tempRaw.length-1]);
         const pressRaw = slice.map(p => Number.isFinite(p.pressure_hpa) ? p.pressure_hpa : 0);
         const velRaw = slice.map((p, i) => {
           if(i===0) return 0;
@@ -610,7 +620,7 @@
         const rssiRaw = slice.map(p => Number.isFinite(p.rssi_dbm) ? p.rssi_dbm : 0);
 
         upAlt.setData([xs, smoothSeries(altRaw, 0.14)]);
-        upTemp.setData([xs, smoothSeries(tempRaw, 0.2)]);
+        upTemp.setData([xs, smoothSeries(tempRaw, 0.2), smoothSeries(temp1Raw, 0.2), smoothSeries(temp2Raw, 0.2), smoothSeries(temp3Raw, 0.2), smoothSeries(temp4Raw, 0.2)]);
         upPress.setData([xs, smoothSeries(pressRaw, 0.2)]);
         upVvel.setData([xs, smoothSeries(velRaw, 0.2)]);
         if(upAccel) upAccel.setData([xs, smoothSeries(accelRaw, 0.2)]);
@@ -808,7 +818,7 @@
         if (pkt.altitude_m > maxAlt[src]) maxAlt[src] = pkt.altitude_m;
         updateMetricValue('val-apogee', maxAlt[src], pad(maxAlt[src], 4));
         $('stat-max-alt').textContent = pad(maxAlt[src], 4);
-        $('alt-bar-fill').style.height = `${Math.min(100, (pkt.altitude_m / Math.max(maxAlt[src], 10)) * 100)}%`;
+        $('alt-bar-fill').style.height = `${Math.min(100, (pkt.altitude_m / Math.max(maxAlt[src], 3000)) * 100)}%`;
 
         updateMetricValue('val-temp', pkt.temp_c, pad(pkt.temp_c, 2));
         updateMetricValue('val-press', pkt.pressure_hpa, pad(pkt.pressure_hpa, 4));

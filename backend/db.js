@@ -59,13 +59,17 @@ function ensureColumn(table, column, definition) {
 }
 
 ensureColumn('packets', 'upload_id', 'INTEGER');
+ensureColumn('packets', 'temp_c_1', 'REAL');
+ensureColumn('packets', 'temp_c_2', 'REAL');
+ensureColumn('packets', 'temp_c_3', 'REAL');
+ensureColumn('packets', 'temp_c_4', 'REAL');
 ensureColumn('sd_uploads', 'source', "TEXT NOT NULL DEFAULT 'CANSAT'");
 db.exec(`CREATE INDEX IF NOT EXISTS idx_packets_upload_id ON packets(upload_id);`);
 
 const statements = {
   insertPacket: db.prepare(`
-    INSERT INTO packets (source, pkt_id, timestamp_ms, altitude_m, temp_c, pressure_hpa, accel_z, gyro_x, lat, lon, rssi_dbm, flags, raw, received_at, upload_id)
-    VALUES (@source, @pkt_id, @timestamp_ms, @altitude_m, @temp_c, @pressure_hpa, @accel_z, @gyro_x, @lat, @lon, @rssi_dbm, @flags, @raw, @received_at, @upload_id)
+    INSERT INTO packets (source, pkt_id, timestamp_ms, altitude_m, temp_c, temp_c_1, temp_c_2, temp_c_3, temp_c_4, pressure_hpa, accel_z, gyro_x, lat, lon, rssi_dbm, flags, raw, received_at, upload_id)
+    VALUES (@source, @pkt_id, @timestamp_ms, @altitude_m, @temp_c, @temp_c_1, @temp_c_2, @temp_c_3, @temp_c_4, @pressure_hpa, @accel_z, @gyro_x, @lat, @lon, @rssi_dbm, @flags, @raw, @received_at, @upload_id)
   `),
   insertEvent: db.prepare(`
     INSERT INTO mission_events (source, event_type, altitude_m, timestamp_ms, received_at)
@@ -111,7 +115,7 @@ const statements = {
     WHERE (? = 'ALL' OR source = ?)
   `),
   exportPackets: db.prepare(`
-    SELECT id, source, pkt_id, timestamp_ms, altitude_m, temp_c, pressure_hpa, accel_z, gyro_x, lat, lon, rssi_dbm, flags, received_at
+    SELECT id, source, pkt_id, timestamp_ms, altitude_m, temp_c, temp_c_1, temp_c_2, temp_c_3, temp_c_4, pressure_hpa, accel_z, gyro_x, lat, lon, rssi_dbm, flags, received_at
     FROM packets
     WHERE (? = 'ALL' OR source = ?)
     ORDER BY received_at ASC
@@ -140,6 +144,10 @@ function toPacketRow(packet) {
     timestamp_ms: packet.timestamp_ms,
     altitude_m: packet.altitude_m,
     temp_c: packet.temp_c,
+    temp_c_1: packet.temp_c_1 ?? null,
+    temp_c_2: packet.temp_c_2 ?? null,
+    temp_c_3: packet.temp_c_3 ?? null,
+    temp_c_4: packet.temp_c_4 ?? null,
     pressure_hpa: packet.pressure_hpa,
     accel_z: packet.accel_z,
     gyro_x: packet.gyro_x,

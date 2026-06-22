@@ -4,6 +4,7 @@ const { CansatFrameParser } = require('./cansat-framer');
 const { insertPacket, insertEvent } = require('./db');
 const { processPacket } = require('./phase-tracker');
 const { createNrcSerial } = require('./nrc-serial');
+const { createMachxSerial } = require('./machx-serial');
 
 const CANSAT_PORT = process.env.SERIAL_PORT_CANSAT || '/dev/ttyUSB0';
 const NRC_PORT    = process.env.SERIAL_PORT_NRC    || '/dev/ttyUSB1';
@@ -11,9 +12,12 @@ const CANSAT_CMD_PORT = process.env.SERIAL_PORT_CANSAT_CMD || '';
 const CANSAT_BAUD = parseInt(process.env.SERIAL_BAUD_CANSAT || '115200', 10);
 const NRC_BAUD    = parseInt(process.env.SERIAL_BAUD_NRC || '115200', 10);
 const CANSAT_CMD_BAUD = parseInt(process.env.SERIAL_BAUD_CANSAT_CMD || String(CANSAT_BAUD), 10);
+const MACHX_PORT = process.env.SERIAL_PORT_MACHX || '/dev/ttyUSB2';
+const MACHX_BAUD = parseInt(process.env.SERIAL_BAUD_MACHX || '115200', 10);
 const ENABLE_NRC_LIVE = process.env.ENABLE_NRC_LIVE === 'true';
+const ENABLE_MACHX_LIVE = process.env.ENABLE_MACHX_LIVE !== 'false';
 
-let cansatPort, cansatCmdPort, nrcSerial, cansatFrameParser;
+let cansatPort, cansatCmdPort, nrcSerial, machxSerial, cansatFrameParser;
 let shuttingDown = false;
 let watchdogInterval = null;
 let cansatReconnectTimer = null;
@@ -30,11 +34,13 @@ const RECONNECT_DELAY_MS = Math.max(
 );
 const sourceState = {
   CANSAT: { lastSeenAt: null, lost: false, connected: false, port: CANSAT_PORT },
-  NRC: { lastSeenAt: null, lost: false, connected: false, port: NRC_PORT, live_enabled: ENABLE_NRC_LIVE }
+  NRC: { lastSeenAt: null, lost: false, connected: false, port: NRC_PORT, live_enabled: ENABLE_NRC_LIVE },
+  MACHX: { lastSeenAt: null, lost: false, connected: false, port: MACHX_PORT, live_enabled: ENABLE_MACHX_LIVE }
 };
 const diagnostics = {
   CANSAT: { port: CANSAT_PORT, baud: CANSAT_BAUD, open: false, packets: 0, parse_errors: 0, serial_errors: 0, reconnects: 0, last_error: null },
-  NRC: { port: NRC_PORT, baud: NRC_BAUD, open: false, packets: 0, parse_errors: 0, serial_errors: 0, reconnects: 0, last_error: ENABLE_NRC_LIVE ? null : 'NRC live telemetry disabled' }
+  NRC: { port: NRC_PORT, baud: NRC_BAUD, open: false, packets: 0, parse_errors: 0, serial_errors: 0, reconnects: 0, last_error: ENABLE_NRC_LIVE ? null : 'NRC live telemetry disabled' },
+  MACHX: { port: MACHX_PORT, baud: MACHX_BAUD, open: false, packets: 0, parse_errors: 0, serial_errors: 0, reconnects: 0, last_error: ENABLE_MACHX_LIVE ? null : 'MACHX live telemetry disabled' }
 };
 
 function clearTimer(timer) {
@@ -89,6 +95,7 @@ function initSerial(emitFn) {
     const now = Date.now();
     triggerSignalLost('CANSAT', emitFn, now);
     if (ENABLE_NRC_LIVE) triggerSignalLost('NRC', emitFn, now);
+    if (ENABLE_MACHX_LIVE) triggerSignalLost('MACHX', emitFn, now);
   }, 1000);
 
   const handlePacket = (pkt) => {
@@ -224,9 +231,32 @@ function initSerial(emitFn) {
     diagnostics.NRC.last_error = 'NRC live telemetry disabled';
   }
 
+  if (ENABLE_MACHX_LIVE) {
+    machxSerial = createMachxSerial({
+      PortClass,
+      portPath: MACHX_PORT,
+      baudRate: MACHX_BAUD,
+      disabledPortPath: CANSAT_PORT,
+      reconnectDelayMs: RECONNECT_DELAY_MS,
+      diagnostics,
+      sourceState,
+      emitFn,
+      safeEmit,
+      handlePacket,
+      shouldReconnect: () => !shuttingDown
+    });
+  } else {
+    machxSerial = null;
+    sourceState.MACHX.connected = false;
+    sourceState.MACHX.lost = false;
+    diagnostics.MACHX.open = false;
+    diagnostics.MACHX.last_error = 'MACHX live telemetry disabled';
+  }
+
   connectCansat();
   connectCansatCommand();
   if (nrcSerial) nrcSerial.connect();
+  if (machxSerial) machxSerial.connect();
 }
 
 function writePort(port, command, unavailableMessage) {
@@ -297,6 +327,14 @@ function getSignalState() {
       port: sourceState.NRC.port,
       last_seen_ms: sourceState.NRC.lastSeenAt || 0,
       diagnostics: { ...diagnostics.NRC }
+    },
+    MACHX: {
+      lost: sourceState.MACHX.lost,
+      connected: sourceState.MACHX.connected,
+      live_enabled: ENABLE_MACHX_LIVE,
+      port: sourceState.MACHX.port,
+      last_seen_ms: sourceState.MACHX.lastSeenAt || 0,
+      diagnostics: { ...diagnostics.MACHX }
     }
   };
 }
@@ -321,7 +359,8 @@ async function shutdown() {
   await Promise.all([
     closePort(cansatPort),
     closePort(cansatCmdPort),
-    nrcSerial ? nrcSerial.close() : Promise.resolve()
+    nrcSerial ? nrcSerial.close() : Promise.resolve(),
+    machxSerial ? machxSerial.close() : Promise.resolve()
   ]);
 }
 
