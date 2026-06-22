@@ -22,6 +22,17 @@
 
 RH_RF95 rf95(RFM95_CS, RFM95_IRQ);
 
+uint16_t crc16Ccitt(const uint8_t* data, size_t len) {
+    uint16_t crc = 0xFFFF;
+    for (size_t i = 0; i < len; i++) {
+        crc ^= static_cast<uint16_t>(data[i]) << 8;
+        for (uint8_t bit = 0; bit < 8; bit++) {
+            crc = (crc & 0x8000) ? static_cast<uint16_t>((crc << 1) ^ 0x1021) : static_cast<uint16_t>(crc << 1);
+        }
+    }
+    return crc;
+}
+
 void setup() {
     Serial.begin(GCS_SERIAL_BAUD);
     
@@ -41,10 +52,9 @@ void setup() {
     }
     
     if (!rf95.setFrequency(RFM95_FREQ)) {
-        Serial.println("GCS:ERROR RFM95W frequency set failed");
-        while (1) {
-            delay(100);
-        }
+        Serial.println("GCS:ERROR RFM95W frequency set failed, restarting...");
+        delay(500);
+        ESP.restart();
     }
     // Setting High Power, but GS is mostly receiving
     rf95.setTxPower(20, false);
@@ -65,40 +75,62 @@ void loop() {
                 buf[sizeof(buf) - 1] = '\0';
             }
             
-            // MACHX2 payload has 15 fields separated by 14 commas, plus a CRC separated by the 15th comma.
-            char* ptr = (char*)buf;
-            int commas = 0;
-            char* rssi_start = nullptr;
-            
-            while(*ptr) {
-                if(*ptr == ',') {
-                    commas++;
-                    if(commas == 13) rssi_start = ptr + 1;
-                }
-                ptr++;
+            // Strip trailing newlines or whitespace
+            while (len > 0 && (buf[len - 1] == '\r' || buf[len - 1] == '\n' || buf[len - 1] == ' ' || buf[len - 1] == '\0')) {
+                buf[len - 1] = '\0';
+                len--;
             }
             
-            if (rssi_start && commas >= 14) {
-                char* flags_start = strchr(rssi_start, ',');
-                if (flags_start) {
-                    unsigned int flags = atoi(flags_start + 1);
-                    *rssi_start = '\0'; // Truncate at the comma before rssi
-                    
-                    char newPayload[256];
-                    int n = snprintf(newPayload, sizeof(newPayload), "%s%d,%u", (char*)buf, rf95.lastRssi(), flags);
-                    
-                    if (n > 0 && n < (int)sizeof(newPayload) && n > 7) {
-                        uint16_t crc = crc16Ccitt((uint8_t*)(newPayload + 7), n - 7);
-                        Serial.printf("%s,%04X\n", newPayload, crc);
-                        return; // Done
-                    } else {
-                        Serial.println("GCS:WARN payload rebuild truncated");
+            if (strncmp((char*)buf, "MACHX2:", 7) == 0) {
+                // Count commas to verify the packet format (MACHX2 payload has 15 fields separated by 14 commas, plus a CRC separated by the 15th comma)
+                int commas = 0;
+                char* comma_ptrs[16] = {nullptr};
+                char* p = (char*)buf;
+                while (*p) {
+                    if (*p == ',') {
+                        if (commas < 16) {
+                            comma_ptrs[commas] = p;
+                        }
+                        commas++;
                     }
+                    p++;
                 }
+                
+                if (commas == 15) {
+                    char* incoming_crc_str = comma_ptrs[14] + 1;
+                    uint16_t incoming_crc = (uint16_t)strtol(incoming_crc_str, nullptr, 16);
+                    
+                    // Verify CRC on the body (from buf + 7 to the 15th comma)
+                    size_t body_len = comma_ptrs[14] - ((char*)buf + 7);
+                    uint16_t expected_crc = crc16Ccitt((uint8_t*)(buf + 7), body_len);
+                    
+                    if (incoming_crc == expected_crc) {
+                        // Extract flags (after 14th comma, before 15th comma)
+                        unsigned int flags = atoi(comma_ptrs[13] + 1);
+                        
+                        // Truncate at the comma before rssi (13th comma)
+                        *comma_ptrs[12] = '\0';
+                        
+                        char newPayload[256];
+                        int n = snprintf(newPayload, sizeof(newPayload), "%s,%d,%u", (char*)buf, rf95.lastRssi(), flags);
+                        
+                        if (n > 0 && n < (int)sizeof(newPayload) && n > 7) {
+                            uint16_t crc = crc16Ccitt((uint8_t*)(newPayload + 7), n - 7);
+                            Serial.printf("%s,%04X\n", newPayload, crc);
+                            return; // Done
+                        } else {
+                            Serial.println("GCS:WARN payload rebuild truncated");
+                        }
+                    } else {
+                        Serial.printf("GCS:WARN invalid crc (received %04X, expected %04X)\n", incoming_crc, expected_crc);
+                    }
+                } else {
+                    Serial.printf("GCS:WARN malformed packet (comma count: %d)\n", commas);
+                }
+            } else {
+                // Fallback for non-MACHX2 packets
+                Serial.println((char*)buf);
             }
-            
-            // Fallback
-            Serial.print((char*)buf);
         }
     }
 }

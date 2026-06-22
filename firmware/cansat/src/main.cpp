@@ -32,6 +32,7 @@ const uint8_t LM75_ADDR_1 = 0x48; // PCB 1
 const uint8_t LM75_ADDR_2 = 0x49; // PCB 2
 const uint8_t LM75_ADDR_3 = 0x4A; // PCB 4
 const uint8_t LM75_ADDR_4 = 0x4C; // PCB 3
+const uint8_t LM75_ADDRS[4] = { LM75_ADDR_1, LM75_ADDR_2, LM75_ADDR_3, LM75_ADDR_4 };
 
 // ─── Flags ───────────────────────────────────────────────────────────────────
 #define FLAG_LAUNCHED     0x01
@@ -54,12 +55,17 @@ FsFile logFile;
 uint32_t pkt_id = 0;
 uint32_t lastTxMs = 0;
 const uint32_t TX_INTERVAL_MS = 1000;
+const uint32_t SENSOR_TIMEOUT_MS = 3000;
 
 float baselinePressure = 1013.25f;
 uint8_t baselineSamples = 0;
 float maxAltitude = 0.0f;
 uint8_t flags = 0;
 bool radio_ok = false;
+
+// Watchdog timestamps
+uint32_t lastBmpUpdateMs = 0;
+uint32_t lastLm75UpdateMs[4] = {0};
 
 // Sensor data cache
 float alt_m = 0.0, press_hpa = 0.0, temp_bmp = 0.0;
@@ -120,6 +126,39 @@ void readMPU6500() {
     }
 }
 
+void recoverI2CBus() {
+    Serial.println("I2C: Running bus recovery...");
+    pinMode(PB6, OUTPUT);
+    pinMode(PB7, INPUT_PULLUP);
+    delayMicroseconds(10);
+
+    // Clock out up to 16 cycles if SDA is stuck LOW
+    for (int i = 0; i < 16; i++) {
+        if (digitalRead(PB7) == HIGH) {
+            break;
+        }
+        digitalWrite(PB6, LOW);
+        delayMicroseconds(10);
+        digitalWrite(PB6, HIGH);
+        delayMicroseconds(10);
+    }
+
+    // Generate STOP condition
+    pinMode(PB7, OUTPUT);
+    digitalWrite(PB7, LOW);
+    delayMicroseconds(10);
+    digitalWrite(PB6, HIGH);
+    delayMicroseconds(10);
+    digitalWrite(PB7, HIGH);
+    delayMicroseconds(10);
+
+    // Re-initialize Wire
+    Wire.begin();
+    #if defined(WIRE_HAS_TIMEOUT)
+    Wire.setWireTimeout(3000, true);
+    #endif
+}
+
 // ─── Setup ───────────────────────────────────────────────────────────────────
 void setup() {
     #if defined(HAL_AFIO_MODULE_ENABLED)
@@ -128,9 +167,17 @@ void setup() {
 
     Serial.begin(115200);
     SerialGPS.begin(9600);
-    Wire.begin();
+    
+    // Perform I2C bus recovery and initialize Wire
+    recoverI2CBus();
     
     IWatchdog.begin(3000); // 3 seconds
+
+    // Initialize watchdog timestamps
+    lastBmpUpdateMs = millis();
+    for (int i = 0; i < 4; i++) {
+        lastLm75UpdateMs[i] = millis();
+    }
 
     // SPI Setup
     SPI.setMOSI(PB15);
@@ -169,6 +216,7 @@ void setup() {
         bmp.setIIRFilterCoeff(BMP3_IIR_FILTER_COEFF_3);
         bmp.setOutputDataRate(BMP3_ODR_50_HZ);
         flags |= FLAG_BMP_OK;
+        lastBmpUpdateMs = millis();
     }
 
     // SD Init
@@ -194,6 +242,7 @@ void loop() {
         if (now - lastTxMs >= TX_INTERVAL_MS) lastTxMs = now; // Prevent spiral of death
         
         // 1. Read Sensors
+        bool bmpReadSuccess = false;
         if (flags & FLAG_BMP_OK && bmp.performReading()) {
             temp_bmp = bmp.temperature;
             press_hpa = bmp.pressure / 100.0f;
@@ -204,12 +253,31 @@ void loop() {
             }
             alt_m = bmp.readAltitude(baselinePressure);
             if (alt_m > maxAltitude) maxAltitude = alt_m;
+            bmpReadSuccess = true;
+            lastBmpUpdateMs = now;
         }
         
-        temp_lm75[0] = readLM75(LM75_ADDR_1);
-        temp_lm75[1] = readLM75(LM75_ADDR_2);
-        temp_lm75[2] = readLM75(LM75_ADDR_3);
-        temp_lm75[3] = readLM75(LM75_ADDR_4);
+        bool lm75Success[4] = {false};
+        for (int i = 0; i < 4; i++) {
+            float t = readLM75(LM75_ADDRS[i]);
+            if (t != -999.0f) {
+                temp_lm75[i] = t;
+                lastLm75UpdateMs[i] = now;
+                lm75Success[i] = true;
+            }
+        }
+
+        // I2C Bus recovery trigger: if BMP and all LM75s fail consecutively
+        static int consecutiveI2cFails = 0;
+        if (!bmpReadSuccess && !lm75Success[0] && !lm75Success[1] && !lm75Success[2] && !lm75Success[3]) {
+            consecutiveI2cFails++;
+            if (consecutiveI2cFails >= 3) {
+                recoverI2CBus();
+                consecutiveI2cFails = 0;
+            }
+        } else {
+            consecutiveI2cFails = 0;
+        }
         
         if (gps.location.isValid() && gps.location.age() < 2000) {
             gps_lat = gps.location.lat();
@@ -229,6 +297,29 @@ void loop() {
         
         // Read IMU
         readMPU6500();
+
+        // Stale sensor watchdog (stale if older than 3 seconds, or IMU not ok)
+        bool sensorStale = false;
+        if (now - lastBmpUpdateMs > SENSOR_TIMEOUT_MS) {
+            sensorStale = true;
+        }
+        for (int i = 0; i < 4; i++) {
+            if (now - lastLm75UpdateMs[i] > SENSOR_TIMEOUT_MS) {
+                sensorStale = true;
+            }
+        }
+        if (!gps.location.isValid() || gps.location.age() > 5000) {
+            sensorStale = true;
+        }
+        if (!(flags & FLAG_IMU_OK)) {
+            sensorStale = true;
+        }
+
+        if (sensorStale) {
+            flags |= FLAG_STALE_SENSOR;
+        } else {
+            flags &= ~FLAG_STALE_SENSOR;
+        }
 
         // 2. Format MACHX2 body string (without MACHX2:, CRC and \n)
         char bodyBuf[256];
@@ -254,10 +345,25 @@ void loop() {
                     rf95.waitPacketSent(100);
                 }
                 
-                // 6. Log to SD
+                // 6. Log to SD with bounded/periodic flushing
                 if (flags & FLAG_SD_OK) {
                     logFile.print(finalPacket);
-                    logFile.flush();
+                    
+                    static uint32_t lastFlushMs = 0;
+                    static uint32_t flushIntervalMs = 10000; // start at 10 seconds
+                    if (now - lastFlushMs >= flushIntervalMs) {
+                        uint32_t flushStart = millis();
+                        logFile.flush();
+                        uint32_t flushDuration = millis() - flushStart;
+                        lastFlushMs = now;
+                        
+                        if (flushDuration > 50) {
+                            // Degrade flush interval to 30s if SD is slow
+                            flushIntervalMs = 30000;
+                        } else {
+                            flushIntervalMs = 10000;
+                        }
+                    }
                 }
                 
                 Serial.print(finalPacket); // Local debug

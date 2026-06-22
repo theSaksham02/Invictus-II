@@ -143,3 +143,101 @@ test('MACHX progresses through PAD, LAUNCHED, ASCENT, APOGEE, DESCENT, MAIN, and
     'LANDED'
   ]);
 });
+
+test('phase tracker resets state on timestamp rollback (MCU reboot)', () => {
+  resetState('MACHX');
+  const events = [];
+  const emit = (event, payload) => events.push({ event, payload });
+
+  processPacket(packet('MACHX', 1, 1000, 10), emit);
+  processPacket(packet('MACHX', 2, 2000, 15), emit);
+  
+  // MCU resets, timestamp rolls back to 500
+  processPacket(packet('MACHX', 3, 500, 20), emit);
+
+  // Check that the state was reset
+  assert.equal(states.MACHX.last_packet_time, 500);
+  assert.equal(states.MACHX.baseline_alt, 20);
+});
+
+test('MACHX apogee logic ignores single-sample dip', () => {
+  resetState('MACHX');
+  const events = [];
+  const emit = (event, payload) => events.push({ event, payload });
+
+  // Go to ASCENT phase
+  [
+    [1, 1000, 0],
+    [2, 2000, 16], // LAUNCHED
+    [3, 3000, 30],
+    [4, 4000, 45], // ASCENT
+    [5, 5000, 1000] // ASCENT continues
+  ].forEach(([pktId, timestampMs, altitudeM]) => {
+    processPacket(packet('MACHX', pktId, timestampMs, altitudeM), emit);
+  });
+
+  assert.equal(states.MACHX.phase, 'ASCENT');
+
+  // Single sample dip: alt drops to 975 (drop = 25m, fallingByThreshold = true)
+  processPacket(packet('MACHX', 6, 6000, 975), emit);
+  // Phase should still be ASCENT because confirmation count is only 1 (needs 3)
+  assert.equal(states.MACHX.phase, 'ASCENT');
+
+  // Immediately recovers/ascends: alt goes to 1010
+  processPacket(packet('MACHX', 7, 7000, 1010), emit);
+  // Descent confirmation count should reset to 0
+  assert.equal(states.MACHX.descent_confirm_count, 0);
+  assert.equal(states.MACHX.phase, 'ASCENT');
+});
+
+test('MACHX apogee logic triggers on sustained descent', () => {
+  resetState('MACHX');
+  const events = [];
+  const emit = (event, payload) => events.push({ event, payload });
+
+  // Go to ASCENT phase
+  [
+    [1, 1000, 0],
+    [2, 2000, 16], // LAUNCHED
+    [3, 3000, 30],
+    [4, 4000, 45], // ASCENT
+    [5, 5000, 1000] // Max altitude
+  ].forEach(([pktId, timestampMs, altitudeM]) => {
+    processPacket(packet('MACHX', pktId, timestampMs, altitudeM), emit);
+  });
+
+  // Sustained descent (3 samples)
+  processPacket(packet('MACHX', 6, 6000, 979), emit); // sample 1: drop 21m, fallingByThreshold
+  assert.equal(states.MACHX.phase, 'ASCENT');
+  
+  processPacket(packet('MACHX', 7, 7000, 958), emit); // sample 2: drop 42m, fallingByThreshold
+  assert.equal(states.MACHX.phase, 'ASCENT');
+
+  processPacket(packet('MACHX', 8, 8000, 937), emit); // sample 3: drop 63m, fallingByThreshold
+  assert.equal(states.MACHX.phase, 'APOGEE');
+});
+
+test('MACHX apogee logic does not trigger if max altitude is sub-threshold', () => {
+  resetState('MACHX');
+  const events = [];
+  const emit = (event, payload) => events.push({ event, payload });
+
+  // Max altitude is only 250m (threshold is 300m)
+  [
+    [1, 1000, 0],
+    [2, 2000, 16], // LAUNCHED
+    [3, 3000, 30],
+    [4, 4000, 45], // ASCENT
+    [5, 5000, 250] // Max altitude (below 300m)
+  ].forEach(([pktId, timestampMs, altitudeM]) => {
+    processPacket(packet('MACHX', pktId, timestampMs, altitudeM), emit);
+  });
+
+  // Sustained descent (3 samples) below 300m
+  processPacket(packet('MACHX', 6, 6000, 229), emit); 
+  processPacket(packet('MACHX', 7, 7000, 208), emit); 
+  processPacket(packet('MACHX', 8, 8000, 187), emit); 
+
+  // Should NOT trigger APOGEE because max altitude was 250m (< 300m)
+  assert.notEqual(states.MACHX.phase, 'APOGEE');
+});

@@ -59,9 +59,13 @@ function processPacket(pkt, emitFn) {
   if (!pkt || !states[pkt.source]) return;
   if (!Number.isFinite(pkt.altitude_m) || !Number.isFinite(pkt.timestamp_ms)) return;
 
-  const s = states[pkt.source];
+  let s = states[pkt.source];
   const packetTs = Math.trunc(pkt.timestamp_ms);
-  if (s.last_packet_time && packetTs < s.last_packet_time) return;
+  if (s.last_packet_time && packetTs < s.last_packet_time) {
+    console.warn(`[PHASE] Rollback detected for ${pkt.source} (${packetTs} < ${s.last_packet_time}). Resetting state.`);
+    resetState(pkt.source);
+    s = states[pkt.source];
+  }
 
   s.last_packet_time = packetTs;
   if (s.baseline_alt === null) s.baseline_alt = pkt.altitude_m;
