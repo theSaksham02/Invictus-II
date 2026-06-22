@@ -138,8 +138,15 @@ void setup() {
     SPI.setSCLK(PB13);
     SPI.begin();
 
+    // Shared SPI bus safety: de-select all devices before any SPI transfers
+    pinMode(RFM95_CS, OUTPUT);
+    digitalWrite(RFM95_CS, HIGH);
+
     pinMode(MPU6500_CS, OUTPUT);
-    digitalWrite(MPU6500_CS, HIGH); // Deselect MPU6500 to free SPI bus
+    digitalWrite(MPU6500_CS, HIGH);
+
+    pinMode(SD_CS, OUTPUT);
+    digitalWrite(SD_CS, HIGH);
     
     // Wake MPU6500
     writeMPU6500(0x6B, 0x00);

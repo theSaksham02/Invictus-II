@@ -24,6 +24,8 @@ const ASCENT_STEP_THRESHOLD_M = 1.0;
 
 const LEGACY_APOGEE_DROP_M = 5.0;
 const MACHX_APOGEE_DROP_M = 20.0;
+const MACHX_APOGEE_CONFIRM_SAMPLES = 3;
+const MACHX_APOGEE_MIN_ALTITUDE_M = 300.0;
 
 const DESCENT_STEP_THRESHOLD_M = 1.0;
 const MAIN_DEPLOY_ALTITUDE_M = 500.0;
@@ -41,6 +43,7 @@ function makeState(source) {
     launch_time: 0,
     apogee_time: 0,
     last_packet_time: 0,
+    descent_confirm_count: 0,
     alt_history: []
   };
 }
@@ -102,7 +105,7 @@ function processPacket(pkt, emitFn) {
   } else {
     // MACHX / SUGAR Logic
     if (s.phase === PHASE_PAD) {
-      if (altitudeGain >= MACHX_LAUNCH_ALTITUDE_DELTA_M) {
+      if (altitudeGain >= MACHX_LAUNCH_ALTITUDE_DELTA_M && risingByThreshold) {
         newPhase = PHASE_LAUNCHED;
         s.launch_time = packetTs;
       }
@@ -113,9 +116,18 @@ function processPacket(pkt, emitFn) {
       }
     }
     else if (s.phase === PHASE_ASCENT) {
-      if ((s.max_alt - pkt.altitude_m) >= MACHX_APOGEE_DROP_M) {
+      const drop = s.max_alt - pkt.altitude_m;
+      const apogeeCandidate = 
+        drop >= MACHX_APOGEE_DROP_M &&
+        fallingByThreshold &&
+        s.max_alt >= MACHX_APOGEE_MIN_ALTITUDE_M;
+        
+      s.descent_confirm_count = apogeeCandidate ? s.descent_confirm_count + 1 : 0;
+      
+      if (s.descent_confirm_count >= MACHX_APOGEE_CONFIRM_SAMPLES) {
         newPhase = PHASE_APOGEE;
         s.apogee_time = packetTs;
+        s.descent_confirm_count = 0;
       }
     }
     else if (s.phase === PHASE_APOGEE) {

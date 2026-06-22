@@ -22,17 +22,6 @@
 
 RH_RF95 rf95(RFM95_CS, RFM95_IRQ);
 
-uint16_t crc16Ccitt(const uint8_t* data, size_t len) {
-    uint16_t crc = 0xFFFF;
-    for (size_t i = 0; i < len; i++) {
-        crc ^= static_cast<uint16_t>(data[i]) << 8;
-        for (uint8_t bit = 0; bit < 8; bit++) {
-            crc = (crc & 0x8000) ? static_cast<uint16_t>((crc << 1) ^ 0x1021) : static_cast<uint16_t>(crc << 1);
-        }
-    }
-    return crc;
-}
-
 void setup() {
     Serial.begin(GCS_SERIAL_BAUD);
     
@@ -46,13 +35,17 @@ void setup() {
     delay(10);
 
     if (!rf95.init()) {
-        Serial.println("GCS:ERROR RFM95W init failed");
+        Serial.println("GCS:ERROR RFM95W init failed, restarting...");
+        delay(500);
+        ESP.restart();
+    }
+    
+    if (!rf95.setFrequency(RFM95_FREQ)) {
+        Serial.println("GCS:ERROR RFM95W frequency set failed");
         while (1) {
             delay(100);
         }
     }
-    
-    rf95.setFrequency(RFM95_FREQ);
     // Setting High Power, but GS is mostly receiving
     rf95.setTxPower(20, false);
     
@@ -65,7 +58,7 @@ void loop() {
         uint8_t len = sizeof(buf);
 
         if (rf95.recv(buf, &len)) {
-            // Null-terminate to ensure safe printing
+            // Null-terminate safely
             if (len < sizeof(buf)) {
                 buf[len] = '\0';
             } else {
@@ -73,7 +66,6 @@ void loop() {
             }
             
             // MACHX2 payload has 15 fields separated by 14 commas, plus a CRC separated by the 15th comma.
-            // We want to replace the 14th field (rssi) with rf95.lastRssi() and recompute CRC.
             char* ptr = (char*)buf;
             int commas = 0;
             char* rssi_start = nullptr;
@@ -93,15 +85,19 @@ void loop() {
                     *rssi_start = '\0'; // Truncate at the comma before rssi
                     
                     char newPayload[256];
-                    snprintf(newPayload, sizeof(newPayload), "%s%d,%u", (char*)buf, rf95.lastRssi(), flags);
+                    int n = snprintf(newPayload, sizeof(newPayload), "%s%d,%u", (char*)buf, rf95.lastRssi(), flags);
                     
-                    uint16_t crc = crc16Ccitt((uint8_t*)(newPayload + 7), strlen(newPayload) - 7);
-                    Serial.printf("%s,%04X\n", newPayload, crc);
-                    continue;
+                    if (n > 0 && n < (int)sizeof(newPayload) && n > 7) {
+                        uint16_t crc = crc16Ccitt((uint8_t*)(newPayload + 7), n - 7);
+                        Serial.printf("%s,%04X\n", newPayload, crc);
+                        return; // Done
+                    } else {
+                        Serial.println("GCS:WARN payload rebuild truncated");
+                    }
                 }
             }
             
-            // Fallback: forward the raw ASCII frame over USB Serial if parsing fails
+            // Fallback
             Serial.print((char*)buf);
         }
     }
