@@ -179,33 +179,11 @@
     #stats-bar span strong { color: var(--text-1); font-family: var(--mono); font-weight: 500; }
 
     /* ═══════════════════════════════════════════════════════════
-       RIGHT — CAMERA, MAP, EVENTS, ACTIONS
+       RIGHT — MAP, EVENTS, ACTIONS
        ═══════════════════════════════════════════════════════════ */
-    #info-panel { display: grid; grid-template-rows: 200px 1fr 1.2fr auto; gap: var(--gap); min-height: 0; }
+    #info-panel { display: grid; grid-template-rows: minmax(260px, 1.15fr) minmax(240px, 1fr) auto; gap: var(--gap); min-height: 0; }
 
-    /* Camera Feed */
-    #camera-container { display: flex; flex-direction: column; }
     .panel-header { font-family: var(--sans); font-size: 0.55rem; font-weight: 600; color: var(--text-3); padding: 8px 12px; border-bottom: 1px solid var(--border); letter-spacing: 0.15em; }
-    #cam-feed { flex: 1; background: #050505; position: relative; display: flex; justify-content: center; align-items: center; overflow: hidden; }
-    .cam-noise { position: absolute; inset: 0; pointer-events: none; opacity: 0.08; background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E"); }
-    .cam-scanline { position: absolute; inset: 0; pointer-events: none; opacity: 0.1; background: linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,0) 50%, rgba(0,0,0,0.2) 50%, rgba(0,0,0,0.2)); background-size: 100% 4px; }
-    .cam-overlay { position: absolute; font-family: var(--mono); font-size: 0.55rem; color: var(--text-1); z-index: 10; display: flex; flex-direction: column; gap: 2px; }
-    .cam-overlay span { display: block; opacity: 0.8; }
-    .cam-overlay strong { font-weight: 600; color: var(--spx-blue-light); }
-    .cam-overlay.top-left { top: 12px; left: 12px; }
-    .cam-overlay.top-right { top: 12px; right: 12px; align-items: flex-end; }
-    .cam-overlay.bottom-left { bottom: 12px; left: 12px; opacity: 0.6; }
-    .cam-overlay.bottom-right { bottom: 12px; right: 12px; text-align: right; }
-    .cam-overlay.rec { color: var(--critical); display: flex; flex-direction: row; align-items: center; gap: 6px; font-weight: 600; opacity: 1; }
-    .cam-overlay.rec::before { content: ''; width: 6px; height: 6px; background: var(--critical); border-radius: 50%; animation: blink 1.5s infinite; }
-    .cam-reticle { position: absolute; inset: 0; pointer-events: none; opacity: 0.15; display: flex; justify-content: center; align-items: center; }
-    .reticle-h { position: absolute; width: 60%; height: 1px; background: #fff; }
-    .reticle-v { position: absolute; width: 1px; height: 60%; background: #fff; }
-    .reticle-circle { position: absolute; width: 30px; height: 30px; border: 1px solid #fff; border-radius: 50%; }
-    .no-signal-text { font-family: var(--mono); font-size: 0.75rem; letter-spacing: 0.15em; color: var(--text-3); z-index: 5; animation: blink 2s infinite;}
-    
-    #gamepad-status { position: absolute; bottom: 8px; right: 8px; z-index: 1000; font-family: var(--mono); font-size: 0.5rem; padding: 4px 8px; background: rgba(0,0,0,0.8); border: 1px solid var(--critical); color: var(--critical); }
-    #gamepad-status.linked { border-color: var(--nominal); color: var(--nominal); }
 
     /* Map & Radar */
     #map-container { position: relative; filter: grayscale(100%) contrast(1.1) brightness(0.7); overflow: hidden; }
@@ -230,19 +208,6 @@
     #actions-bar { display: flex; gap: var(--gap); }
     .action-btn { flex: 1; font-family: var(--sans); font-size: 0.65rem; font-weight: 600; padding: 12px 0; background: transparent; border: 1px solid var(--text-3); color: var(--text-2); cursor: pointer; transition: all 0.2s; letter-spacing: 0.1em; border-radius: var(--r); }
     .action-btn:hover, .action-btn:active { background: var(--text-1); color: #000; border-color: var(--text-1); }
-    .action-btn.launch-btn { background: #e03131; border-color: #ff5a5a; color: #fff; }
-    .action-btn.launch-btn:hover, .action-btn.launch-btn:active { background: #ff3b3b; border-color: #ff7777; box-shadow: 0 0 18px rgba(255,59,59,0.38); }
-    .launch-confirm { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 24px; background: rgba(0,0,0,0.72); backdrop-filter: blur(5px); }
-    .launch-confirm[hidden] { display: none; }
-    .launch-confirm-dialog { width: min(360px, 100%); border: 1px solid var(--border-hi); border-radius: var(--r); background: var(--bg-panel); box-shadow: 0 24px 60px rgba(0,0,0,0.58); padding: 22px; }
-    .launch-confirm-title { font-family: var(--mono); font-size: 1rem; font-weight: 800; color: var(--text-1); letter-spacing: 0.14em; text-align: center; margin-bottom: 20px; }
-    .launch-confirm-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    .launch-confirm-btn { min-height: 42px; border-radius: var(--r); border: 1px solid transparent; font-family: var(--sans); font-size: 0.72rem; font-weight: 800; letter-spacing: 0.12em; cursor: pointer; transition: transform 0.1s, box-shadow 0.2s, background 0.2s; }
-    .launch-confirm-btn:active { transform: translateY(1px); }
-    .launch-confirm-btn.abort { background: #c92a2a; border-color: #ff5a5a; color: #fff; }
-    .launch-confirm-btn.abort:hover { background: #f03e3e; box-shadow: 0 0 18px rgba(240,62,62,0.32); }
-    .launch-confirm-btn.proceed { background: #2f9e44; border-color: #69db7c; color: #fff; }
-    .launch-confirm-btn.proceed:hover { background: #37b24d; box-shadow: 0 0 18px rgba(55,178,77,0.32); }
     
     /* ═══════════════════════════════════════════════════════════
        FOOTER - TIMELINE SCRUBBER
@@ -369,19 +334,6 @@
       </section>
 
       <aside id="info-panel">
-        <div id="camera-container" class="panel">
-          <div class="panel-header" style="display:flex; justify-content:space-between; align-items:center;">
-            <span>LIVE STREAM // CANSAT</span>
-            <button onclick="promptStreamUrl()" style="background:transparent;border:1px solid var(--border-hi);color:var(--text-3);font-family:var(--mono);font-size:0.5rem;padding:2px 8px;cursor:pointer;border-radius:4px;letter-spacing:0.1em;">SET URL</button>
-          </div>
-          <div id="cam-feed">
-            <iframe id="stream-frame" width="100%" height="100%" frameborder="0" allow="autoplay; encrypted-media" allowfullscreen style="display:none;"></iframe>
-            <div id="stream-placeholder" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:8px;">
-              <span style="font-family:var(--mono);font-size:0.7rem;color:var(--text-3);letter-spacing:0.1em;">NO STREAM CONFIGURED</span>
-              <span style="font-family:var(--mono);font-size:0.5rem;color:var(--text-3);">CLICK "SET URL" TO ADD YOUTUBE LIVE LINK</span>
-            </div>
-          </div>
-        </div>
         <div id="map-container" class="panel">
           <div id="map"></div>
           <div class="radar-sweep" id="radar"></div>
@@ -392,7 +344,6 @@
           <div id="events-list"></div>
         </div>
         <div id="actions-bar">
-          <button class="action-btn launch-btn" id="btn-launch" onclick="showLaunchConfirm()">LAUNCH</button>
           <button class="action-btn" id="btn-upload" onclick="uploadSD()">UPLOAD SD</button>
           <button class="action-btn" id="btn-export" onclick="exportCSV()">EXPORT CSV</button>
           <input type="file" id="file-sd" accept=".csv" hidden>
@@ -407,16 +358,6 @@
     </footer>
   </div>
 
-  <div class="launch-confirm" id="launch-confirm" role="dialog" aria-modal="true" aria-labelledby="launch-confirm-title" hidden>
-    <div class="launch-confirm-dialog">
-      <div class="launch-confirm-title" id="launch-confirm-title">CONFIRM LAUNCH</div>
-      <div class="launch-confirm-actions">
-        <button class="launch-confirm-btn abort" type="button" onclick="hideLaunchConfirm()">ABORT</button>
-        <button class="launch-confirm-btn proceed" type="button" onclick="startLaunchSequence()">PROCEED</button>
-      </div>
-    </div>
-  </div>
-
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -426,7 +367,8 @@
     (() => {
       'use strict';
       const $ = id => document.getElementById(id);
-      let statusVoiceEnabled = localStorage.getItem('STATUS_VOICE') === 'true';
+      const AUDIO_ENABLED_KEY = 'GROUND_STATION_AUDIO_ENABLED';
+      let statusVoiceEnabled = localStorage.getItem(AUDIO_ENABLED_KEY) === 'true';
 
       function renderStatusVoiceToggle() {
         const toggle = $('status-voice-toggle');
@@ -442,45 +384,26 @@
         renderStatusVoiceToggle();
         toggle.addEventListener('change', () => {
           statusVoiceEnabled = toggle.checked;
-          localStorage.setItem('STATUS_VOICE', statusVoiceEnabled ? 'true' : 'false');
+          localStorage.setItem(AUDIO_ENABLED_KEY, statusVoiceEnabled ? 'true' : 'false');
           renderStatusVoiceToggle();
           if (!statusVoiceEnabled && 'speechSynthesis' in window) speechSynthesis.cancel();
         });
       }
       setupStatusVoiceToggle();
 
-      // AUDIO & TTS ENGINE
-      let actx = null, osc = null, gainNode = null, audioInit = false;
-      function initAudio() {
-        if(audioInit) return;
+      // AUDIO & TTS ENGINE — muted by default. No continuous software hum.
+      function playPing() {
+        if(!statusVoiceEnabled) return;
         const AudioContext = window.AudioContext || window.webkitAudioContext;
         if(!AudioContext) return;
-        actx = new AudioContext();
-        osc = actx.createOscillator();
-        gainNode = actx.createGain();
-        osc.type = 'sine'; osc.frequency.value = 50; gainNode.gain.value = 0;
-        osc.connect(gainNode); gainNode.connect(actx.destination);
-        osc.start();
-        audioInit = true;
-      }
-      function updateEngineHum(accel) {
-        if(!actx || actx.state !== 'running') return;
-        const f = 50 + Math.max(0, accel - 1) * 40;
-        osc.frequency.setTargetAtTime(f, actx.currentTime, 0.1);
-        gainNode.gain.setTargetAtTime(0.04, actx.currentTime, 0.1);
-      }
-      function silenceHum() {
-        if(!actx || actx.state !== 'running') return;
-        gainNode.gain.setTargetAtTime(0, actx.currentTime, 0.1);
-      }
-      function playPing() {
-        if(!actx) return;
+        const actx = new AudioContext();
         const o = actx.createOscillator(), g = actx.createGain();
         o.type = 'triangle'; o.frequency.value = 880;
         o.connect(g); g.connect(actx.destination);
         g.gain.setValueAtTime(0.5, actx.currentTime);
         g.gain.exponentialRampToValueAtTime(0.01, actx.currentTime + 1);
         o.start(); o.stop(actx.currentTime + 1);
+        o.addEventListener('ended', () => actx.close().catch(() => {}), { once: true });
       }
       function speak(text) {
         if(!statusVoiceEnabled) return;
@@ -490,8 +413,6 @@
            speechSynthesis.speak(u);
         }
       }
-      document.body.addEventListener('click', initAudio, {once: true});
-
       // STATE
       const pad = (num, length, decimals = 1) => {
         if(isNaN(num)) return "----.-";
@@ -506,7 +427,7 @@
       const currentPath = window.location.pathname;
       let source = sourceByPath[currentPath] || (currentPath.endsWith('/nrc.html') ? 'NRC' : 'MACHX');
       let maxAlt = { CANSAT: 0, NRC: 0, MACHX: 0, SUGAR: 0 };
-      let pktCount = { CANSAT: 0, NRC: 0 };
+      let pktCount = { CANSAT: 0, NRC: 0, MACHX: 0, SUGAR: 0 };
       let firstReceivedAt = null;
       let currentPhase = { CANSAT: 'IDLE', NRC: 'IDLE', MACHX: 'IDLE', SUGAR: 'IDLE' };
       const flightPhases = new Set(['IDLE', 'GROUNDED', 'PAD', 'LAUNCHED', 'ASCENDING', 'ASCENT', 'APOGEE', 'DESCENDING', 'DESCENT', 'MAIN', 'LANDED']);
@@ -517,7 +438,7 @@
         NRC: { connected: false, lost: true }
       };
       
-      const historyDB = { CANSAT: [], NRC: [] };
+      const historyDB = { CANSAT: [], NRC: [], MACHX: [], SUGAR: [] };
       const metricTrendValues = {};
       let isScrubbing = false;
       let scrubIndex = 0;
@@ -653,8 +574,6 @@
 
         if (!isScrubbing) { trail.addLatLng(pos); map.panTo(pos); }
         $('coord-lat').textContent = pkt.lat.toFixed(5); $('coord-lon').textContent = pkt.lon.toFixed(5);
-        if($('cam-lat')) $('cam-lat').textContent = pkt.lat.toFixed(5);
-        if($('cam-lon')) $('cam-lon').textContent = pkt.lon.toFixed(5);
       }
 
       function renderTrail() {
@@ -861,9 +780,6 @@
         syncCharts();
         updatePreflight(pkt);
 
-        if(!isScrubbing) updateEngineHum(pkt.accel_z || 1);
-        else silenceHum();
-
         $('scrub-display').textContent = 'T+' + (pkt.timestamp_ms/1000).toFixed(1) + 'S';
       }
 
@@ -903,74 +819,6 @@
          }
       });
 
-      window.showLaunchConfirm = () => {
-        const modal = $('launch-confirm');
-        if (!modal) return;
-        modal.hidden = false;
-        const proceed = modal.querySelector('.proceed');
-        if (proceed) proceed.focus();
-      };
-
-      window.hideLaunchConfirm = () => {
-        const modal = $('launch-confirm');
-        if (!modal) return;
-        modal.hidden = true;
-        const launch = $('btn-launch');
-        if (launch) launch.focus();
-      };
-
-      document.addEventListener('keydown', (event) => {
-        if (event.key === 'Escape' && !$('launch-confirm')?.hidden) hideLaunchConfirm();
-      });
-
-      window.startLaunchSequence = async () => {
-        hideLaunchConfirm();
-        setModeBadge('SENDING LAUNCH COMMAND', 'var(--warning)');
-        const proceed = document.querySelector('.launch-confirm-btn.proceed');
-        if (proceed) proceed.disabled = true;
-
-        let payload = null;
-        try {
-          const res = await fetch(apiUrl('/api/launch'), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ source })
-          });
-          payload = await res.json().catch(() => null);
-          if (!res.ok && !payload?.partial) {
-            const errorText = payload?.results?.map(r => `${r.source}: ${r.error || r.status}`).join(' | ') || `launch ${res.status}`;
-            throw new Error(errorText);
-          }
-        } catch (error) {
-          setModeBadge('LAUNCH COMMAND FAILED', 'var(--critical)');
-          addEvent({
-            source,
-            event_type: 'LAUNCH_FAILED',
-            altitude_m: 0,
-            timestamp_ms: 0,
-            received_at: Date.now()
-          });
-          if (proceed) proceed.disabled = false;
-          return;
-        }
-
-        const now = Date.now();
-        const latest = historyDB[source][historyDB[source].length - 1] || {};
-        firstReceivedAt = now;
-        $('mission-timer').textContent = '00:00:00';
-        updatePhase('LAUNCHED', source);
-        addEvent({
-          source,
-          event_type: 'LAUNCHED',
-          altitude_m: Number.isFinite(latest.altitude_m) ? latest.altitude_m : 0,
-          timestamp_ms: Number.isFinite(latest.timestamp_ms) ? latest.timestamp_ms : 0,
-          received_at: now
-        });
-        setModeBadge(payload?.partial ? 'LAUNCH PARTIAL' : 'LAUNCH COMMAND SENT', payload?.partial ? 'var(--warning)' : 'var(--text-1)');
-        $('btn-launch').textContent = 'LAUNCH';
-        if (proceed) proceed.disabled = false;
-      };
-
       // EVENTS
       function addEvent(evt) {
         if (evt?.source && evt.source !== source) return;
@@ -1007,9 +855,6 @@
 
       // Removed switchSource as source is hardcoded
 
-      // GAMEPAD API
-      let gamepadIndex = null;
-      let lastControlTime = 0;
       const backendOrigin = (() => {
         const isHttp = window.location.protocol === 'http:' || window.location.protocol === 'https:';
         if (!isHttp) return 'http://localhost:3000';
@@ -1017,12 +862,6 @@
         return window.location.origin;
       })();
       const apiUrl = (path) => backendOrigin + path;
-      const roverHeaders = () => {
-        const headers = {'Content-Type':'application/json'};
-        const token = localStorage.getItem('ROVER_CONTROL_TOKEN');
-        if (token) headers['x-rover-token'] = token;
-        return headers;
-      };
 
       async function refreshSignalState() {
         try {
@@ -1040,31 +879,6 @@
 
       refreshSignalState();
       setInterval(refreshSignalState, 1000);
-
-      function pollGamepad() {
-        const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-        const padObj = Array.from(pads).find(p => p && p.connected);
-        const statusEl = $('gamepad-status');
-        
-        if(padObj) {
-          if(gamepadIndex === null) { gamepadIndex = padObj.index; statusEl.textContent = 'PAD: LINKED'; statusEl.className = 'linked'; speak('Controller linked.'); }
-          let left = -padObj.axes[1] * 100;
-          let right = -padObj.axes[3] * 100;
-          if(Math.abs(left) < 10) left = 0; if(Math.abs(right) < 10) right = 0;
-          const now = Date.now();
-          if(now - lastControlTime > 100) {
-            fetch(apiUrl('/api/rover/control'), { method: 'POST', headers: roverHeaders(), body: JSON.stringify({ left, right }) }).catch(()=>{});
-            lastControlTime = now;
-          }
-        } else {
-          if(gamepadIndex !== null) {
-            fetch(apiUrl('/api/rover/stop'), { method: 'POST', headers: roverHeaders() }).catch(()=>{});
-            gamepadIndex = null; statusEl.textContent = 'PAD: DISCONNECTED'; statusEl.className = '';
-          }
-        }
-        requestAnimationFrame(pollGamepad);
-      }
-      requestAnimationFrame(pollGamepad);
 
       // SOCKET.IO
       let socket = null;
@@ -1097,11 +911,6 @@
           processPacket(pkt);
         });
         s.on('mission_event', evt => { addEvent(evt); updatePhase(evt.event_type, evt.source); });
-        s.on('launch_command', payload => {
-          if (!payload) return;
-          const result = Array.isArray(payload.results) ? payload.results.find(r => r.source === source) : null;
-          if (result && !result.ok) setModeBadge(`LAUNCH ${result.status.toUpperCase()}`, 'var(--warning)');
-        });
         s.on('server_error', payload => setModeBadge(payload?.message || 'SERVER ERROR', 'var(--critical)'));
       }
 
@@ -1120,19 +929,6 @@
         fetch(apiUrl('/api/upload-sd'), { method: 'POST', body: fd }).finally(() => { $('btn-upload').textContent = 'UPLOAD SD'; e.target.value = ''; });
       });
       window.exportCSV = () => window.open(apiUrl('/api/export?source=' + source), '_blank');
-
-      window.promptStreamUrl = () => {
-        const url = prompt('Enter YouTube Live stream URL:');
-        if (!url) return;
-        const frame = $('stream-frame');
-        const placeholder = $('stream-placeholder');
-        let embedUrl = url;
-        const ytMatch = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/live\/)([^&?]+)/);
-        if (ytMatch) embedUrl = 'https://www.youtube.com/embed/' + ytMatch[1] + '?autoplay=1&mute=1';
-        frame.src = embedUrl;
-        frame.style.display = 'block';
-        placeholder.style.display = 'none';
-      };
 
     })();
   </script>

@@ -96,3 +96,18 @@ test('parseMachX rejects truncated lines', () => {
   const parsed = parseMachX(packet);
   assert.equal(parsed, null, 'should reject truncated/incomplete line');
 });
+
+test('parseNrc rejects malformed CRC and physically impossible values', () => {
+  const validBody = '1,1000,12.50,20.00,1010.00,25.000000,55.000000,-80,40';
+  assert.equal(parseNrc(`NRC2:${validBody},ZZZZ`), null);
+
+  const badAltitudeBody = '2,2000,999999.00,20.00,1010.00,25.000000,55.000000,-80,40';
+  const crcHex = crc16Ccitt(Buffer.from(badAltitudeBody, 'utf8')).toString(16).padStart(4, '0').toUpperCase();
+  assert.equal(parseNrc(`NRC2:${badAltitudeBody},${crcHex}`), null);
+});
+
+test('parseMachX rejects non-finite and out-of-range values even with valid CRC', () => {
+  const body = '1,2000,15.50,1013.25,25.00,26.00,26.10,25.90,26.20,Infinity,0.01,45.000000,-120.000000,-85,1';
+  const crcHex = crc16Ccitt(Buffer.from(body, 'utf8')).toString(16).padStart(4, '0').toUpperCase();
+  assert.equal(parseMachX(`MACHX2:${body},${crcHex}`), null);
+});

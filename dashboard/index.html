@@ -161,15 +161,16 @@
       const toggle = document.getElementById('status-voice-toggle');
       const state = document.getElementById('status-voice-state');
       if (!toggle || !state) return;
+      const AUDIO_ENABLED_KEY = 'GROUND_STATION_AUDIO_ENABLED';
 
       function render(enabled) {
         toggle.checked = Boolean(enabled);
         state.textContent = enabled ? 'ON' : 'OFF';
       }
 
-      render(localStorage.getItem('STATUS_VOICE') === 'true');
+      render(localStorage.getItem(AUDIO_ENABLED_KEY) === 'true');
       toggle.addEventListener('change', () => {
-        localStorage.setItem('STATUS_VOICE', toggle.checked ? 'true' : 'false');
+        localStorage.setItem(AUDIO_ENABLED_KEY, toggle.checked ? 'true' : 'false');
         render(toggle.checked);
         if (!toggle.checked && 'speechSynthesis' in window) speechSynthesis.cancel();
       });

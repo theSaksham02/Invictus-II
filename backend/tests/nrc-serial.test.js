@@ -141,3 +141,38 @@ test('serial opens NRC live ingest only when explicitly enabled', async () => {
     assert.equal(signal.NRC.connected, true);
   });
 });
+
+test('serial disables MACHX live ingest when it collides with CANSAT port', async () => {
+  await withMockedSerialModule({
+    ENABLE_NRC_LIVE: '',
+    ENABLE_MACHX_LIVE: 'true',
+    SERIAL_PORT_CANSAT: '/dev/shared',
+    SERIAL_PORT_MACHX: '/dev/shared'
+  }, async (serial, openedPaths) => {
+    serial.initSerial(() => {});
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.deepEqual(openedPaths, ['/dev/shared']);
+    const signal = serial.getSignalState();
+    assert.equal(signal.MACHX.live_enabled, true);
+    assert.equal(signal.MACHX.connected, false);
+    assert.equal(signal.MACHX.diagnostics.last_error, 'MACHX disabled because CANSAT and MACHX are configured with the same serial port');
+  });
+});
+
+test('serial shutdown clears all source connection flags', async () => {
+  await withMockedSerialModule({
+    ENABLE_NRC_LIVE: 'true',
+    ENABLE_MACHX_LIVE: 'true',
+    SERIAL_PORT_CANSAT: '/dev/cansat',
+    SERIAL_PORT_NRC: '/dev/nrc',
+    SERIAL_PORT_MACHX: '/dev/machx'
+  }, async (serial) => {
+    serial.initSerial(() => {});
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await serial.shutdown();
+    const signal = serial.getSignalState();
+    assert.equal(signal.CANSAT.connected, false);
+    assert.equal(signal.NRC.connected, false);
+    assert.equal(signal.MACHX.connected, false);
+  });
+});

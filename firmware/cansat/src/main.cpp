@@ -405,11 +405,16 @@ void loop() {
                         
                         // 6. Log to SD with bounded/periodic flushing
                         if (flags & FLAG_SD_OK) {
-                            logFile.print(finalPacket);
+                            size_t expectedBytes = strlen(finalPacket);
+                            size_t writtenBytes = logFile.print(finalPacket);
+                            if (writtenBytes != expectedBytes) {
+                                flags &= ~FLAG_SD_OK;
+                                Serial.println("SD:WARN write failed; disabling SD_OK flag");
+                            }
                             
                             static uint32_t lastFlushMs = 0;
                             static uint32_t flushIntervalMs = 10000; // start at 10 seconds
-                            if (now - lastFlushMs >= flushIntervalMs) {
+                            if ((flags & FLAG_SD_OK) && now - lastFlushMs >= flushIntervalMs) {
                                 uint32_t flushStart = millis();
                                 logFile.flush();
                                 uint32_t flushDuration = millis() - flushStart;

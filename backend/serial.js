@@ -8,20 +8,17 @@ const { createMachxSerial } = require('./machx-serial');
 
 const CANSAT_PORT = process.env.SERIAL_PORT_CANSAT || '/dev/ttyUSB1';
 const NRC_PORT    = process.env.SERIAL_PORT_NRC    || '/dev/ttyUSB2';
-const CANSAT_CMD_PORT = process.env.SERIAL_PORT_CANSAT_CMD || '';
 const CANSAT_BAUD = parseInt(process.env.SERIAL_BAUD_CANSAT || '115200', 10);
 const NRC_BAUD    = parseInt(process.env.SERIAL_BAUD_NRC || '115200', 10);
-const CANSAT_CMD_BAUD = parseInt(process.env.SERIAL_BAUD_CANSAT_CMD || String(CANSAT_BAUD), 10);
 const MACHX_PORT = process.env.SERIAL_PORT_MACHX || '/dev/ttyUSB0';
 const MACHX_BAUD = parseInt(process.env.SERIAL_BAUD_MACHX || '115200', 10);
 const ENABLE_NRC_LIVE = process.env.ENABLE_NRC_LIVE === 'true';
 const ENABLE_MACHX_LIVE = process.env.ENABLE_MACHX_LIVE !== 'false';
 
-let cansatPort, cansatCmdPort, nrcSerial, machxSerial, cansatFrameParser;
+let cansatPort, nrcSerial, machxSerial, cansatFrameParser;
 let shuttingDown = false;
 let watchdogInterval = null;
 let cansatReconnectTimer = null;
-let cansatCmdReconnectTimer = null;
 let activeMode = 'hardware';
 
 const SIGNAL_TIMEOUT_MS = Math.max(
@@ -130,14 +127,6 @@ function initSerial(emitFn) {
     }, RECONNECT_DELAY_MS);
   };
 
-  const scheduleCansatCommandReconnect = (connectFn) => {
-    if (shuttingDown || cansatCmdReconnectTimer) return;
-    cansatCmdReconnectTimer = setTimeout(() => {
-      cansatCmdReconnectTimer = null;
-      connectFn();
-    }, RECONNECT_DELAY_MS);
-  };
-
   const connectCansat = () => {
     try {
       cansatPort = new PortClass({ path: CANSAT_PORT, baudRate: CANSAT_BAUD });
@@ -189,27 +178,6 @@ function initSerial(emitFn) {
     }
   };
 
-  const connectCansatCommand = () => {
-    if (!CANSAT_CMD_PORT || CANSAT_CMD_PORT === CANSAT_PORT) return;
-    try {
-      cansatCmdPort = new PortClass({ path: CANSAT_CMD_PORT, baudRate: CANSAT_CMD_BAUD });
-      cansatCmdPort.on('open', () => {
-        cansatCmdReconnectTimer = clearTimer(cansatCmdReconnectTimer);
-      });
-      cansatCmdPort.on('error', (err) => {
-        console.warn('[SERIAL] CANSAT command port error:', err.message);
-        scheduleCansatCommandReconnect(connectCansatCommand);
-      });
-      cansatCmdPort.on('close', () => {
-        console.warn('[SERIAL] CANSAT command port closed, reconnecting...');
-        scheduleCansatCommandReconnect(connectCansatCommand);
-      });
-    } catch (error) {
-      console.warn('[SERIAL] CANSAT command port init error:', error.message);
-      scheduleCansatCommandReconnect(connectCansatCommand);
-    }
-  };
-
   if (ENABLE_NRC_LIVE) {
     nrcSerial = createNrcSerial({
       PortClass,
@@ -255,55 +223,8 @@ function initSerial(emitFn) {
   }
 
   connectCansat();
-  connectCansatCommand();
   if (nrcSerial) nrcSerial.connect();
   if (machxSerial) machxSerial.connect();
-}
-
-function writePort(port, command, unavailableMessage) {
-  return new Promise((resolve, reject) => {
-    if (!port || !port.isOpen) {
-      reject(new Error(unavailableMessage));
-      return;
-    }
-    port.write(command, (writeError) => {
-      if (writeError) return reject(writeError);
-      if (typeof port.drain !== 'function') return resolve();
-      port.drain((drainError) => drainError ? reject(drainError) : resolve());
-    });
-  });
-}
-
-async function sendLaunchCommand(source) {
-  const normalizedSource = String(source || '').toUpperCase();
-  if (normalizedSource !== 'CANSAT') {
-    throw new Error(`Unsupported launch source: ${source}`);
-  }
-
-  const targets = [normalizedSource];
-  const results = [];
-
-  for (const target of targets) {
-    try {
-      if (target === 'CANSAT') {
-        if (!CANSAT_CMD_PORT) {
-          results.push({ source: target, ok: false, status: 'unavailable', error: 'SERIAL_PORT_CANSAT_CMD is not configured' });
-        } else {
-          const port = CANSAT_CMD_PORT === CANSAT_PORT ? cansatPort : cansatCmdPort;
-          await writePort(port, 'CMD:LAUNCH\n', 'CANSAT command serial port is not open');
-          results.push({ source: target, ok: true, status: 'sent' });
-        }
-      }
-    } catch (error) {
-      results.push({ source: target, ok: false, status: 'failed', error: error.message });
-    }
-  }
-
-  return {
-    ok: results.some((result) => result.ok),
-    partial: results.some((result) => result.ok) && results.some((result) => !result.ok),
-    results
-  };
 }
 
 function getSignalState() {
@@ -351,18 +272,17 @@ async function shutdown() {
   shuttingDown = true;
   sourceState.CANSAT.connected = false;
   sourceState.NRC.connected = false;
+  sourceState.MACHX.connected = false;
   cansatReconnectTimer = clearTimer(cansatReconnectTimer);
-  cansatCmdReconnectTimer = clearTimer(cansatCmdReconnectTimer);
   if (watchdogInterval) {
     clearInterval(watchdogInterval);
     watchdogInterval = null;
   }
   await Promise.all([
     closePort(cansatPort),
-    closePort(cansatCmdPort),
     nrcSerial ? nrcSerial.close() : Promise.resolve(),
     machxSerial ? machxSerial.close() : Promise.resolve()
   ]);
 }
 
-module.exports = { initSerial, getSignalState, sendLaunchCommand, shutdown };
+module.exports = { initSerial, getSignalState, shutdown };

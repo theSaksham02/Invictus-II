@@ -213,8 +213,10 @@ CANSAT / MACHX / SUGAR:
 
 NRC:
   (pkt.flags & 0x01) !== 0
-  └─ Bit 0 set by Heltec firmware or USB CMD:LAUNCH bench command
+  └─ Bit 0 set automatically by Heltec firmware after sensor-based launch detection
 ```
+
+Launch is initiated by an external device. Ground-station software only receives telemetry and derives mission phase; it cannot command launch.
 
 **Timing constraint:** Must occur within 120 s of `npm start` in live mode.
 

@@ -32,6 +32,7 @@ const MAIN_DEPLOY_ALTITUDE_M = 500.0;
 
 const LANDED_VARIANCE_M = 1.0;
 const LANDED_WINDOW_SIZE = 10;
+const TIMESTAMP_REORDER_GRACE_MS = 1000;
 
 function makeState(source) {
   const isLegacy = source === 'NRC' || source === 'CANSAT';
@@ -43,7 +44,9 @@ function makeState(source) {
     launch_time: 0,
     apogee_time: 0,
     last_packet_time: 0,
+    last_pkt_id: null,
     descent_confirm_count: 0,
+    ignored_out_of_order: 0,
     alt_history: []
   };
 }
@@ -61,13 +64,27 @@ function processPacket(pkt, emitFn) {
 
   let s = states[pkt.source];
   const packetTs = Math.trunc(pkt.timestamp_ms);
+
+  if (s.last_packet_time && packetTs === s.last_packet_time && pkt.pkt_id === s.last_pkt_id) {
+    s.ignored_out_of_order++;
+    return;
+  }
+
   if (s.last_packet_time && packetTs < s.last_packet_time) {
+    const rollbackMs = s.last_packet_time - packetTs;
+    if (rollbackMs <= TIMESTAMP_REORDER_GRACE_MS) {
+      s.ignored_out_of_order++;
+      console.warn(`[PHASE] Ignoring out-of-order packet for ${pkt.source} (${packetTs} < ${s.last_packet_time}, ${rollbackMs}ms rollback).`);
+      return;
+    }
+
     console.warn(`[PHASE] Rollback detected for ${pkt.source} (${packetTs} < ${s.last_packet_time}). Resetting state.`);
     resetState(pkt.source);
     s = states[pkt.source];
   }
 
   s.last_packet_time = packetTs;
+  s.last_pkt_id = Number.isInteger(pkt.pkt_id) ? pkt.pkt_id : null;
   if (s.baseline_alt === null) s.baseline_alt = pkt.altitude_m;
   if (pkt.altitude_m > s.max_alt) s.max_alt = pkt.altitude_m;
 
@@ -162,7 +179,7 @@ function processPacket(pkt, emitFn) {
     };
     try {
       insertEvent(ev);
-      emitFn('mission_event', ev);
+      if (typeof emitFn === 'function') emitFn('mission_event', ev);
     } catch (error) {
       console.error('[PHASE] event publish failed:', error.message);
     }

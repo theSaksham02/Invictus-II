@@ -150,9 +150,10 @@ npm install
 cp .env.example .env
 # → Set SERIAL_PORT_CANSAT for MachX live tracking. NRC live ingest is off by default.
 
-# 3. Launch 🚀
+# 3. Start the monitoring software
 npm start
 # → http://localhost:3000
+# Launch is controlled by an external device; this software only receives and displays telemetry.
 ```
 
 ### 🧪 Simulation Mode (No Hardware Needed)
@@ -182,7 +183,6 @@ GET  /api/health          →  System status, uptime, signal state
 GET  /api/packets         →  ?source=CANSAT&limit=200&since=0
 GET  /api/stats           →  Max alt, min temp, packet counts per source
 GET  /api/export          →  ?source=CANSAT → downloads flight.csv
-POST /api/launch          →  { source: "CANSAT" } only; NRC launch is BMP280-detected
 POST /api/upload-sd       →  Multipart: SD card CSV file
 GET  /api/sd-uploads/:id/packets → Full packet set for an uploaded SD file
 POST /api/rover/control   →  { left: 100, right: -100 }

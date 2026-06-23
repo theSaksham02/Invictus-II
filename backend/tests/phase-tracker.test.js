@@ -160,6 +160,32 @@ test('phase tracker resets state on timestamp rollback (MCU reboot)', () => {
   assert.equal(states.MACHX.baseline_alt, 20);
 });
 
+test('phase tracker ignores duplicate and near out-of-order packets without changing phase', () => {
+  resetState('MACHX');
+  const events = [];
+  const emit = (event, payload) => events.push({ event, payload });
+
+  [
+    [1, 1000, 0],
+    [2, 2000, 16],
+    [3, 3000, 30],
+    [4, 4000, 45]
+  ].forEach(([pktId, timestampMs, altitudeM]) => {
+    processPacket(packet('MACHX', pktId, timestampMs, altitudeM), emit);
+  });
+
+  assert.equal(states.MACHX.phase, 'ASCENT');
+  const eventCount = events.length;
+
+  processPacket(packet('MACHX', 4, 4000, 45), emit);
+  processPacket(packet('MACHX', 5, 3500, 1000), emit);
+
+  assert.equal(states.MACHX.phase, 'ASCENT');
+  assert.equal(states.MACHX.last_packet_time, 4000);
+  assert.equal(states.MACHX.ignored_out_of_order, 2);
+  assert.equal(events.length, eventCount);
+});
+
 test('MACHX apogee logic ignores single-sample dip', () => {
   resetState('MACHX');
   const events = [];

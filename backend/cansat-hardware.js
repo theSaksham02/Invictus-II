@@ -103,6 +103,82 @@ const CIRCUIT = Object.freeze({
   ]
 });
 
+const NRC_PAYLOAD_CIRCUIT = Object.freeze({
+  name: 'INVICTUS II NRC PAYLOAD',
+  controller: 'Heltec WiFi LoRa 32 V3',
+  docs_source: 'backend/PAYLOAD_CIRCUIT.md',
+  firmware: 'firmware/nrc/src/main.cpp',
+  telemetry: {
+    protocol_prefixes: ['NRC:', 'NRC2:'],
+    interface: 'USB Serial @ 115200 baud when bench live ingest is enabled',
+    live_enabled_default: false,
+    note: 'Competition workflow is SD card recovery; live telemetry is bench/debug only.'
+  },
+  power: {
+    input: 'Battery JST -> Li-ion 2S 3A BMS -> switch terminal block -> LM2596',
+    five_volt: 'LM2596 OUT+ -> 5V_BUS',
+    ground: 'LM2596 OUT- -> GROUND',
+    controller: {
+      vin: 'LoRa pin 2 5V -> 5V_BUS',
+      ground: ['LoRa pin 1 GND -> GROUND', 'LoRa pin 36 GND -> GROUND'],
+      three_v_three: 'LoRa pin 35 3V3 -> 3V3_BUS',
+      unused_three_v_three: 'LoRa pin 34 3V3 -> EMPTY'
+    },
+    note: 'PAYLOAD_CIRCUIT.md labels SD card VCC as 5V_BUS3; backend treats it as the same 5V_BUS rail.'
+  },
+  buses: {
+    i2c: {
+      pins: { sda: 'GPIO1', scl: 'GPIO2' },
+      devices: [
+        { name: 'BMP280', address: '0x76 preferred, 0x77 fallback', connections: { sda: 'pin 4 BMP280 SDA', scl: 'pin 3 BMP280 SCL' } },
+        { name: 'LM75', address: '0x48', connections: { sda: 'pin 3 LM75 SDA', scl: 'pin 4 LM75 SCL' }, telemetry: 'temperature fallback only; no independent telemetry flag/value' }
+      ],
+      power: {
+        bmp280: { vcc: '3V3_BUS', gnd: 'GROUND', csb: '3V3_BUS', sdo: 'GROUND' },
+        lm75: { vcc: '3V3_BUS', gnd: 'GROUND', os: 'EMPTY' }
+      }
+    },
+    gps_uart: {
+      bus: 'UART1',
+      pins: { rx: 'GPIO7', tx: 'GPIO6' },
+      device: 'NEO-6M',
+      connections: {
+        rx: 'GPIO7 receives NEO-6M TX',
+        tx: 'GPIO6 transmits to NEO-6M RX',
+        power: 'NEO-6M VCC -> 5V_BUS, GND -> GROUND'
+      }
+    },
+    sd_spi: {
+      pins: { cs: 'GPIO38', sck: 'GPIO39', mosi: 'GPIO41', miso: 'GPIO42' },
+      device: 'SDCardModule1',
+      connections: {
+        cs: 'LoRa GPIO38 -> SDCardModule1 pin 6',
+        sck: 'LoRa GPIO39 -> SDCardModule1 pin 5',
+        mosi: 'LoRa GPIO41 -> SDCardModule1 pin 4',
+        miso: 'LoRa GPIO42 -> SDCardModule1 pin 3',
+        power: 'SDCardModule1 VCC -> 5V_BUS, GND -> GROUND'
+      }
+    },
+    lora_internal_spi: {
+      device: 'SX1262 internal to Heltec V3',
+      pins: { cs: 'GPIO8', dio1: 'GPIO14', rst: 'GPIO12', busy: 'GPIO13', sck: 'GPIO9', miso: 'GPIO11', mosi: 'GPIO10' },
+      radio: { frequency_mhz: 868.0, bandwidth_khz: 125.0, spreading_factor: 9, coding_rate: '4/7' }
+    }
+  },
+  camera: {
+    device: 'ESP32-CAM1',
+    integration: 'power_only',
+    backend_streaming: false,
+    reason: 'PAYLOAD_CIRCUIT.md lists IO4, IO2, IO14, IO15, IO13, IO12, IO16, IO0, U0R, and U0T as EMPTY.',
+    power: { five_volt: 'ESP32-CAM1 pin 8 5V -> 5V_BUS', grounds: ['pin 7 GND', 'pin 12 GND', 'pin 16 GND'] }
+  },
+  unconnected_controller_pins: [
+    'RX', 'TX', 'RST', 'GPIO0', 'GPIO36', 'GPIO35', 'GPIO34', 'GPIO33',
+    'GPIO47', 'GPIO48', 'GPIO26', 'GPIO21', 'GPIO20', 'GPIO19',
+    'GPIO5', 'GPIO4', 'GPIO3', 'GPIO40', 'GPIO45', 'GPIO46', 'GPIO37'
+  ]
+});
+
 const TELEMETRY_LIMITS = Object.freeze({
   pkt_id: { min: 0, max: 65535 },
   timestamp_ms: { min: 0, max: 0xffffffff },
@@ -153,22 +229,28 @@ function deriveSensorHealth(packet) {
       bmp280: {
         ok: flags.bmp_ok && Number.isFinite(packet.pressure_hpa) && Number.isFinite(packet.altitude_m),
         bus: 'i2c',
-        pins: { sda: 'GPIO1', scl: 'GPIO2' }
+        pins: NRC_PAYLOAD_CIRCUIT.buses.i2c.pins
+      },
+      lm75: {
+        ok: null,
+        bus: 'i2c',
+        pins: NRC_PAYLOAD_CIRCUIT.buses.i2c.pins,
+        note: 'Configured as BMP280 temperature fallback; current NRC telemetry has no dedicated LM75 health flag or value.'
       },
       neo6m: {
         ok: flags.gps_fix && Number.isFinite(packet.lat) && Number.isFinite(packet.lon),
-        bus: 'uart1',
-        pins: { rx: 'GPIO7', tx: 'GPIO6' }
+        bus: 'gps_uart',
+        pins: NRC_PAYLOAD_CIRCUIT.buses.gps_uart.pins
       },
       sd_card: {
         ok: flags.sd_ok,
-        bus: 'spi',
-        pins: { cs: 'GPIO38', sck: 'GPIO39', mosi: 'GPIO41', miso: 'GPIO42' }
+        bus: 'sd_spi',
+        pins: NRC_PAYLOAD_CIRCUIT.buses.sd_spi.pins
       },
       lora: {
         ok: Number.isInteger(packet.rssi_dbm) && packet.rssi_dbm >= TELEMETRY_LIMITS.rssi_dbm.min,
-        bus: 'internal_spi',
-        pins: { cs: 'GPIO8', dio1: 'GPIO14', rst: 'GPIO12', busy: 'GPIO13' }
+        bus: 'lora_internal_spi',
+        pins: NRC_PAYLOAD_CIRCUIT.buses.lora_internal_spi.pins
       }
     };
   }
@@ -295,6 +377,7 @@ function packetWarnings(packet) {
 
 module.exports = {
   CIRCUIT,
+  NRC_PAYLOAD_CIRCUIT,
   CANSAT_SOURCE_ID,
   FLAG_BITS,
   LEGACY_PACKET_LENGTH_BYTES,

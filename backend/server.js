@@ -14,6 +14,8 @@ const rover = require('./rover-proxy');
 const { log } = require('./logger');
 const {
   CIRCUIT,
+  NRC_PAYLOAD_CIRCUIT,
+  TELEMETRY_LIMITS,
   decodeFlags,
   deriveSensorHealth,
   packetWarnings
@@ -53,7 +55,6 @@ const SD_UPLOAD_MAX_ROWS = Math.max(
 );
 const TELEMETRY_SOURCES = new Set(['CANSAT', 'NRC', 'MACHX', 'SUGAR']);
 const EXPORT_SOURCES = new Set(['CANSAT', 'NRC', 'ALL', 'MACHX', 'SUGAR']);
-const LAUNCH_SOURCES = new Set(['CANSAT', 'MACHX']);
 
 const upload = multer({
   dest: 'uploads/',
@@ -200,9 +201,23 @@ function parseOptionalCsvFloat(row, lookup, names) {
   return Number.isFinite(parsed) ? parsed : NaN;
 }
 
+function inTelemetryRange(value, field) {
+  const limit = TELEMETRY_LIMITS[field];
+  if (!limit) return true;
+  return Number.isFinite(value) && value >= limit.min && value <= limit.max;
+}
+
+function optionalInTelemetryRange(value, field) {
+  return value === null || inTelemetryRange(value, field);
+}
+
 function parseSdPacketRow(row, lookup, raw, receivedAt, source) {
   const accelZ = parseOptionalCsvFloat(row, lookup, ['accel_z', 'acceleration_z']);
   const gyroX = parseOptionalCsvFloat(row, lookup, ['gyro_x', 'gyroscope_x']);
+  const rssiRaw = getCsvValue(row, lookup, ['rssi_dbm', 'rssi']);
+  const rssiDbm = rssiRaw === undefined || String(rssiRaw).trim() === ''
+    ? 0
+    : Number.parseInt(rssiRaw, 10);
   const packet = {
     source,
     pkt_id: Number.parseInt(getCsvValue(row, lookup, ['pkt_id', 'packet_id', 'id']), 10),
@@ -219,22 +234,31 @@ function parseSdPacketRow(row, lookup, raw, receivedAt, source) {
     lat: Number.parseFloat(getCsvValue(row, lookup, ['lat', 'latitude'])),
     lon: Number.parseFloat(getCsvValue(row, lookup, ['lon', 'lng', 'longitude'])),
     flags: Number.parseInt(getCsvValue(row, lookup, ['flags', 'flag']), 10),
-    rssi_dbm: 0,
+    rssi_dbm: rssiDbm,
     raw,
     received_at: receivedAt
   };
 
   return (
     Number.isInteger(packet.pkt_id) &&
+    inTelemetryRange(packet.pkt_id, 'pkt_id') &&
     Number.isInteger(packet.timestamp_ms) &&
-    Number.isFinite(packet.altitude_m) &&
-    Number.isFinite(packet.temp_c) &&
-    Number.isFinite(packet.pressure_hpa) &&
-    (source === 'NRC' ? packet.accel_z === null || Number.isFinite(packet.accel_z) : Number.isFinite(packet.accel_z)) &&
-    (source === 'NRC' ? packet.gyro_x === null || Number.isFinite(packet.gyro_x) : Number.isFinite(packet.gyro_x)) &&
-    Number.isFinite(packet.lat) &&
-    Number.isFinite(packet.lon) &&
-    Number.isInteger(packet.flags)
+    inTelemetryRange(packet.timestamp_ms, 'timestamp_ms') &&
+    inTelemetryRange(packet.altitude_m, 'altitude_m') &&
+    inTelemetryRange(packet.temp_c, 'temp_c') &&
+    optionalInTelemetryRange(packet.temp_c_1, 'temp_c_1') &&
+    optionalInTelemetryRange(packet.temp_c_2, 'temp_c_2') &&
+    optionalInTelemetryRange(packet.temp_c_3, 'temp_c_3') &&
+    optionalInTelemetryRange(packet.temp_c_4, 'temp_c_4') &&
+    inTelemetryRange(packet.pressure_hpa, 'pressure_hpa') &&
+    (source === 'NRC' ? optionalInTelemetryRange(packet.accel_z, 'accel_z') : inTelemetryRange(packet.accel_z, 'accel_z')) &&
+    (source === 'NRC' ? optionalInTelemetryRange(packet.gyro_x, 'gyro_x') : inTelemetryRange(packet.gyro_x, 'gyro_x')) &&
+    inTelemetryRange(packet.lat, 'lat') &&
+    inTelemetryRange(packet.lon, 'lon') &&
+    Number.isInteger(packet.rssi_dbm) &&
+    inTelemetryRange(packet.rssi_dbm, 'rssi_dbm') &&
+    Number.isInteger(packet.flags) &&
+    inTelemetryRange(packet.flags, 'flags')
   ) ? packet : null;
 }
 
@@ -341,31 +365,23 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     uptime_s: Math.floor((Date.now() - uptimeStart) / 1000),
-    serial_connected: Boolean(signal.CANSAT.connected || signal.NRC.connected),
+    serial_connected: Boolean(signal.CANSAT.connected || signal.NRC.connected || signal.MACHX.connected),
     db_packet_count: cansatStats.count + nrcStats.count,
     signal
   });
 });
 
-app.post('/api/launch', asyncRoute(async (req, res) => {
-  const source = parseSource(req.body?.source, LAUNCH_SOURCES, 'CANSAT');
-  const command = await serial.sendLaunchCommand(source);
-  const payload = {
-    ok: command.ok,
-    partial: command.partial,
-    source,
-    results: command.results,
-    issued_at: Date.now()
-  };
-
-  emitToAll('launch_command', payload);
-  res.status(command.ok ? 200 : 503).json(payload);
-}));
-
 app.get('/api/cansat/hardware', (req, res) => {
   res.json({
     ok: true,
     circuit: CIRCUIT
+  });
+});
+
+app.get('/api/nrc/hardware', (req, res) => {
+  res.json({
+    ok: true,
+    circuit: NRC_PAYLOAD_CIRCUIT
   });
 });
 
@@ -581,7 +597,12 @@ io.on('connection', (socket) => {
 
 app.use((error, req, res, next) => {
   if (error.code === 'LIMIT_FILE_SIZE') {
-    res.status(413).json({ ok: false, error: 'Upload exceeds allowed file size' });
+    res.status(413).json({
+      ok: false,
+      error: 'Upload exceeds allowed file size',
+      code: 'LIMIT_FILE_SIZE',
+      request_id: req.requestId
+    });
     return;
   }
 
@@ -591,7 +612,11 @@ app.use((error, req, res, next) => {
       ? error.status
       : 500;
 
-  const payload = { ok: false, error: error.message || 'Internal server error' };
+  const payload = {
+    ok: false,
+    error: error.message || 'Internal server error',
+    request_id: req.requestId
+  };
   if (error.code) payload.code = error.code;
   if (error.details) payload.details = error.details;
 

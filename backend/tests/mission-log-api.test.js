@@ -44,8 +44,7 @@ async function withMockedServer(fn) {
           mode: 'hardware',
           CANSAT: { connected: false },
           NRC: { connected: false }
-        }),
-        sendLaunchCommand: async () => ({ ok: false, partial: false, results: [] })
+        })
       };
     }
     if (request === './rover-proxy') {

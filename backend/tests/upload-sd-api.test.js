@@ -25,8 +25,10 @@ function makeDbMock(captured) {
   };
 }
 
-async function withMockedServer(fn) {
+async function withMockedServer(fn, env = {}) {
+  const originalEnv = { ...process.env };
   process.env.PORT = '0';
+  Object.assign(process.env, env);
   const captured = { packets: [], uploads: [] };
   const originalLoad = Module._load;
   Module._load = function patchedLoad(request, parent, isMain) {
@@ -39,8 +41,7 @@ async function withMockedServer(fn) {
           mode: 'hardware',
           CANSAT: { connected: false },
           NRC: { connected: false }
-        }),
-        sendLaunchCommand: async () => ({ ok: false, partial: false, results: [] })
+        })
       };
     }
     if (request === './rover-proxy') {
@@ -69,6 +70,7 @@ async function withMockedServer(fn) {
     Module._load = originalLoad;
     await new Promise((resolve) => server.close(resolve));
     delete require.cache[serverPath];
+    process.env = originalEnv;
   }
 }
 
@@ -147,4 +149,73 @@ test('POST /api/upload-sd keeps CANSAT upload behavior compatible', async () => 
     assert.equal(captured.uploads[0].source, 'CANSAT');
     assert.equal(captured.packets.every((packet) => packet.upload_id === 1), true);
   });
+});
+
+test('POST /api/upload-sd skips out-of-range telemetry rows instead of importing corrupt data', async () => {
+  await withMockedServer(async (baseUrl, captured) => {
+    const csv = [
+      'pkt_id,timestamp_ms,altitude_m,temp_c,pressure_hpa,accel_z,gyro_x,lat,lon,rssi_dbm,flags',
+      '1,1000,0.00,22.10,1013.20,1.00,0.10,0,0,-70,40',
+      '2,2000,999999.00,22.00,1008.20,1.20,0.20,0,0,-69,41',
+      '3,3000,10.00,22.00,9999.20,1.20,0.20,0,0,-69,41',
+      '4,4000,11.00,22.00,1008.20,99.20,0.20,0,0,-69,41'
+    ].join('\n');
+
+    const fd = new FormData();
+    fd.append('source', 'CANSAT');
+    fd.append('file', new Blob([csv], { type: 'text/csv' }), 'cansat.csv');
+
+    const res = await fetch(`${baseUrl}/api/upload-sd`, {
+      method: 'POST',
+      body: fd
+    });
+    const body = await res.json();
+
+    assert.equal(res.status, 201);
+    assert.equal(body.inserted, 1);
+    assert.equal(body.skipped, 3);
+    assert.deepEqual(captured.packets.map((packet) => packet.pkt_id), [1]);
+  });
+});
+
+test('POST /api/upload-sd returns structured request IDs for invalid uploads', async () => {
+  await withMockedServer(async (baseUrl) => {
+    const fd = new FormData();
+    fd.append('source', 'CANSAT');
+    fd.append('file', new Blob(['pkt_id,timestamp_ms\n'], { type: 'text/csv' }), 'bad.csv');
+
+    const res = await fetch(`${baseUrl}/api/upload-sd`, {
+      method: 'POST',
+      headers: { 'x-request-id': 'audit-upload-1' },
+      body: fd
+    });
+    const body = await res.json();
+
+    assert.equal(res.status, 400);
+    assert.equal(body.ok, false);
+    assert.equal(body.request_id, 'audit-upload-1');
+  });
+});
+
+test('POST /api/upload-sd enforces configured row count cap', async () => {
+  await withMockedServer(async (baseUrl) => {
+    const rows = ['pkt_id,timestamp_ms,altitude_m,temp_c,pressure_hpa,accel_z,gyro_x,lat,lon,flags'];
+    for (let i = 1; i <= 101; i++) {
+      rows.push(`${i},${i * 1000},0,20,1013,1,0,0,0,40`);
+    }
+
+    const fd = new FormData();
+    fd.append('source', 'CANSAT');
+    fd.append('file', new Blob([rows.join('\n')], { type: 'text/csv' }), 'too-many.csv');
+
+    const res = await fetch(`${baseUrl}/api/upload-sd`, {
+      method: 'POST',
+      body: fd
+    });
+    const body = await res.json();
+
+    assert.equal(res.status, 413);
+    assert.equal(body.ok, false);
+    assert.equal(body.details.max_rows, 100);
+  }, { SD_UPLOAD_MAX_ROWS: '100' });
 });
