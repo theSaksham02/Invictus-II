@@ -22,6 +22,25 @@ const CIRCUIT = Object.freeze({
   legacy_packet_bytes: LEGACY_PACKET_LENGTH_BYTES,
   packet_sync: `0x${PACKET_SYNC.toString(16).toUpperCase()}`,
   packet_version: PACKET_VERSION,
+  docs_source: 'backend/CANSAT_CIRCUIT.md',
+  firmware: 'firmware/cansat/src/main.cpp',
+
+  components: [
+    { name: 'LM75', quantity: 4, role: 'distributed temperature sensors', addresses: ['0x48', '0x49', '0x4A', '0x4C'] },
+    { name: 'BMP388', quantity: 1, role: 'barometric altitude, pressure, and temperature' },
+    { name: 'RFM69HCW', quantity: 1, role: '433 MHz flight telemetry radio' },
+    { name: 'NEO-6M', quantity: 1, role: 'GPS position source' },
+    { name: 'SDCardModule', quantity: 1, role: 'onboard telemetry recovery log' },
+    { name: 'STM32 Bluepill', quantity: 1, role: 'flight computer' },
+    { name: 'MPU6500', quantity: 1, role: 'acceleration and gyro telemetry' },
+    { name: 'XL6009', quantity: 1, role: 'SYS_POWER to 5V_BUS boost converter' },
+    { name: 'AMS1117', quantity: 1, role: '5V_BUS to 3V3_BUS regulator' },
+    { name: 'TP4056', quantity: 1, role: 'USB-C/solar LiPo charger and battery interface' },
+    { name: 'solar panel module', quantity: 4, role: 'charge input to TP4056 VIN+/VIN-' },
+    { name: 'ESP32-CAM', quantity: 1, role: 'independent camera, UART wired for future trigger/status' },
+    { name: 'Buzzer', quantity: 1, role: 'audible boot/status indicator' },
+    { name: 'red LED', quantity: 1, role: 'visual boot/status indicator' }
+  ],
 
   // Ground Station Receiver — ESP32 WROOM-32 + RFM69HCW 433 MHz
   // The ESP32 bridges the RFM69 radio to the laptop via USB Serial (115200 baud).
@@ -33,6 +52,7 @@ const CIRCUIT = Object.freeze({
   ground_station_receiver: {
     mcu: 'ESP32 WROOM-32',
     radio: 'RFM69HCW 433 MHz',
+    frequency_mhz: 433.0,
     interface: 'USB Serial (CP2102/CH340) @ 115200 baud',
     firmware: 'firmware/ground-station/src/main.cpp',
     pins: {
@@ -54,35 +74,97 @@ const CIRCUIT = Object.freeze({
   buses: {
     sd_spi: {
       pins: { cs: 'PA4', clk: 'PA5', miso: 'PA6', mosi: 'PA7' },
-      devices: ['SDCardSlot1']
+      devices: ['SDCardSlot1'],
+      connections: {
+        cs: 'STM32 A4 -> SDCardSlot CS',
+        clk: 'STM32 A5 -> SDCardSlot CLK',
+        miso: 'STM32 A6 <- SDCardSlot MISO',
+        mosi: 'STM32 A7 -> SDCardSlot MOSI',
+        power: 'SDCardSlot 3V3 -> 3V3_BUS, GND -> GROUND'
+      }
     },
     avionics_spi: {
       pins: { sck: 'PB13', miso: 'PB14', mosi: 'PB15' },
       devices: [
-        { name: 'RFM69HCW1', cs: 'PA15', irq: 'PB5' },
-        { name: 'MPU-6500', cs: 'PB12', irq: 'PA8' }
+        {
+          name: 'RFM69HCW1',
+          cs: 'PA15',
+          irq: 'PB5',
+          reset: 'unconnected',
+          frequency_mhz: 433.0,
+          antenna: 'ANT -> SMA female connector'
+        },
+        {
+          name: 'MPU-6500',
+          cs: 'PB12',
+          irq: 'PA8',
+          decoupling: '4.7uF and 0.1uF capacitors in parallel from VCC to GND'
+        }
       ]
     },
     i2c: {
       pins: { scl: 'PB6', sda: 'PB7' },
-      devices: ['BMP388', 'LM75-U1', 'LM75-U2', 'LM75-U3', 'LM75-U4'],
-      note: 'BMP388 is wired in I2C mode by tying CS high and SDO low; LM75 address pins are not documented in CANSAT_CIRCUIT.md.'
+      devices: [
+        { name: 'BMP388', address: '0x76', mode: 'I2C', cs: '3V3_BUS', sdo: 'GROUND', int: 'unconnected' },
+        { name: 'LM75-U1', address: '0x48', os: 'unconnected' },
+        { name: 'LM75-U2', address: '0x49', os: 'unconnected' },
+        { name: 'LM75-U3', address: '0x4A', os: 'unconnected' },
+        { name: 'LM75-U4', address: '0x4C', os: 'unconnected' }
+      ],
+      note: 'All LM75 modules share STM32 B6/B7 and must be address-strapped to unique addresses.'
     },
     gps_uart: {
       pins: { stm32_rx: 'PB11', stm32_tx: 'PB10' },
-      device: 'NEO-6M'
+      device: 'NEO-6M',
+      connections: {
+        stm32_rx: 'STM32 B11 receives NEO-6M TX',
+        stm32_tx: 'STM32 B10 transmits to NEO-6M RX',
+        power: 'NEO-6M VCC -> 5V_BUS, GND -> GROUND'
+      }
     },
     camera_uart: {
       pins: { stm32_rx: 'PA10', stm32_tx: 'PA9' },
-      device: 'ESP32-CAM1'
+      device: 'ESP32-CAM1',
+      integration: 'power_plus_uart_reserved',
+      connections: {
+        stm32_rx: 'STM32 A10 receives ESP32-CAM U0T',
+        stm32_tx: 'STM32 A9 transmits to ESP32-CAM U0R',
+        power: 'ESP32-CAM 5V -> 5V_BUS, all GND pins -> GROUND'
+      }
+    }
+  },
+  indicators: {
+    led: {
+      color: 'red',
+      stm32_pin: 'PA0',
+      wiring: 'PA0 -> LED anode, LED cathode -> 150 ohm resistor -> GROUND'
+    },
+    buzzer: {
+      stm32_pin: 'PA1',
+      wiring: 'PA1 -> buzzer positive, buzzer negative -> GROUND'
     }
   },
   power: {
-    system: 'TP4056 OUT+ -> SYS_POWER',
-    five_volt: 'SYS_POWER -> XL6009 -> 5V_BUS',
-    three_v_three: '5V_BUS -> AMS1117 -> 3V3_BUS',
-    protection: 'D1 between 3V3_BUS and 5V_BUS, pointed toward 5V_BUS'
+    charge_input: {
+      usb_c: 'TP4056 VIN+ / VIN-',
+      solar: '4 solar panel modules wired to TP4056 VIN+ / VIN- respectively'
+    },
+    battery: 'LiPo JST -> TP4056 BAT+ / BAT-',
+    system: 'TP4056 OUT+ -> switch -> SYS_POWER, TP4056 OUT- -> GROUND',
+    five_volt: 'SYS_POWER -> XL6009 IN+, XL6009 OUT+ -> 5V_BUS, XL6009 IN-/OUT- -> GROUND',
+    three_v_three: '5V_BUS -> AMS1117 VIN, AMS1117 VOUT -> 3V3_BUS, AMS1117 GND -> GROUND',
+    protection: '1N4007 diode between 3V3_BUS and 5V_BUS, cathode toward 5V_BUS',
+    decoupling: [
+      '100nF and 1000uF capacitors in parallel from 5V_BUS to GROUND near XL6009 output',
+      '4.7uF and 0.1uF capacitors in parallel from MPU-6500 VCC to GROUND'
+    ],
+    rails: {
+      SYS_POWER: ['XL6009 IN+'],
+      '5V_BUS': ['AMS1117 VIN', 'NEO-6M VCC', 'ESP32-CAM 5V'],
+      '3V3_BUS': ['STM32 VB/3.3V pins', 'BMP388 VIN/CS', 'LM75 Vcc', 'MPU-6500 VCC', 'RFM69HCW 3.3V', 'SDCardSlot 3V3']
+    }
   },
+  unconnected_controller_pins: ['PC13', 'PC14', 'PC15', 'PA2', 'PA3', 'PB1', 'RESET', '5V', 'PB9', 'PB8', 'PB4', 'PB3', 'PA12', 'PA11'],
   packet_fields: [
     { offset: 0, bytes: 2, type: 'uint16le', name: 'sync' },
     { offset: 2, bytes: 1, type: 'uint8', name: 'version' },
@@ -275,7 +357,7 @@ function deriveSensorHealth(packet) {
         bus: 'avionics_spi',
         pins: CIRCUIT.buses.avionics_spi.pins
       },
-      neo8m: {
+      gps: {
         ok: flags.gps_fix && Number.isFinite(packet.lat) && Number.isFinite(packet.lon),
         bus: 'gps_uart',
         pins: CIRCUIT.buses.gps_uart.pins
@@ -285,7 +367,7 @@ function deriveSensorHealth(packet) {
         bus: 'sd_spi',
         pins: CIRCUIT.buses.sd_spi.pins
       },
-      rfm95w: {
+      radio: {
         ok: Number.isInteger(packet.rssi_dbm) && packet.rssi_dbm >= TELEMETRY_LIMITS.rssi_dbm.min,
         bus: 'avionics_spi',
         pins: CIRCUIT.buses.avionics_spi.pins
@@ -342,14 +424,14 @@ function packetWarnings(packet) {
   if (packet?.source === 'MACHX' || packet?.source === 'SUGAR') {
     if (!flags.bmp_ok) warnings.push('BMP388 flag is not set; altitude, pressure, and temperature may be fallback values.');
     if (!flags.mpu_ok) warnings.push('MPU-6500 flag is not set; acceleration and gyro data may be fallback values.');
-    if (!flags.gps_fix) warnings.push('NEO-8M GPS fix flag is not set; latitude and longitude may be stale or zero.');
+    if (!flags.gps_fix) warnings.push('GPS fix flag is not set; latitude and longitude may be stale or zero.');
     if (!flags.sd_ok) warnings.push('SD card flag is not set; onboard recovery log may be unavailable.');
 
     if (Number.isFinite(packet?.pressure_hpa) && packet.pressure_hpa < 300) {
       warnings.push('Pressure is unusually low for the expected flight envelope.');
     }
     if (Number.isInteger(packet?.rssi_dbm) && packet.rssi_dbm < -110) {
-      warnings.push('RFM95W LoRa RSSI is very weak; expect packet loss.');
+      warnings.push('Radio RSSI is very weak; expect packet loss.');
     }
     if (!Number.isFinite(packet.temp_c_1) || !Number.isFinite(packet.temp_c_2) || !Number.isFinite(packet.temp_c_3) || !Number.isFinite(packet.temp_c_4)) {
       warnings.push('One or more LM75 temperature sensors failed to report.');

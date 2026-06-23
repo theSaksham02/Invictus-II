@@ -13,8 +13,8 @@ const {
   xorChecksum
 } = require('./cansat-hardware');
 
-// CANSAT: 37 bytes struct
-// uint16 pkt_id, uint32 timestamp_ms, float alt, temp, pres, accelz, gyrox, lat, lon, int8 rssi, uint8 flags, uint8 checksum
+// CANSAT primary frame: 43-byte v2 binary packet with 0xA55A sync and CRC16-CCITT.
+// A 37-byte legacy XOR packet is still accepted for historical bench captures.
 
 function isFiniteNumber(value) {
   return Number.isFinite(value);

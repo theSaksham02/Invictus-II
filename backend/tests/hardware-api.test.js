@@ -1,5 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const Module = require('node:module');
 const { deriveSensorHealth } = require('../cansat-hardware');
 
@@ -90,7 +92,7 @@ test('GET /api/nrc/hardware exposes payload circuit pins from PAYLOAD_CIRCUIT.md
   });
 });
 
-test('GET /api/cansat/hardware preserves legacy CanSat circuit metadata', async () => {
+test('GET /api/cansat/hardware exposes flight CanSat circuit truth', async () => {
   await withMockedServer(async (baseUrl) => {
     const res = await fetch(`${baseUrl}/api/cansat/hardware`);
     const body = await res.json();
@@ -99,7 +101,35 @@ test('GET /api/cansat/hardware preserves legacy CanSat circuit metadata', async 
     assert.equal(body.ok, true);
     assert.equal(body.circuit.controller, 'STM32 Bluepill');
     assert.deepEqual(body.circuit.buses.i2c.pins, { scl: 'PB6', sda: 'PB7' });
+    assert.equal(body.circuit.telemetry_packet_bytes, 43);
+    assert.equal(body.circuit.ground_station_receiver.radio, 'RFM69HCW 433 MHz');
+    assert.equal(body.circuit.ground_station_receiver.frequency_mhz, 433.0);
+    assert.deepEqual(body.circuit.buses.sd_spi.pins, { cs: 'PA4', clk: 'PA5', miso: 'PA6', mosi: 'PA7' });
+    assert.deepEqual(body.circuit.buses.avionics_spi.pins, { sck: 'PB13', miso: 'PB14', mosi: 'PB15' });
+    assert.equal(body.circuit.buses.avionics_spi.devices[0].name, 'RFM69HCW1');
+    assert.equal(body.circuit.buses.avionics_spi.devices[0].frequency_mhz, 433.0);
+    assert.deepEqual(body.circuit.buses.camera_uart.pins, { stm32_rx: 'PA10', stm32_tx: 'PA9' });
+    assert.equal(body.circuit.indicators.led.stm32_pin, 'PA0');
+    assert.equal(body.circuit.indicators.buzzer.stm32_pin, 'PA1');
+    assert.equal(body.circuit.power.rails['5V_BUS'].includes('ESP32-CAM 5V'), true);
+    assert.equal(body.circuit.power.rails['3V3_BUS'].includes('RFM69HCW 3.3V'), true);
+    assert.deepEqual(
+      body.circuit.buses.i2c.devices.filter((device) => device.name.startsWith('LM75')).map((device) => device.address),
+      ['0x48', '0x49', '0x4A', '0x4C']
+    );
   });
+});
+
+test('CanSat firmware uses RFM69 433 MHz and flight indicator pins', () => {
+  const firmware = fs.readFileSync(path.resolve(__dirname, '../../firmware/cansat/src/main.cpp'), 'utf8');
+  assert.match(firmware, /#include <RH_RF69\.h>/);
+  assert.match(firmware, /#define RFM69_CS\s+PA15/);
+  assert.match(firmware, /#define RFM69_INT\s+PB5/);
+  assert.match(firmware, /#define RFM69_FREQ\s+433\.0/);
+  assert.match(firmware, /#define LED_PIN\s+PA0/);
+  assert.match(firmware, /#define BUZZER_PIN\s+PA1/);
+  assert.match(firmware, /TelemetryPacket packet/);
+  assert.doesNotMatch(firmware, /RH_RF95|RFM95_FREQ|868\.0/);
 });
 
 test('NRC sensor health uses payload circuit pin mappings', () => {

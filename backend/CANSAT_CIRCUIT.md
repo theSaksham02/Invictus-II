@@ -1,163 +1,149 @@
-FORMAT FOR THESE CONNECTIONS:
-------------------------------------------------------------------------------
-for example:
-7 STM32 A10 to 15 ESP32-CAM1 U0T
-this refers to the 7th pin of the STM32 pcm board which is labeled A10. this is connected to the 15h pin of the ESP32-CAM1 pcb board which is labeled U0T
+# INVICTUS II CanSat Circuit
 
-4 STM32 B15 connects/intersects w (4 MPU-6500 SDA + 3 RFM69HCW1 MOSI)
-same instructions above, except here is more than two pins being connected here using either the same or different wires, they're interconnected.
+This file is the source-of-truth wiring map for the STM32 Bluepill CanSat payload.
 
-if there is no pcb board name explicitly mentioned, for example:
-22 STM32 C13 to *EMPTY*
-39 STM32 GND to *GROUND*
-4 BMP388 SCK to *B6_STM*
-EMPTY refers to no connections to the pin. GROUND is grounded.
-------------------------------------------------------------------------------
+## Components
 
+| Qty | Component | Purpose |
+|---:|---|---|
+| 4 | LM75 | Distributed temperature sensing |
+| 1 | BMP388 | Barometric altitude, pressure, and temperature |
+| 1 | RFM69HCW | 433 MHz telemetry radio |
+| 1 | NEO-6M | GPS position |
+| 1 | SDCardModule | Onboard recovery log |
+| 1 | STM32 Bluepill | Flight computer |
+| 1 | MPU6500 | IMU acceleration and gyro |
+| 1 | XL6009 | Boost converter to 5V_BUS |
+| 1 | AMS1117 | 3.3V regulator |
+| 1 | TP4056 | USB-C/solar LiPo charge and battery interface |
+| 4 | Solar panel modules | Charge input |
+| 1 | 100nF capacitor | 5V rail decoupling |
+| 1 | 1000uF capacitor | 5V rail bulk capacitance |
+| 1 | 150 ohm resistor | Red LED current limiting |
+| 1 | 1N4007 diode | Rail protection between 3V3_BUS and 5V_BUS |
+| 1 | ESP32-CAM | Independent camera, UART wired for future trigger/status |
+| 1 | Buzzer | Audible status |
+| 1 | Red LED | Visual status |
 
-STM32 CONNECTIONS
+## Power
 
-22 STM32 C13 to EMPTY
-23 STM32 C14 to EMPTY
-24 STM32 C15 to EMPTY
-25 STM32 A0 to EMPTY
-26 STM32 A1 to EMPTY
-27 STM32 A2 to EMPTY
-28 STM32 A3 to EMPTY
-29 STM32 A4 to 5 SDCardSlot1 CS
-30 STM32 A5 to 3 SDCardSlot1 CLK
-31 STM32 A6 to 2 SDCardSlot1 MISO
-32 STM32 A7 to 4 SDCardSlot1 MOSI
-33 STM32 B0 to GROUND
-34 STM32 B1 to EMPTY
-35 STM32 B10 to 3 Neo-6m1 RX
-36 STM32 B11 to 2 Neo-6m1 TX
-37 STM32 R to EMPTY
-39 STM32 GND to GROUND
-40 STM32 GND to GROUND
+### TP4056
 
+- `VIN+` / `VIN-`: USB-C charging input and solar panel `+` / `-` input.
+- `BAT+` / `BAT-`: LiPo battery through JST connector.
+- `OUT-`: `GROUND`.
+- `OUT+`: switch input; switch output is `SYS_POWER`.
 
-20 STM32 3.3 connects/intersects w (21 STM32 VB + 38 STM32 3.3V + 3V3_BUS)
-19 STM32 GND to GROUND
-18 STM32 5V to EMPTY
-17 STM32 B9 to EMPTY
-16 STM32 B8 to EMPTY
-15 STM32 B7 to B7_STM
-14 STM32 B6 to B6_STM
-13 STM32 B5 to 14 RFM69HCW1 DIO0
-12 STM32 B4 to EMPTY
-11 STM32 B3 to EMPTY
-10 STM32 A15 to 5 RFM69HCW1 NSS
-9 STM32 A12 to EMPTY
-8 STM32 A11 to EMPTY
-7 STM32 A10 to 15 ESP32-CAM1 U0T
-6 STM32 A9 to 14 ESP32-CAM1 U0R
-5 STM32 A8 to 8 MPU-6500 INT
-4 STM32 B15 connects/intersects w (4 MPU-6500 SDA + 3 RFM69HCW1 MOSI)
-3 STM32 B14 connects/intersects w (7 MPU-6500 ADO + 2 RFM69HCW1 MISO)
-2 STM32 B13 connects/intersects w (3 MPU-6500 SCL + 4 RFM69HCW1 SCK)
-1 STM32 B12 to 9 MPU6500 NCS
+### XL6009
 
-SDCardSlot1 CONNECTIONS
+- `IN+`: `SYS_POWER`.
+- `IN-`: `GROUND`.
+- `OUT-`: `GROUND`.
+- `OUT+`: `5V_BUS`.
+- A `100nF` capacitor and a `1000uF` capacitor are connected in parallel from `5V_BUS` to `GROUND`.
 
-1 SDCardSlot1 GND to GROUND
-6 SDCardSlot1 3V3 to 3V3_BUS
-Neo-6m1 CONNECTIONS
+### AMS1117
 
-1 Neo-6m1 GND to GROUND
-4 Neo-6m1 VCC to 5V_BUS
+- `VIN`: `5V_BUS`.
+- `VOUT`: `3V3_BUS`.
+- `GND`: `GROUND`.
+- `1N4007`: between `3V3_BUS` and `5V_BUS`, with the cathode pointed toward `5V_BUS`.
 
-BMP388 CONNECTIONS
+## STM32 Bluepill Pin Ownership
 
-1 BMP388 VIN connects/intersects w (7 BMP388 CS + 3V3_BUS)
-2 BMP388 3Vo to EMPTY
-3 BMP388 GND interconnects/intersects w (5 BMP388 SDO + GROUND)
-4 BMP388 SCK to B6_STM
-6 BMP388 SDI to B7_STM
-8 BMP388 INT to EMPTY
+| STM32 pin | Connection |
+|---|---|
+| `VB` | `3V3_BUS` |
+| `3.3V`, `3.3` | `3V3_BUS` |
+| all `GND` pins | `GROUND` |
+| `A0` | Red LED anode; LED cathode -> `150 ohm` resistor -> `GROUND` |
+| `A1` | Buzzer positive; buzzer negative -> `GROUND` |
+| `A4` | SDCardModule `CS` |
+| `A5` | SDCardModule `CLK` |
+| `A6` | SDCardModule `MISO` |
+| `A7` | SDCardModule `MOSI` |
+| `B5` | RFM69HCW `DIO0` |
+| `B6` | I2C `SCL`: BMP388 `SCK`, all LM75 `SCL` |
+| `B7` | I2C `SDA`: BMP388 `SDI`, all LM75 `SDA` |
+| `B10` | NEO-6M `RX` |
+| `B11` | NEO-6M `TX` |
+| `A15` | RFM69HCW `NSS` |
+| `A10` | ESP32-CAM `U0T` |
+| `A9` | ESP32-CAM `U0R` |
+| `A8` | MPU-6500 `INT` |
+| `B15` | SPI2 `MOSI`: MPU-6500 `SDA`, RFM69HCW `MOSI` |
+| `B14` | SPI2 `MISO`: MPU-6500 `ADO`, RFM69HCW `MISO` |
+| `B13` | SPI2 `SCK`: MPU-6500 `SCL`, RFM69HCW `SCK` |
+| `B12` | MPU-6500 `NCS` |
+| `C13`, `C14`, `C15`, `A2`, `A3`, `B1`, `R`, `5V`, `B9`, `B8`, `B4`, `B3`, `A12`, `A11` | Unconnected |
 
-ESP32-CAM1 CONNECTIONS
+## Sensors And Peripherals
 
-1 ESP32-CAM1 IO4 to EMPTY
-2 ESP32-CAM1 IO2 to EMPTY
-3 ESP32-CAM1 IO14 to EMPTY
-4 ESP32-CAM1 IO15 to EMPTY
-5 ESP32-CAM1 IO13 to EMPTY
-6 ESP32-CAM1 IO12 to EMPTY
-7 ESP32-CAM1 GND connects/intersects w (16 ESP32-CAM1 GND + 12 ESP32-CAM1 GND + GROUND)
-8 ESP32-CAM1 5V to 5V_BUS
+### LM75 x4
 
-RFM69HCW1 CONNECTIONS
+- All `Vcc`: `3V3_BUS`.
+- All `GND`: `GROUND`.
+- All `SCL`: STM32 `B6`.
+- All `SDA`: STM32 `B7`.
+- All `OS`: unconnected.
+- Required I2C addresses: `0x48`, `0x49`, `0x4A`, `0x4C`.
 
-1 RFM69HCW1 GND connects/intersects w (8 RFM69HCW1 GND + 10 RFM69HCW1 GND + GROUND)
-6 RFM69HCW1 RESET to EMPTY
-7 RFM69HCW1 DIO5 to EMPTY
-9 RFM69HCW1 ANT to EMPTY
-11 RFM69HCW1 DIO3 to EMPTY
-12 RFM69HCW1 DIO4 to EMPTY
-13 RFM69HCW1 3.3V to 3V3_BUS
-15 RFM69HCW1 DIO1 to EMPTY
-16 RFM69HCW1 DIO2 to EMPTY
+### MPU-6500
 
-MPU-6500 CONNECTIONS
+- `VCC`: `3V3_BUS`.
+- `GND`: `GROUND`.
+- `SCL`: STM32 `B13`.
+- `SDA`: STM32 `B15`.
+- `ADO`: STM32 `B14`.
+- `INT`: STM32 `A8`.
+- `NCS`: STM32 `B12`.
+- `EDA`, `ECL`, `FSYNC`: unconnected.
+- Add `4.7uF` and `0.1uF` capacitors in parallel from `VCC` to `GROUND`.
 
-1 MPU-6500 VCC to 3V3_BUS
-2 MPU-6500 GND to GROUND
-5 MPU-6500 EDA to EMPTY
-6 MPU-6500 ECL to EMPTY
-10 MPU-6500 FSYNC to EMPTY
+### SDCardModule
 
-XI6009 CONNECTIONS
+- `GND`: `GROUND`.
+- `MISO`: STM32 `A6`.
+- `CLK`: STM32 `A5`.
+- `MOSI`: STM32 `A7`.
+- `CS`: STM32 `A4`.
+- `3V3`: `3V3_BUS`.
 
-1 XI6009 IN+ to SYS_POWER
-2 XI600 OUT+ connects/intersects w (5V_BUS + 3 XI600 OUT- [capacitor C3 of 0.1 uF in the middle of OUT+ and OUT-])
-3 XI600 OUT- connects/intersects w (4 XI600 IN- + GROUND)
+### BMP388
 
-AMS1117 CONNECTIONS
+- `VIN`: `3V3_BUS`.
+- `3Vo`: unconnected.
+- `GND`: `GROUND`.
+- `SCK`: STM32 `B6`.
+- `SDO`: `GROUND` for I2C address `0x76`.
+- `SDI`: STM32 `B7`.
+- `CS`: `3V3_BUS`.
+- `INT`: unconnected.
 
-1 AMS1117 GND to GROUND
-2 AMS1117 VOUT to 3V3_BUS
-3 AMSS117 VIN to 5V_BUS
+### NEO-6M
 
-[DIODE D1 BETWEEN 3V3_BUS and 5V_BUS WIRES POINTED TOWARDS THE 5V_BUS WIRE]
+- `VCC`: `5V_BUS`.
+- `RX`: STM32 `B10`.
+- `TX`: STM32 `B11`.
+- `GND`: `GROUND`.
 
-TP4056 CONNECTIONS
+### RFM69HCW1
 
-1 TP4056 VIN+ to EMPTY
-2 TP4056 VIN- to EMPTY
-3 TP4056 OUT+ to SYS_POWER
-4 TP4056 BAT+ to EMPTY
-5 TP4056 BAT- to EMPTY
-6 TP4056 OUT- to GROUND
+- `3.3V`: `3V3_BUS`.
+- All `GND`: `GROUND`.
+- `MISO`: STM32 `B14`.
+- `MOSI`: STM32 `B15`.
+- `SCK`: STM32 `B13`.
+- `NSS`: STM32 `A15`.
+- `DIO0`: STM32 `B5`.
+- `RESET`, `DIO1`, `DIO2`, `DIO3`, `DIO4`, `DIO5`: unconnected.
+- `ANT`: SMA female connector.
+- Frequency: `433.0 MHz`.
 
-LM75 U1 CONNECTIONS
-6 TP4056 OUT- to GROUND
-1 LM75 VCC to 3V3_BUS
-2 LM75 GND to GROUND
-3 LM75 SDA to B7_STM
-4 LM75 SCL to B6_STM
-5 LM75 CS to EMPTY
+### ESP32-CAM
 
-LM75 U2 CONNECTIONS
-6 TP4056 OUT- to GROUND
-1 LM75 VCC to 3V3_BUS
-2 LM75 GND to GROUND
-3 LM75 SDA to B7_STM
-4 LM75 SCL to B6_STM
-5 LM75 CS to EMPTY
-
-LM75 U3 CONNECTIONS
-6 TP4056 OUT- to GROUND
-1 LM75 VCC to 3V3_BUS
-2 LM75 GND to GROUND
-3 LM75 SDA to B7_STM
-4 LM75 SCL to B6_STM
-5 LM75 CS to EMPTY
-
-LM75 U4 CONNECTIONS
-6 TP4056 OUT- to GROUND
-1 LM75 VCC to 3V3_BUS
-2 LM75 GND to GROUND
-3 LM75 SDA to B7_STM
-4 LM75 SCL to B6_STM
-5 LM75 CS to EMPTY
+- All three `GND` pins: `GROUND`.
+- `U0T`: STM32 `A10`.
+- `U0R`: STM32 `A9`.
+- `5V`: `5V_BUS`.
+- `VCC`, `IO0`, `IO16`, `3V3`, `IO4`, `IO2`, `IO14`, `IO15`, `IO13`, `IO12`: unconnected.
