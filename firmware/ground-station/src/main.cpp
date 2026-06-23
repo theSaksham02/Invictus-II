@@ -1,26 +1,36 @@
 /*
- * INVICTUS II - MACH-X / SUGAR Ground Station Firmware
- * Target: ESP32 (WROOM-32)
- * Radio: RFM95W @ 868.0 MHz (LoRa)
+ * INVICTUS II - CanSat Ground Station Receiver
+ * Target: ESP32 WROOM-32
+ * Radio: RFM69HCW @ 433.0 MHz
  *
  * Role:
- *   - Listens for MACHX2 ASCII telemetry packets over RFM95W
- *   - Forwards the raw string directly over USB Serial to the laptop
+ *   - Receives the 43-byte CANSAT v2 binary telemetry frame over RFM69HCW
+ *   - Validates sync/version/source/payload length and CRC16-CCITT
+ *   - Stamps ground-side RSSI into byte 39
+ *   - Recomputes CRC and forwards the raw frame over USB Serial
  */
 
 #include <Arduino.h>
 #include <SPI.h>
-#include <RH_RF95.h>
+#include <RH_RF69.h>
 
 // ─── Pin Definitions (ESP32 WROOM) ───────────────────────────────────────────
-#define RFM95_CS      5
-#define RFM95_IRQ     4
-#define RFM95_RST    14
-#define RFM95_FREQ  868.0
+#define RFM69_CS      5
+#define RFM69_IRQ     4
+#define RFM69_RST    14
+#define RFM69_FREQ  433.0
 
 #define GCS_SERIAL_BAUD 115200
 
-RH_RF95 rf95(RFM95_CS, RFM95_IRQ);
+#define TELEMETRY_SYNC 0xA55A
+#define TELEMETRY_VERSION 2
+#define TELEMETRY_SOURCE_CANSAT 1
+#define TELEMETRY_PAYLOAD_LEN 36
+#define TELEMETRY_FRAME_BYTES 43
+#define TELEMETRY_RSSI_OFFSET 39
+#define TELEMETRY_CRC_OFFSET 41
+
+RH_RF69 rf69(RFM69_CS, RFM69_IRQ);
 
 uint16_t crc16Ccitt(const uint8_t* data, size_t len) {
     uint16_t crc = 0xFFFF;
@@ -33,28 +43,42 @@ uint16_t crc16Ccitt(const uint8_t* data, size_t len) {
     return crc;
 }
 
+bool validFrame(const uint8_t* buf, uint8_t len) {
+    if (len != TELEMETRY_FRAME_BYTES) return false;
+    uint16_t sync = static_cast<uint16_t>(buf[0]) | (static_cast<uint16_t>(buf[1]) << 8);
+    if (sync != TELEMETRY_SYNC) return false;
+    if (buf[2] != TELEMETRY_VERSION) return false;
+    if (buf[3] != TELEMETRY_SOURCE_CANSAT) return false;
+    if (buf[4] != TELEMETRY_PAYLOAD_LEN) return false;
+
+    uint16_t receivedCrc = static_cast<uint16_t>(buf[TELEMETRY_CRC_OFFSET]) |
+        (static_cast<uint16_t>(buf[TELEMETRY_CRC_OFFSET + 1]) << 8);
+    uint16_t expectedCrc = crc16Ccitt(buf, TELEMETRY_FRAME_BYTES - 2);
+    return receivedCrc == expectedCrc;
+}
+
+void resetRadio() {
+    pinMode(RFM69_RST, OUTPUT);
+    digitalWrite(RFM69_RST, HIGH);
+    delay(10);
+    digitalWrite(RFM69_RST, LOW);
+    delay(10);
+}
+
 void setup() {
     Serial.begin(GCS_SERIAL_BAUD);
-    
-    // Hardware Reset for RFM95
-    pinMode(RFM95_RST, OUTPUT);
-    digitalWrite(RFM95_RST, HIGH);
-    delay(10);
-    digitalWrite(RFM95_RST, LOW);
-    delay(10);
-    digitalWrite(RFM95_RST, HIGH);
-    delay(10);
 
-    bool radio_ok = false;
+    resetRadio();
+
+    bool radioOk = false;
     for (int i = 0; i < 3; i++) {
-        radio_ok = rf95.init();
-        if (radio_ok) break;
-        Serial.printf("GCS:WARN RFM95W init attempt %d failed\n", i + 1);
+        radioOk = rf69.init();
+        if (radioOk) break;
+        Serial.printf("GCS:WARN RFM69HCW init attempt %d failed\n", i + 1);
         delay(500);
     }
-    
-    if (!radio_ok) {
-        Serial.println("GCS:FATAL RFM95W init failed completely. Halting...");
+    if (!radioOk) {
+        Serial.println("GCS:FATAL RFM69HCW init failed completely. Halting...");
         pinMode(2, OUTPUT);
         while (1) {
             digitalWrite(2, HIGH);
@@ -63,17 +87,16 @@ void setup() {
             delay(250);
         }
     }
-    
-    bool freq_ok = false;
+
+    bool freqOk = false;
     for (int i = 0; i < 3; i++) {
-        freq_ok = rf95.setFrequency(RFM95_FREQ);
-        if (freq_ok) break;
-        Serial.printf("GCS:WARN RFM95W frequency set attempt %d failed\n", i + 1);
+        freqOk = rf69.setFrequency(RFM69_FREQ);
+        if (freqOk) break;
+        Serial.printf("GCS:WARN RFM69HCW frequency set attempt %d failed\n", i + 1);
         delay(500);
     }
-    
-    if (!freq_ok) {
-        Serial.println("GCS:FATAL RFM95W frequency set failed completely. Halting...");
+    if (!freqOk) {
+        Serial.println("GCS:FATAL RFM69HCW frequency set failed completely. Halting...");
         pinMode(2, OUTPUT);
         while (1) {
             digitalWrite(2, HIGH);
@@ -82,94 +105,31 @@ void setup() {
             delay(250);
         }
     }
-    // Setting High Power, but GS is mostly receiving
-    rf95.setTxPower(20, false);
-    
-    Serial.println("GCS:READY RFM95W 868MHz");
+
+    rf69.setTxPower(13, true);
+    Serial.println("GCS:READY RFM69HCW 433MHz");
 }
 
 void loop() {
-    if (rf95.available()) {
-        uint8_t buf[RH_RF95_MAX_MESSAGE_LEN];
-        uint8_t len = sizeof(buf);
+    if (!rf69.available()) return;
 
-        if (rf95.recv(buf, &len)) {
-            // Null-terminate safely
-            if (len < sizeof(buf)) {
-                buf[len] = '\0';
-            } else {
-                buf[sizeof(buf) - 1] = '\0';
-            }
-            
-            // Strip trailing newlines or whitespace
-            while (len > 0 && (buf[len - 1] == '\r' || buf[len - 1] == '\n' || buf[len - 1] == ' ' || buf[len - 1] == '\0')) {
-                buf[len - 1] = '\0';
-                len--;
-            }
-            
-            if (strncmp((char*)buf, "MACHX2:", 7) == 0) {
-                // Count commas to verify the packet format (MACHX2 payload has 15 fields separated by 14 commas, plus a CRC separated by the 15th comma)
-                int commas = 0;
-                char* comma_ptrs[16] = {nullptr};
-                char* p = (char*)buf;
-                while (*p) {
-                    if (*p == ',') {
-                        if (commas < 16) {
-                            comma_ptrs[commas] = p;
-                        }
-                        commas++;
-                    }
-                    p++;
-                }
-                
-                if (commas == 15) {
-                    char* incoming_crc_str = comma_ptrs[14] + 1;
-                    bool crc_str_ok = (strlen(incoming_crc_str) == 4);
-                    for (int i = 0; i < 4 && crc_str_ok; i++) {
-                        char c = incoming_crc_str[i];
-                        if (!((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f'))) {
-                            crc_str_ok = false;
-                        }
-                    }
-                    
-                    if (!crc_str_ok) {
-                        Serial.println("GCS:WARN malformed crc format (must be 4 hex chars)");
-                        return;
-                    }
-                    
-                    uint16_t incoming_crc = (uint16_t)strtol(incoming_crc_str, nullptr, 16);
-                    
-                    // Verify CRC on the body (from buf + 7 to the 15th comma)
-                    size_t body_len = comma_ptrs[14] - ((char*)buf + 7);
-                    uint16_t expected_crc = crc16Ccitt((uint8_t*)(buf + 7), body_len);
-                    
-                    if (incoming_crc == expected_crc) {
-                        // Extract flags (after 14th comma, before 15th comma)
-                        unsigned int flags = atoi(comma_ptrs[13] + 1);
-                        
-                        // Truncate at the comma before rssi (13th comma)
-                        *comma_ptrs[12] = '\0';
-                        
-                        char newPayload[256];
-                        int n = snprintf(newPayload, sizeof(newPayload), "%s,%d,%u", (char*)buf, rf95.lastRssi(), flags);
-                        
-                        if (n > 0 && n < (int)sizeof(newPayload) && n > 7) {
-                            uint16_t crc = crc16Ccitt((uint8_t*)(newPayload + 7), n - 7);
-                            Serial.printf("%s,%04X\n", newPayload, crc);
-                            return; // Done
-                        } else {
-                            Serial.println("GCS:WARN payload rebuild truncated");
-                        }
-                    } else {
-                        Serial.printf("GCS:WARN invalid crc (received %04X, expected %04X)\n", incoming_crc, expected_crc);
-                    }
-                } else {
-                    Serial.printf("GCS:WARN malformed packet (comma count: %d)\n", commas);
-                }
-            } else {
-                // Fallback for non-MACHX2 packets
-                Serial.println((char*)buf);
-            }
-        }
+    uint8_t buf[RH_RF69_MAX_MESSAGE_LEN];
+    uint8_t len = sizeof(buf);
+    if (!rf69.recv(buf, &len)) return;
+
+    if (!validFrame(buf, len)) {
+        Serial.printf("GCS:WARN rejected frame len=%u\n", len);
+        return;
     }
+
+    int rssi = rf69.lastRssi();
+    if (rssi < -127) rssi = -127;
+    if (rssi > 20) rssi = 20;
+    buf[TELEMETRY_RSSI_OFFSET] = static_cast<uint8_t>(static_cast<int8_t>(rssi));
+
+    uint16_t crc = crc16Ccitt(buf, TELEMETRY_FRAME_BYTES - 2);
+    buf[TELEMETRY_CRC_OFFSET] = static_cast<uint8_t>(crc & 0xFF);
+    buf[TELEMETRY_CRC_OFFSET + 1] = static_cast<uint8_t>((crc >> 8) & 0xFF);
+
+    Serial.write(buf, TELEMETRY_FRAME_BYTES);
 }

@@ -208,23 +208,27 @@ GET  /api/rover/data      →  Rover sensor readings
 
 ## 📦 Packet Specification
 
-### CANSAT — 37-byte Binary (Little-Endian)
+### CANSAT — 43-byte Binary v2 (Little-Endian)
 
 ```
 Offset  Size  Type     Field
 ──────  ────  ───────  ─────────────────────────────
-0       2     uint16   pkt_id
-2       4     uint32   timestamp_ms
-6       4     float32  altitude_m
-10      4     float32  temp_c
-14      4     float32  pressure_hpa
-18      4     float32  accel_z
-22      4     float32  gyro_x
-26      4     float32  lat
-30      4     float32  lon
-34      1     int8     rssi_dbm
-35      1     uint8    flags  (bit0=launched  bit1=apogee)
-36      1     uint8    checksum  (XOR of bytes 0–35)
+0       2     uint16   sync = 0xA55A
+2       1     uint8    version = 2
+3       1     uint8    source_id = 1
+4       1     uint8    payload_len = 36
+5       2     uint16   pkt_id
+7       4     uint32   timestamp_ms
+11      4     float32  altitude_m
+15      4     float32  temp_c
+19      4     float32  pressure_hpa
+23      4     float32  accel_z
+27      4     float32  gyro_x
+31      4     float32  lat
+35      4     float32  lon
+39      1     int8     rssi_dbm
+40      1     uint8    flags
+41      2     uint16   crc16_ccitt over bytes 0-40
 ```
 
 ### NRC Rocket — SD Recovery CSV

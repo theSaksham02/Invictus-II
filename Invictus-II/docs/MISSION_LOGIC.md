@@ -39,8 +39,8 @@ UOBRPL competes in three simultaneous national and international competitions, a
 | Parameter | Value |
 |---|---|
 | Target Altitude | 2,200 ft (670 m) |
-| Telemetry | 1 Hz, 868 MHz RFM69HCW |
-| Packet Format | 37-byte binary struct (CANSAT source) |
+| Telemetry | 1 Hz, 433 MHz RFM69HCW |
+| Packet Format | 43-byte binary v2 CRC16 struct (CANSAT source) |
 | NRC Satellite | Heltec LoRa v3 868 MHz (NRC source) |
 | Ground Station | `npm start` — Node.js + Socket.io |
 | Rulebook | UKSEDS NRC 2025–26 |
@@ -83,8 +83,8 @@ UOBRPL competes in three simultaneous national and international competitions, a
 |---|---|
 | Rocket | MATCHA |
 | CanSat | SUGAR |
-| Packet format | TBD — likely same 37-byte binary struct as INVICTUS II |
-| Radio | TBD — 868 MHz |
+| Packet format | TBD — expected to use the same 43-byte binary v2 struct as INVICTUS II if hardware is reused |
+| Radio | TBD |
 | Launch site | Machrihanish Airbase, Scotland (via EXO Events) |
 
 **Source identifiers in backend (reserved):**
@@ -167,9 +167,9 @@ The FSM runs **one independent state machine per source**:
 
 | Source | Vehicle | Hardware | Packet Format | Accel | Flags |
 |---|---|---|---|---|---|
-| `CANSAT` | INVICTUS II | STM32 + RFM69HCW 868MHz | 37-byte binary | ✅ | ✅ |
+| `CANSAT` | INVICTUS II | STM32 + RFM69HCW 433MHz | 43-byte binary v2 | ✅ | ✅ |
 | `NRC` | INVICTUS II | Heltec LoRa v3 868MHz | ASCII CSV `NRC2:...` | ❌ | ✅ |
-| `MACHX` | MATCHA | TBD | TBD (likely 37-byte binary) | 🔜 | 🔜 |
+| `MACHX` | MATCHA | TBD | TBD (likely 43-byte binary v2 if hardware is reused) | 🔜 | 🔜 |
 | `SUGAR` | SUGAR CanSat | TBD | TBD | 🔜 | 🔜 |
 
 > **Note:** ROVER (NOVARIUM II) does not use the FSM — it is controlled via HTTP, not telemetry.
@@ -375,7 +375,7 @@ app.post('/api/reset/:source', (req, res) => {
 - [ ] LANDED fires within 10 packets of sim touchdown
 
 **MATCHA + SUGAR (EuRoC) — TBD:**
-- [ ] Confirm packet spec (37-byte binary or new struct)
+- [ ] Confirm packet spec (43-byte binary v2 or new struct)
 - [ ] Update `parser.js` with MACHX + SUGAR parsers
 - [ ] Confirm radio frequency and baud rate
 - [ ] Add serial port config to `.env.example`

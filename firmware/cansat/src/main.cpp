@@ -1,31 +1,34 @@
 /*
  * INVICTUS II - MACH-X / SUGAR CanSat Firmware
  * Target: STM32 Bluepill
- * Radio: RFM95W @ 868.0 MHz (LoRa)
+ * Radio: RFM69HCW @ 433.0 MHz
  * Sensors: 
  *   - 1x BMP388 (I2C)
  *   - 4x LM75 Temperature Sensors (I2C: 0x48, 0x49, 0x4A, 0x4C)
  *   - 1x MPU6500 (SPI)
- *   - 1x U-Blox NEO-8M (Serial)
+ *   - 1x U-Blox NEO-6M (Serial)
  *   - 1x SD Card (SPI)
  */
 
 #include <Arduino.h>
 #include <SPI.h>
 #include <Wire.h>
-#include <RH_RF95.h>
+#include <RH_RF69.h>
 #include <Adafruit_BMP3XX.h>
 #include <TinyGPSPlus.h>
 #include <SdFat.h>
 #include <IWatchdog.h>
+#include "telemetry.h"
 
 // ─── Pin Definitions ─────────────────────────────────────────────────────────
-#define RFM95_CS    PA15
-#define RFM95_INT   PB5
+#define RFM69_CS    PA15
+#define RFM69_INT   PB5
 #define MPU6500_CS  PB12
 #define SD_CS       PA4
+#define LED_PIN     PA0
+#define BUZZER_PIN  PA1
 
-#define RFM95_FREQ  868.0
+#define RFM69_FREQ  433.0
 
 // ─── Sensor Addresses ────────────────────────────────────────────────────────
 const uint8_t LM75_ADDR_1 = 0x48; // PCB 1
@@ -44,7 +47,7 @@ const uint8_t LM75_ADDRS[4] = { LM75_ADDR_1, LM75_ADDR_2, LM75_ADDR_3, LM75_ADDR
 #define FLAG_STALE_SENSOR 0x40
 
 // ─── Globals ─────────────────────────────────────────────────────────────────
-RH_RF95 rf95(RFM95_CS, RFM95_INT);
+RH_RF69 rf69(RFM69_CS, RFM69_INT);
 Adafruit_BMP3XX bmp;
 TinyGPSPlus gps;
 HardwareSerial SerialGPS(PB11, PB10);
@@ -52,9 +55,7 @@ SPIClass sdSPI(PA7, PA6, PA5);
 SdFat sd;
 FsFile logFile;
 
-uint32_t pkt_id = 0;
-uint32_t lastTxMs = 0;
-const uint32_t TX_INTERVAL_MS = 1000;
+uint16_t pkt_id = 0;
 const uint32_t SENSOR_TIMEOUT_MS = 3000;
 
 // TDM State Machine Definitions
@@ -93,6 +94,17 @@ uint16_t crc16Ccitt(const uint8_t* data, size_t len) {
         }
     }
     return crc;
+}
+
+void pulseIndicator(uint8_t count, uint16_t onMs = 40, uint16_t offMs = 80) {
+    for (uint8_t i = 0; i < count; i++) {
+        digitalWrite(LED_PIN, HIGH);
+        digitalWrite(BUZZER_PIN, HIGH);
+        delay(onMs);
+        digitalWrite(BUZZER_PIN, LOW);
+        digitalWrite(LED_PIN, LOW);
+        delay(offMs);
+    }
 }
 
 float readLM75(uint8_t address) {
@@ -197,11 +209,16 @@ void recoverI2CBus() {
 // ─── Setup ───────────────────────────────────────────────────────────────────
 void setup() {
     #if defined(HAL_AFIO_MODULE_ENABLED)
-    __HAL_AFIO_REMAP_SWJ_NOJTAG(); // Free PA15 (JTAG) for RFM95 CS, keep SWD
+    __HAL_AFIO_REMAP_SWJ_NOJTAG(); // Free PA15 (JTAG) for RFM69 CS, keep SWD
     #endif
 
     Serial.begin(115200);
     SerialGPS.begin(9600);
+
+    pinMode(LED_PIN, OUTPUT);
+    pinMode(BUZZER_PIN, OUTPUT);
+    digitalWrite(LED_PIN, LOW);
+    digitalWrite(BUZZER_PIN, LOW);
     
     // Perform I2C bus recovery and initialize Wire
     recoverI2CBus();
@@ -221,9 +238,9 @@ void setup() {
     SPI.setSCLK(PB13);
     SPI.begin();
 
-    // Shared SPI bus safety: de-select all devices before any SPI transfers
-    pinMode(RFM95_CS, OUTPUT);
-    digitalWrite(RFM95_CS, HIGH);
+    // Shared SPI2 bus safety: de-select all devices before any SPI transfers
+    pinMode(RFM69_CS, OUTPUT);
+    digitalWrite(RFM69_CS, HIGH);
 
     pinMode(MPU6500_CS, OUTPUT);
     digitalWrite(MPU6500_CS, HIGH);
@@ -245,13 +262,13 @@ void setup() {
         Serial.println("MPU6500: Failed WHO_AM_I test!");
     }
 
-    // Init Radio
-    radio_ok = rf95.init();
+    // Init RFM69HCW radio. RESET is intentionally unconnected in the flight harness.
+    radio_ok = rf69.init();
     if (radio_ok) {
-        if (!rf95.setFrequency(RFM95_FREQ)) {
+        if (!rf69.setFrequency(RFM69_FREQ)) {
             radio_ok = false;
         } else {
-            rf95.setTxPower(20, false); // High power LoRa
+            rf69.setTxPower(20, true); // RFM69HCW high-power module
         }
     }
 
@@ -269,15 +286,16 @@ void setup() {
     if (sd.begin(SdSpiConfig(SD_CS, DEDICATED_SPI, SD_SCK_MHZ(4), &sdSPI))) {
         logFile = sd.open("machx_flight.csv", O_WRONLY | O_CREAT | O_APPEND);
         if (logFile) {
-            logFile.println("pkt_id,timestamp_ms,alt,press,temp_bmp,t1,t2,t3,t4,accel_z,gyro_x,lat,lon,rssi,flags");
+            logFile.println("pkt_id,timestamp_ms,altitude_m,temp_c,pressure_hpa,temp_c_1,temp_c_2,temp_c_3,temp_c_4,accel_z,gyro_x,lat,lon,rssi_dbm,flags");
             flags |= FLAG_SD_OK;
         }
     }
 
-    // Put LoRa to sleep at boot to unblind GPS immediately
+    // Put radio to sleep at boot to minimize current draw between packets.
     if (radio_ok) {
-        rf95.sleep();
+        rf69.sleep();
     }
+    pulseIndicator(radio_ok ? 2 : 5);
     tdmStateStartMs = millis();
 }
 
@@ -379,57 +397,65 @@ void loop() {
                     flags &= ~FLAG_STALE_SENSOR;
                 }
 
-                // 2. Format MACHX2 body string (without MACHX2:, CRC and \n)
-                char bodyBuf[256];
-                int written = snprintf(bodyBuf, sizeof(bodyBuf), 
-                    "%lu,%lu,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.6f,%.6f,%d,%u",
-                    pkt_id, now, alt_m, press_hpa, temp_bmp, 
-                    temp_lm75[0], temp_lm75[1], temp_lm75[2], temp_lm75[3],
-                    accel_z, gyro_x, gps_lat, gps_lon, rssi_dbm, flags
-                );
+                TelemetryPacket packet = {};
+                packet.sync = TELEMETRY_SYNC;
+                packet.version = TELEMETRY_VERSION;
+                packet.source_id = TELEMETRY_SOURCE_CANSAT;
+                packet.payload_len = TELEMETRY_PAYLOAD_LEN;
+                packet.pkt_id = pkt_id;
+                packet.timestamp_ms = now;
+                packet.altitude_m = alt_m;
+                packet.temp_c = temp_bmp;
+                packet.pressure_hpa = press_hpa;
+                packet.accel_z = accel_z;
+                packet.gyro_x = gyro_x;
+                packet.lat = gps_lat;
+                packet.lon = gps_lon;
+                packet.rssi_dbm = rssi_dbm;
+                packet.flags = flags;
+                packet.crc16 = crc16Ccitt((uint8_t*)&packet, sizeof(packet) - sizeof(packet.crc16));
+
+                if (radio_ok) {
+                    rf69.setModeIdle(); // Wake from sleep before loading FIFO
+                    rf69.send((uint8_t*)&packet, sizeof(packet));
+                }
+
+                // USB bench output uses the same 43-byte frame that the backend parser accepts.
+                Serial.write((uint8_t*)&packet, sizeof(packet));
                 
-                if (written >= 0 && written < (int)sizeof(bodyBuf)) {
-                    // 3. Compute CRC16 CCITT over the payload ONLY
-                    uint16_t crc = crc16Ccitt((uint8_t*)bodyBuf, strlen(bodyBuf));
-                    
-                    // 4. Append Prefix, Body, CRC and newline
-                    char finalPacket[256];
-                    int finalWritten = snprintf(finalPacket, sizeof(finalPacket), "MACHX2:%s,%04X\n", bodyBuf, crc);
-                    
-                    if (finalWritten >= 0 && finalWritten < (int)sizeof(finalPacket)) {
-                        // 5. Wake up LoRa and Send
-                        if (radio_ok) {
-                            rf95.setModeIdle(); // Wake up from sleep mode
-                            rf95.send((uint8_t*)finalPacket, strlen(finalPacket));
+                // Log to SD with upload-compatible CSV headers and bounded/periodic flushing.
+                if (flags & FLAG_SD_OK) {
+                    char csvLine[192];
+                    int csvWritten = snprintf(csvLine, sizeof(csvLine),
+                        "%u,%lu,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.6f,%.6f,%d,%u\n",
+                        pkt_id, (unsigned long)now, alt_m, temp_bmp, press_hpa,
+                        temp_lm75[0], temp_lm75[1], temp_lm75[2], temp_lm75[3],
+                        accel_z, gyro_x, gps_lat, gps_lon, rssi_dbm, flags
+                    );
+
+                    if (csvWritten > 0 && csvWritten < (int)sizeof(csvLine)) {
+                        size_t writtenBytes = logFile.print(csvLine);
+                        if (writtenBytes != (size_t)csvWritten) {
+                            flags &= ~FLAG_SD_OK;
+                            Serial.println("SD:WARN write failed; disabling SD_OK flag");
+                            pulseIndicator(4);
                         }
-                        
-                        // 6. Log to SD with bounded/periodic flushing
-                        if (flags & FLAG_SD_OK) {
-                            size_t expectedBytes = strlen(finalPacket);
-                            size_t writtenBytes = logFile.print(finalPacket);
-                            if (writtenBytes != expectedBytes) {
-                                flags &= ~FLAG_SD_OK;
-                                Serial.println("SD:WARN write failed; disabling SD_OK flag");
-                            }
+
+                        static uint32_t lastFlushMs = 0;
+                        static uint32_t flushIntervalMs = 10000; // start at 10 seconds
+                        if ((flags & FLAG_SD_OK) && now - lastFlushMs >= flushIntervalMs) {
+                            uint32_t flushStart = millis();
+                            logFile.flush();
+                            uint32_t flushDuration = millis() - flushStart;
+                            lastFlushMs = now;
                             
-                            static uint32_t lastFlushMs = 0;
-                            static uint32_t flushIntervalMs = 10000; // start at 10 seconds
-                            if ((flags & FLAG_SD_OK) && now - lastFlushMs >= flushIntervalMs) {
-                                uint32_t flushStart = millis();
-                                logFile.flush();
-                                uint32_t flushDuration = millis() - flushStart;
-                                lastFlushMs = now;
-                                
-                                if (flushDuration > 50) {
-                                    // Degrade flush interval to 30s if SD is slow
-                                    flushIntervalMs = 30000;
-                                } else {
-                                    flushIntervalMs = 10000;
-                                }
+                            if (flushDuration > 50) {
+                                // Degrade flush interval to 30s if SD is slow.
+                                flushIntervalMs = 30000;
+                            } else {
+                                flushIntervalMs = 10000;
                             }
                         }
-                        
-                        Serial.print(finalPacket); // Local debug
                     }
                 }
                 pkt_id++;
@@ -445,14 +471,13 @@ void loop() {
             // Check if transmission is complete (non-blocking 10ms wait check)
             bool txDone = true;
             if (radio_ok) {
-                txDone = rf95.waitPacketSent(10);
+                txDone = rf69.waitPacketSent(10);
             }
             
             // If TX is complete OR 200ms safety timeout has expired
             if (txDone || (now - tdmStateStartMs >= 200)) {
-                // Put radio back to sleep to unblind GPS
                 if (radio_ok) {
-                    rf95.sleep();
+                    rf69.sleep();
                 }
                 
                 // Return to GPS listening state

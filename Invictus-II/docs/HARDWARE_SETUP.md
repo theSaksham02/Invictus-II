@@ -94,7 +94,7 @@ There are **three independent hardware systems** in this project. Each is physic
 │  └──────────────────┘   └──────────────────────────┘                        │
 │                                                                              │
 │  433 MHz RFM69           ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓                                 │
-│  37-byte binary packet   GROUND STATION                                      │
+│  43-byte binary v2 packet GROUND STATION                                     │
 │                          Node.js · SQLite · Socket.io                        │
 │                          http://localhost:3000                                │
 └──────────────────────────────────────────────────────────────────────────────┘
@@ -1317,15 +1317,17 @@ All GPIO pins output **3.3V**. Most pins tolerate 5V on *input* only. Do not con
 
 | Peripheral | Pins | Notes |
 |-----------|------|-------|
-| **SPI1** (Radio + SD) | PA5(SCK), PA6(MISO), PA7(MOSI) | Shared bus, separate CS pins |
-| **I2C1** (MPU-6500, BMP388, LM75) | PB6(SCL), PB7(SDA) | Add 4.7kΩ pull-ups |
-| **USART1** (GPS) | PA9(TX→NEO RxD), PA10(RX←NEO TxD) | 9600 baud |
-| **USART2** (debug) | PA2(TX), PA3(RX) | Connect to ST-Link Virtual COM |
+| **SPI1** (SD card) | PA5(SCK), PA6(MISO), PA7(MOSI), PA4(CS) | Dedicated SD recovery log bus |
+| **SPI2** (RFM69 + MPU-6500) | PB13(SCK), PB14(MISO), PB15(MOSI) | Shared avionics SPI bus |
+| **I2C1** (BMP388, LM75 x4) | PB6(SCL), PB7(SDA) | LM75 addresses: 0x48, 0x49, 0x4A, 0x4C |
+| **GPS UART** | PB10(TX→NEO-6M RX), PB11(RX←NEO-6M TX) | 9600 baud |
+| **Camera UART** | PA9(TX→ESP32-CAM U0R), PA10(RX←ESP32-CAM U0T) | Reserved for future trigger/status |
 | **SWD** (programming) | PA13(SWDIO), PA14(SWCLK) | **Never use as GPIO!** |
-| **RFM69 CS** | PA4 | Chip-select for radio |
-| **RFM69 RST** | PC15 | Reset for radio |
-| **RFM69 DIO0** | PC14 | IRQ from radio (PacketSent / PayloadReady) |
-| **SD Card CS** | PB12 | Chip-select for SD module |
+| **RFM69 CS** | PA15 | Chip-select for radio |
+| **RFM69 DIO0** | PB5 | IRQ from radio (PacketSent / PayloadReady) |
+| **RFM69 RST** | Unconnected | Flight harness leaves reset unconnected |
+| **MPU-6500 CS** | PB12 | Chip-select for IMU |
+| **Status LED / buzzer** | PA0 / PA1 | Visual and audible boot/status outputs |
 
 #### How to Program It (Use ST-Link V2)
 
@@ -1368,25 +1370,29 @@ GND    ────────────► GND
 A HopeRF FSK/GFSK/OOK radio transceiver operating at 433 MHz. It is controlled entirely via SPI register reads and writes. It has a 66-byte FIFO buffer, hardware AES-128 encryption, CRC-16 error checking, and can output up to +20 dBm TX power (requiring a special register unlock sequence).
 
 #### What Data It Produces
-It transmits the CANSAT's 37-byte binary telemetry packet via 433 MHz FSK and receives an `PacketSent` interrupt on DIO0 when done. On the ground station side (a matching RFM69 receiver or USB dongle), it outputs the raw 37-byte packet.
+It transmits the CANSAT's 43-byte binary v2 telemetry packet via 433 MHz FSK and receives a `PacketSent` interrupt on DIO0 when done. On the ground station side, a matching RFM69 receiver validates the frame, stamps RSSI, recomputes CRC16, and outputs the raw 43-byte packet over USB serial.
 
-#### 37-Byte CANSAT Packet Structure
+#### 43-Byte CANSAT Packet Structure
 
 ```
 Offset  Size  Type     Field
 ──────  ────  ───────  ─────────────────────────────
-  0       2   uint16   pkt_id
-  2       4   uint32   timestamp_ms
-  6       4   float32  altitude_m
- 10       4   float32  temp_c
- 14       4   float32  pressure_hpa
- 18       4   float32  accel_z   (g-force)
- 22       4   float32  gyro_x    (degrees/sec)
- 26       4   float32  lat       (decimal degrees)
- 30       4   float32  lon       (decimal degrees)
- 34       1   int8     rssi_dbm
- 35       1   uint8    flags     (bit0=launched, bit1=apogee)
- 36       1   uint8    checksum  (XOR of bytes 0–35)
+  0       2   uint16   sync = 0xA55A
+  2       1   uint8    version = 2
+  3       1   uint8    source_id = 1
+  4       1   uint8    payload_len = 36
+  5       2   uint16   pkt_id
+  7       4   uint32   timestamp_ms
+ 11       4   float32  altitude_m
+ 15       4   float32  temp_c
+ 19       4   float32  pressure_hpa
+ 23       4   float32  accel_z
+ 27       4   float32  gyro_x
+ 31       4   float32  lat
+ 35       4   float32  lon
+ 39       1   int8     rssi_dbm
+ 40       1   uint8    flags
+ 41       2   uint16   crc16_ccitt over bytes 0-40
 ```
 
 #### Wiring (SPI1 on STM32 Bluepill)
@@ -1396,13 +1402,13 @@ RFM69HCW       STM32 Bluepill
 ────────────   ──────────────
 VCC  ────────► 3.3V
 GND  ────────► GND
-MOSI ────────► PA7  (SPI1 MOSI)
-MISO ────────► PA6  (SPI1 MISO)
-SCK  ────────► PA5  (SPI1 SCK)
-NSS  ────────► PA4  (SPI1 NSS / CS — can also be any GPIO)
-DIO0 ────────► PC14 (IRQ input)
-RST  ────────► PC15 (reset output from STM32)
-ANT  ────────► 17.3 cm wire antenna (λ/4 at 433 MHz)
+MOSI ────────► PB15 (SPI2 MOSI)
+MISO ────────► PB14 (SPI2 MISO)
+SCK  ────────► PB13 (SPI2 SCK)
+NSS  ────────► PA15 (GPIO chip-select)
+DIO0 ────────► PB5  (IRQ input)
+RST  ────────► Unconnected
+ANT  ────────► SMA female connector
 ```
 
 > ⚠️ **Current spike on TX:** The RFM69HCW draws up to **130 mA peak** during +20 dBm transmission. Add a **100 µF electrolytic capacitor** close to the VCC pin to absorb this spike and prevent voltage drooping.
@@ -1427,20 +1433,13 @@ At 433 MHz, a quarter-wave monopole antenna is exactly **17.3 cm** of plain copp
 #include <SPI.h>
 #include <RH_RF69.h>
 
-#define RF69_CS   PA4
-#define RF69_RST  PC15
-#define RF69_INT  PC14
+#define RF69_CS   PA15
+#define RF69_INT  PB5
 #define RF69_FREQ 433.0
 
 RH_RF69 rf69(RF69_CS, RF69_INT);
 
 void setupRadio() {
-    pinMode(RF69_RST, OUTPUT);
-    digitalWrite(RF69_RST, HIGH);
-    delay(10);
-    digitalWrite(RF69_RST, LOW);
-    delay(10);
-
     if (!rf69.init()) {
         Serial.println("RFM69 init FAILED — check wiring");
         while (1);
@@ -1696,20 +1695,20 @@ timestamp_ms,alt_m,temp_c,pressure_hpa,accel_z,gyro_x,lat,lon,flags
 1234,612.3,18.5,940.21,2.1,0.04,51.501,−0.140,3
 ```
 
-#### Wiring (SPI1 on STM32 — Shared with RFM69)
+#### Wiring (SPI1 on STM32)
 
 ```
 SD Module       STM32 Bluepill
 ─────────────   ──────────────
-VCC  ────────► 5V  (module's LDO handles 3.3V internally)
+VCC  ────────► 3V3_BUS
 GND  ────────► GND
-MISO ────────► PA6  (SPI1 MISO — shared with RFM69)
-MOSI ────────► PA7  (SPI1 MOSI — shared with RFM69)
-SCK  ────────► PA5  (SPI1 SCK  — shared with RFM69)
-CS   ────────► PB12 (GPIO output — separate CS from RFM69's PA4)
+MISO ────────► PA6  (SPI1 MISO)
+MOSI ────────► PA7  (SPI1 MOSI)
+SCK  ────────► PA5  (SPI1 SCK)
+CS   ────────► PA4  (GPIO output)
 ```
 
-> ℹ️ SPI bus sharing works correctly because only one CS pin is active (LOW) at a time. When talking to RFM69: PB12 is HIGH and PA4 is LOW. When talking to SD: PA4 is HIGH and PB12 is LOW.
+> ℹ️ The SD module uses SPI1. The RFM69HCW and MPU-6500 share SPI2 on PB13/PB14/PB15, so radio and SD traffic do not contend for the same SPI peripheral.
 
 #### Critical SD Rules
 
@@ -1724,7 +1723,7 @@ CS   ────────► PB12 (GPIO output — separate CS from RFM69's 
 #include <SPI.h>
 #include <SD.h>
 
-#define SD_CS PB12
+#define SD_CS PA4
 
 File logFile;
 
@@ -1820,36 +1819,43 @@ Same as Section 4.7. Set to 5V to power ESP32-CAM and NEO-6M module (which has o
 │  GND       ────► STM32 GND                                                   │
 │                                                                              │
 │  SPI1 (PA4-CS, PA5-SCK, PA6-MISO, PA7-MOSI):                                │
-│    PA4  (CS)   ──────────────────────────────────────► RFM69HCW NSS         │
-│    PA5  (SCK)  ──────────────────────────────────────► RFM69HCW SCK         │
-│                                                         SD Card   SCK        │
-│    PA6  (MISO) ──────────────────────────────────────► RFM69HCW MISO        │
-│                                                         SD Card   MISO       │
-│    PA7  (MOSI) ──────────────────────────────────────► RFM69HCW MOSI        │
-│                                                         SD Card   MOSI       │
-│    PC14        ──────────────────────────────────────► RFM69HCW DIO0        │
-│    PC15        ──────────────────────────────────────► RFM69HCW RST         │
-│    PB12        ──────────────────────────────────────► SD Card   CS         │
+│    PA4  (CS)   ──────────────────────────────────────► SD Card   CS         │
+│    PA5  (SCK)  ──────────────────────────────────────► SD Card   CLK        │
+│    PA6  (MISO) ──────────────────────────────────────► SD Card   MISO       │
+│    PA7  (MOSI) ──────────────────────────────────────► SD Card   MOSI       │
+│                                                                              │
+│  SPI2 (PB13-SCK, PB14-MISO, PB15-MOSI):                                      │
+│    PB13 (SCK)  ──────────────────────────────────────► RFM69HCW SCK         │
+│                                                         MPU-6500 SCL         │
+│    PB14 (MISO) ──────────────────────────────────────► RFM69HCW MISO        │
+│                                                         MPU-6500 ADO         │
+│    PB15 (MOSI) ──────────────────────────────────────► RFM69HCW MOSI        │
+│                                                         MPU-6500 SDA         │
+│    PA15 (CS)   ──────────────────────────────────────► RFM69HCW NSS         │
+│    PB5         ──────────────────────────────────────► RFM69HCW DIO0        │
+│    PB12        ──────────────────────────────────────► MPU-6500 NCS         │
 │                                                                              │
 │  I2C1 (PB6-SCL, PB7-SDA) — 4.7kΩ pull-ups to 3.3V:                        │
-│    PB6 (SCL) ──────────────────────────────────────► MPU-6500 SCL           │
-│                                                       BMP388   SCL           │
+│    PB6 (SCL) ──────────────────────────────────────► BMP388   SCL           │
 │                                                       LM75     SCL           │
-│    PB7 (SDA) ──────────────────────────────────────► MPU-6500 SDA           │
-│                                                       BMP388   SDA           │
+│    PB7 (SDA) ──────────────────────────────────────► BMP388   SDA           │
 │                                                       LM75     SDA           │
 │  I2C addresses on same bus:                                                  │
-│    MPU-6500 → 0x68 (AD0=GND)                                                │
 │    BMP388   → 0x76 (SDO=GND)                                                │
-│    LM75     → 0x48 (A0=A1=A2=GND)                                           │
+│    LM75     → 0x48, 0x49, 0x4A, 0x4C                                        │
 │                                                                              │
-│  USART1 (PA9-TX, PA10-RX):                                                   │
-│    PA10 (RX) ──────────────────────────────────────► NEO-6M  TxD            │
-│    PA9  (TX) ──────────────────────────────────────► NEO-6M  RxD [opt]      │
+│  UARTs:                                                                      │
+│    PB11 (RX) ──────────────────────────────────────► NEO-6M  TX             │
+│    PB10 (TX) ──────────────────────────────────────► NEO-6M  RX             │
+│    PA10 (RX) ──────────────────────────────────────► ESP32-CAM U0T          │
+│    PA9  (TX) ──────────────────────────────────────► ESP32-CAM U0R          │
+│    PA0        ──────────────────────────────────────► Red LED                │
+│    PA1        ──────────────────────────────────────► Buzzer                 │
 │                                                                              │
 │  Power to sensors:                                                            │
 │    3.3V RAIL ──► MPU-6500 VCC, BMP388 VIN, LM75 VCC                         │
-│    5V RAIL   ──► NEO-6M VCC, SD Card VCC, ESP32-CAM 5V                      │
+│    5V RAIL   ──► NEO-6M VCC, ESP32-CAM 5V                                   │
+│    3.3V RAIL ──► SD Card 3V3, RFM69HCW 3.3V                                 │
 │    GND       ──► ALL module GNDs                                             │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                        ANTENNA                                                │
@@ -1903,12 +1909,12 @@ void loop() {
     checkLaunch(imu.accel_z);
     if (launched) checkApogee(baro.altitude_m);
 
-    // 3. Build 37-byte binary packet
-    uint8_t pkt[37];
-    buildPacket(pkt, imu, baro, gps);  // includes XOR checksum
+    // 3. Build 43-byte v2 binary packet
+    uint8_t pkt[43];
+    buildPacket(pkt, imu, baro, gps);  // includes CRC16-CCITT
 
     // 4. Transmit via RFM69 (433 MHz)
-    transmitPacket(pkt, 37);
+    transmitPacket(pkt, 43);
 
     // 5. Log to SD card
     logData(baro.altitude_m, baro.temperature_c, baro.pressure_hpa,
@@ -1974,32 +1980,32 @@ dashboard/nrc.html + dashboard/mach-x.html
   → source-specific packet views
 ```
 
-### CANSAT Binary Packet (37 bytes, little-endian)
+### CANSAT Binary Packet (43 bytes, little-endian)
 
 ```
 Field          Offset  Bytes  Type      Example Value
 ─────────────  ──────  ─────  ────────  ─────────────
-pkt_id            0      2    uint16    42
-timestamp_ms      2      4    uint32    173452
-altitude_m        6      4    float32   612.3
-temp_c           10      4    float32   18.5
-pressure_hpa     14      4    float32   940.21
-accel_z          18      4    float32   1.02   (g)
-gyro_x           22      4    float32   0.41   (deg/s)
-lat              26      4    float32   51.501476
-lon              30      4    float32   -0.140634
-rssi_dbm         34      1    int8      -87
-flags            35      1    uint8     0x03   (launched + apogee)
-checksum         36      1    uint8     XOR of bytes 0–35
+sync              0      2    uint16    0xA55A
+version           2      1    uint8     2
+source_id         3      1    uint8     1
+payload_len       4      1    uint8     36
+pkt_id            5      2    uint16    42
+timestamp_ms      7      4    uint32    173452
+altitude_m       11      4    float32   612.3
+temp_c           15      4    float32   18.5
+pressure_hpa     19      4    float32   940.21
+accel_z          23      4    float32   1.02
+gyro_x           27      4    float32   0.41
+lat              31      4    float32   51.501476
+lon              35      4    float32   -0.140634
+rssi_dbm         39      1    int8      -87
+flags            40      1    uint8     0x03
+crc16_ccitt      41      2    uint16    CRC16 over bytes 0-40
 ```
 
-**Checksum calculation:**
+**CRC calculation:**
 ```cpp
-uint8_t calcChecksum(uint8_t* buf, int len) {
-    uint8_t cs = 0;
-    for (int i = 0; i < len; i++) cs ^= buf[i];
-    return cs;
-}
+uint16_t crc = crc16Ccitt(packetBytes, 41);
 ```
 
 ### NRC ASCII Packet
@@ -2036,17 +2042,24 @@ NRC2:42,173452,612.30,18.50,940.21,51.501476,-0.140634,-87,44,7B3F
 
 | STM32 Pin | Function | Connect To |
 |----------|----------|------------|
-| PA4 | SPI1 CS (RFM69) | RFM69HCW NSS |
-| PA5 | SPI1 SCK | RFM69HCW SCK, SD Card SCK |
-| PA6 | SPI1 MISO | RFM69HCW MISO, SD Card MISO |
-| PA7 | SPI1 MOSI | RFM69HCW MOSI, SD Card MOSI |
-| PB12 | GPIO Output (SD CS) | SD Card CS |
-| PC14 | GPIO Input (Radio IRQ) | RFM69HCW DIO0 |
-| PC15 | GPIO Output (Radio RST) | RFM69HCW RST |
-| PB6 | I2C1 SCL | MPU-6500, BMP388, LM75 |
-| PB7 | I2C1 SDA | MPU-6500, BMP388, LM75 |
-| PA9 | USART1 TX | NEO-6M RxD |
-| PA10 | USART1 RX | NEO-6M TxD |
+| PA0 | GPIO Output | Red LED |
+| PA1 | GPIO Output | Buzzer |
+| PA4 | SPI1 CS | SD Card CS |
+| PA5 | SPI1 SCK | SD Card CLK |
+| PA6 | SPI1 MISO | SD Card MISO |
+| PA7 | SPI1 MOSI | SD Card MOSI |
+| PA15 | GPIO Output | RFM69HCW NSS |
+| PB5 | GPIO Input (Radio IRQ) | RFM69HCW DIO0 |
+| PB6 | I2C1 SCL | BMP388, LM75 x4 |
+| PB7 | I2C1 SDA | BMP388, LM75 x4 |
+| PB10 | UART TX | NEO-6M RX |
+| PB11 | UART RX | NEO-6M TX |
+| PB12 | SPI2 CS | MPU-6500 NCS |
+| PB13 | SPI2 SCK | RFM69HCW SCK, MPU-6500 SCL |
+| PB14 | SPI2 MISO | RFM69HCW MISO, MPU-6500 ADO |
+| PB15 | SPI2 MOSI | RFM69HCW MOSI, MPU-6500 SDA |
+| PA9 | UART TX | ESP32-CAM U0R |
+| PA10 | UART RX | ESP32-CAM U0T |
 | PA13 | SWD DATA | ST-Link (programming only) |
 | PA14 | SWD CLK | ST-Link (programming only) |
 | 3.3V | Power | All 3.3V devices |
@@ -2056,9 +2069,11 @@ NRC2:42,173452,612.30,18.50,940.21,51.501476,-0.140634,-87,44,7B3F
 
 | Device | I2C Address | Address Pin Config |
 |--------|------------|-------------------|
-| MPU-6500 | **0x68** | AD0 = GND |
 | BMP388 | **0x76** | SDO = GND |
-| LM75 | **0x48** | A2=A1=A0 = GND |
+| LM75-U1 | **0x48** | Address strapped |
+| LM75-U2 | **0x49** | Address strapped |
+| LM75-U3 | **0x4A** | Address strapped |
+| LM75-U4 | **0x4C** | Address strapped |
 | BMP388 (alt) | 0x77 | SDO = 3.3V |
 
 ---
