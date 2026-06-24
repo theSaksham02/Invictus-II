@@ -1,14 +1,14 @@
 /*
- * INVICTUS II — NRC Rocket Payload Firmware
+ * INVICTUS II — Mach-X Rideshare Payload Firmware
  * ──────────────────────────────────────────
  * Hardware : Heltec WiFi LoRa 32 V3 (ESP32-S3 + SX1262 LoRa + SSD1306 OLED)
  * Sensors  : BMP280 (I2C), NEO-6M GPS (UART), LM75 (I2C), SD Card (SPI)
  * Camera   : ESP32-CAM (standalone on 5V_BUS, records to its own SD card)
- * Radio    : SX1262 LoRa @ 868 MHz (built into Heltec board, bench/debug only)
+ * Radio    : SX1262 LoRa @ 868 MHz (built into Heltec board, live telemetry)
  * Display  : SSD1306 0.96" OLED (built into Heltec board)
  *
- * Optional live telemetry contract (NRC2 — v2 with CRC16):
- *   NRC2:<pkt_id>,<ts_ms>,<alt_m>,<temp_c>,<press_hpa>,<lat>,<lon>,<rssi>,<flags>,<CRC16_HEX>\n
+ * Live telemetry contract (MXR3 — v3 with CRC16):
+ *   MXR3:<pkt_id>,<ts_ms>,<alt_m>,<temp_c>,<lm75_temp_c>,<press_hpa>,<lat>,<lon>,<rssi>,<flags>,<CRC16_HEX>\n
  *
  * Pin mapping — per physical circuit (verified 2026-05-30):
  *   BMP280  → I2C:  SDA=GPIO1,  SCL=GPIO2   (addr 0x76, SDO→GND)
@@ -29,8 +29,12 @@
 #include <U8g2lib.h>
 #include <esp_task_wdt.h>
 
-#ifndef ENABLE_NRC_LIVE
-#define ENABLE_NRC_LIVE 0
+#ifndef ENABLE_RIDESHARE_LIVE
+  #ifdef ENABLE_NRC_LIVE
+    #define ENABLE_RIDESHARE_LIVE ENABLE_NRC_LIVE
+  #else
+    #define ENABLE_RIDESHARE_LIVE 1
+  #endif
 #endif
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -138,7 +142,7 @@ bool sd_ok = false;
 bool lora_ok = false;
 
 int16_t last_rssi = 0;   // Updated after each LoRa TX
-char log_filename[24] = "/nrc_flight_001.csv";
+char log_filename[24] = "/mxr_flight_001.csv";
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  CRC16-CCITT — must match backend cansat-hardware.js crc16Ccitt()
@@ -172,7 +176,7 @@ float readLM75() {
 
 bool openFreshLogFile() {
     for (uint16_t index = 1; index <= 999; index++) {
-        snprintf(log_filename, sizeof(log_filename), "/nrc_flight_%03u.csv", (unsigned)index);
+        snprintf(log_filename, sizeof(log_filename), "/mxr_flight_%03u.csv", (unsigned)index);
         if (SD.exists(log_filename)) continue;
 
         logFile = SD.open(log_filename, FILE_WRITE);
@@ -197,7 +201,7 @@ void displayStatus(float alt, float maxAlt, float apogeeAlt, uint8_t flags, uint
     display.setFont(u8g2_font_6x10_tf);
 
     if (flags & FLAG_APOGEE) {
-        display.drawStr(0, 10, "NRC APOGEE");
+        display.drawStr(0, 10, "MXR APOGEE");
         display.setFont(u8g2_font_logisoso22_tf);
         char apogeeLine[24];
         float shownApogee = isfinite(apogeeAlt) ? apogeeAlt : maxAlt;
@@ -216,7 +220,7 @@ void displayStatus(float alt, float maxAlt, float apogeeAlt, uint8_t flags, uint
     }
 
     // Line 1: Mission phase
-    display.drawStr(0, 10, "NRC INVICTUS II");
+    display.drawStr(0, 10, "MACH-X RIDESHARE");
 
     // Line 2: Current altitude in feet
     char line[32];
@@ -242,7 +246,7 @@ void displayStatus(float alt, float maxAlt, float apogeeAlt, uint8_t flags, uint
 void displayBootStep(const char* line1, const char* line2 = "") {
     display.clearBuffer();
     display.setFont(u8g2_font_6x10_tf);
-    display.drawStr(0, 10, "NRC BOOTING...");
+    display.drawStr(0, 10, "MXR BOOTING...");
     display.drawStr(0, 28, line1);
     if (line2 && line2[0] != '\0') display.drawStr(0, 42, line2);
     display.sendBuffer();
@@ -254,7 +258,7 @@ void displayBootStep(const char* line1, const char* line2 = "") {
 void setup() {
     Serial.begin(115200);
     delay(500);
-    Serial.println("[NRC] Booting...");
+    Serial.println("[MXR] Booting...");
 
     // ── Power on OLED + Vext rail ────────────────────────────────────
     pinMode(VEXT_PIN, OUTPUT);
@@ -265,35 +269,35 @@ void setup() {
     display.begin();
     display.clearBuffer();
     display.setFont(u8g2_font_6x10_tf);
-    display.drawStr(0, 10, "NRC BOOTING...");
+    display.drawStr(0, 10, "MXR BOOTING...");
     display.sendBuffer();
 
-#if ENABLE_NRC_LIVE
-    // ── LoRa SX1262 init (bench/debug live telemetry) ────────────────
-    Serial.println("[NRC] Initializing LoRa SX1262...");
+#if ENABLE_RIDESHARE_LIVE
+    // ── LoRa SX1262 init (live telemetry) ───────────────────────────
+    Serial.println("[MXR] Initializing LoRa SX1262...");
     displayBootStep("INIT LORA");
     loraSPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_NSS);
     int state = radio.begin(LORA_FREQ, LORA_BW, LORA_SF, LORA_CR, LORA_SW, LORA_POWER, LORA_PREAMBLE);
     if (state == RADIOLIB_ERR_NONE) {
         lora_ok = true;
-        Serial.println("[NRC] LoRa SX1262 OK @ 868 MHz");
+        Serial.println("[MXR] LoRa SX1262 OK @ 868 MHz");
         displayBootStep("LORA OK");
     } else {
-        Serial.printf("[NRC] LoRa FAILED (err %d)\n", state);
+        Serial.printf("[MXR] LoRa FAILED (err %d)\n", state);
         displayBootStep("LORA FAILED");
     }
 #else
-    Serial.println("[NRC] Live LoRa telemetry disabled (ENABLE_NRC_LIVE=0)");
+    Serial.println("[MXR] Live LoRa telemetry disabled (ENABLE_RIDESHARE_LIVE=0)");
 #endif
 
     // ── GPS on UART1 ─────────────────────────────────────────────────
-    Serial.println("[NRC] Initializing GPS UART1...");
+    Serial.println("[MXR] Initializing GPS UART1...");
     displayBootStep("INIT GPS");
     SerialGPS.begin(9600, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
-    Serial.println("[NRC] GPS UART1 started");
+    Serial.println("[MXR] GPS UART1 started");
 
     // ── I2C bus for BMP280 + LM75 ────────────────────────────────────
-    Serial.println("[NRC] Initializing sensor I2C...");
+    Serial.println("[MXR] Initializing sensor I2C...");
     displayBootStep("INIT I2C");
     sensorI2C.begin(I2C_SDA, I2C_SCL);
 
@@ -308,38 +312,38 @@ void setup() {
         );
         baro_ok = true;
         last_baro_ms = millis();
-        Serial.println("[NRC] BMP280 OK");
+        Serial.println("[MXR] BMP280 OK");
     } else {
-        Serial.println("[NRC] BMP280 FAILED @ 0x76 AND 0x77");
+        Serial.println("[MXR] BMP280 FAILED @ 0x76 AND 0x77");
         displayBootStep("BMP280 FAILED");
     }
 
     // ── LM75 probe ──────────────────────────────────────────────────
     displayBootStep("CHECK LM75");
     float lm75_test = readLM75();
-    Serial.printf("[NRC] LM75 %s (%.1f°C)\n",
+    Serial.printf("[MXR] LM75 %s (%.1f°C)\n",
         isfinite(lm75_test) ? "OK" : "FAILED", lm75_test);
 
     // ── SD Card on custom SPI bus ────────────────────────────────────
-    Serial.println("[NRC] Initializing SD card...");
+    Serial.println("[MXR] Initializing SD card...");
     displayBootStep("INIT SD");
     sdSPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
     if (SD.begin(SD_CS, sdSPI)) {
         if (openFreshLogFile()) {
             sd_ok = true;
-            Serial.printf("[NRC] SD card OK, logging to %s\n", log_filename);
+            Serial.printf("[MXR] SD card OK, logging to %s\n", log_filename);
         }
     } else {
-        Serial.println("[NRC] SD card FAILED");
+        Serial.println("[MXR] SD card FAILED");
     }
 
     // ── Boot status on OLED ──────────────────────────────────────────
     display.clearBuffer();
     display.setFont(u8g2_font_6x10_tf);
-    display.drawStr(0, 10, "NRC INVICTUS II");
+    display.drawStr(0, 10, "MACH-X RIDESHARE");
     char line[32];
     snprintf(line, sizeof(line), "LIVE:%s BMP:%s",
-        ENABLE_NRC_LIVE ? (lora_ok ? "OK" : "XX") : "OFF",
+        ENABLE_RIDESHARE_LIVE ? (lora_ok ? "OK" : "XX") : "OFF",
         baro_ok ? "OK" : "XX");
     display.drawStr(0, 24, line);
     snprintf(line, sizeof(line), "SD:%s GPS:WAIT",
@@ -352,7 +356,7 @@ void setup() {
     esp_task_wdt_init(WDT_TIMEOUT_S, true);
     esp_task_wdt_add(NULL);
 
-    Serial.println("[NRC] Setup complete — SD logging at 1 Hz");
+    Serial.println("[MXR] Setup complete — live telemetry and SD logging at 1 Hz");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -443,16 +447,17 @@ void loop() {
         if ((now - last_baro_ms) > SENSOR_STALE_MS) flags |= FLAG_STALE_SENSOR;
         if (sd_ok && logFile) flags |= FLAG_SD_OK;
 
-#if ENABLE_NRC_LIVE
-        // ── Build NRC2 packet string (bench/debug live telemetry) ────
-        char body[128];
-        char buffer[160];
-        snprintf(body, sizeof(body), "%u,%lu,%.2f,%.2f,%.2f,%.6f,%.6f,%d,%u",
-                 (unsigned)pkt_id, (unsigned long)now, alt, temp, press,
+#if ENABLE_RIDESHARE_LIVE
+        // ── Build MXR3 packet string (live telemetry) ────────────────
+        char body[160];
+        char buffer[192];
+        const float liveLm75 = isfinite(lm75_temp) ? lm75_temp : -999.0f;
+        snprintf(body, sizeof(body), "%u,%lu,%.2f,%.2f,%.2f,%.2f,%.6f,%.6f,%d,%u",
+                 (unsigned)pkt_id, (unsigned long)now, alt, temp, liveLm75, press,
                  lat, lon, (int)last_rssi, (unsigned)flags);
         uint16_t crc = crc16Ccitt(
             reinterpret_cast<const uint8_t*>(body), strlen(body));
-        snprintf(buffer, sizeof(buffer), "NRC2:%s,%04X", body, crc);
+        snprintf(buffer, sizeof(buffer), "MXR3:%s,%04X", body, crc);
 
         // ── Transmit via LoRa ────────────────────────────────────────
         if (lora_ok) {

@@ -1,13 +1,14 @@
-# NRC Rocket Guide
+# Mach-X Rideshare Payload Guide
 
-This guide covers the National Rocketry Competition payload. NRC does not use the Mach-X live tracking workflow. The competition workflow is:
+This guide covers the Mach-X Rideshare payload built from the Heltec/PCB stack. The flight workflow is:
 
 1. Power the Heltec payload before launch.
 2. The firmware samples sensors at 1 Hz.
-3. The firmware writes every sample to a fresh SD CSV.
-4. The firmware latches apogee after descent begins.
-5. The OLED shows the latched apogee for recovery.
-6. After landing, remove the SD card and upload the CSV at `/nrc`.
+3. The firmware transmits live `MXR3:` telemetry to the rideshare LoRa ground receiver.
+4. The firmware writes every sample to a fresh SD CSV.
+5. The firmware latches apogee after descent begins.
+6. The OLED shows the latched apogee for recovery backup.
+7. After landing, use the SD CSV only if live telemetry was incomplete.
 
 ## Hardware
 
@@ -17,8 +18,8 @@ This guide covers the National Rocketry Competition payload. NRC does not use th
 | BMP280 | Barometric altitude and temperature | I2C |
 | LM75 | Backup temperature | I2C |
 | NEO-6M | GPS coordinates | UART |
-| SD Card Module | Recovery flight log | SPI |
-| ESP32-CAM | Standalone camera with its own SD card | Power only |
+| SD Card Module | Recovery flight log backup | SPI |
+| ESP32-CAM | Standalone camera with its own SD card; no live video transmission | Power only |
 
 ## Pin Mapping
 
@@ -47,7 +48,7 @@ On boot:
 2. Starts GPS UART and sensor I2C.
 3. Initializes BMP280 and probes LM75.
 4. Mounts the SD card.
-5. Opens the first unused file named `/nrc_flight_###.csv`.
+5. Opens the first unused file named `/mxr_flight_###.csv`.
 6. Shows readiness on the OLED.
 
 At 1 Hz:
@@ -58,10 +59,19 @@ At 1 Hz:
 4. Updates launch detection from altitude gain.
 5. Updates running maximum altitude.
 6. Latches `apogee_altitude_m` after a 5m drop from max altitude.
-7. Writes a complete CSV row to SD.
-8. Refreshes the OLED.
+7. Sends a CRC-protected `MXR3:` live telemetry line over LoRa/USB.
+8. Writes a complete CSV row to SD.
+9. Refreshes the OLED.
 
 ## SD CSV Contract
+
+Preferred live telemetry contract:
+
+```text
+MXR3:<pkt_id>,<timestamp_ms>,<altitude_m>,<temp_c>,<lm75_temp_c>,<pressure_hpa>,<lat>,<lon>,<rssi_dbm>,<flags>,<crc16_hex>
+```
+
+Legacy `MXR2:` remains accepted by the backend for old captures.
 
 Required columns accepted by the backend:
 
@@ -88,7 +98,7 @@ Example:
 Before apogee:
 
 ```text
-NRC INVICTUS II
+MACH-X RIDESHARE
 ALT: 120.4 m
 MAX:132m
 P:142 GPS BAR SD
@@ -97,7 +107,7 @@ P:142 GPS BAR SD
 After apogee:
 
 ```text
-NRC APOGEE
+MXR APOGEE
 670 m
 P:842 BAR SD
 ```
@@ -115,23 +125,23 @@ The post-apogee OLED value is latched and should remain visible through descent 
 | 5 | `0x20` | `FLAG_SD_OK` | SD file is open for logging |
 | 6 | `0x40` | `FLAG_STALE_SENSOR` | BMP280 has not produced a recent sample |
 
-## Optional Live Debug
+## Live Telemetry
 
-NRC live telemetry is disabled by default. It is only for bench debugging.
-
-To enable firmware LoRa/USB telemetry, add this build flag:
+Mach-X Rideshare live telemetry is enabled by default in firmware with:
 
 ```ini
--DENABLE_NRC_LIVE=1
+-DENABLE_RIDESHARE_LIVE=1
 ```
 
-To enable backend NRC serial ingest:
+Backend serial ingest is enabled by default. The rideshare link uses a second Heltec WiFi LoRa 32 V3 running `firmware/rideshare-ground-station`; the CanSat receiver remains separate. To start normally:
 
 ```bash
-ENABLE_NRC_LIVE=true node backend/server.js
+node backend/server.js
 ```
 
-Do not rely on optional live telemetry for the NRC competition result. The accepted competition path is the SD card CSV and the OLED apogee.
+Set `SERIAL_PORT_CANSAT` and `SERIAL_PORT_RIDESHARE` to distinct USB serial devices before a combined run.
+
+Set `ENABLE_RIDESHARE_LIVE=false` only when intentionally disabling the rideshare live serial path for bench isolation. Legacy `ENABLE_NRC_LIVE=false` is still accepted by the backend as a fallback alias.
 
 ## Build and Flash
 
@@ -142,25 +152,32 @@ pio run --target upload
 pio device monitor --baud 115200
 ```
 
-Expected boot output in competition mode:
+Expected boot output:
 
 ```text
-[NRC] Live LoRa telemetry disabled (ENABLE_NRC_LIVE=0)
-[NRC] GPS UART1 started
-[NRC] BMP280 OK @ 0x76
-[NRC] LM75 OK (...)
-[NRC] SD card OK, logging to /nrc_flight_001.csv
-[NRC] Setup complete - SD logging at 1 Hz
+[MXR] LoRa SX1262 OK @ 868 MHz
+[MXR] GPS UART1 started
+[MXR] BMP280 OK
+[MXR] LM75 OK (...)
+[MXR] SD card OK, logging to /mxr_flight_001.csv
+[MXR] Setup complete - live telemetry and SD logging at 1 Hz
 ```
 
-## Post-Flight Review
+## Live Dashboard and Recovery Fallback
 
-After recovery:
+Before launch:
+
+1. Start the backend with `node backend/server.js`.
+2. Open `http://localhost:3000/mach-x-rideshare`.
+3. Confirm the page title/logo shows `MACH-X RIDESHARE`.
+4. Confirm the rideshare ground receiver is forwarding `MXR3:` or `MXR2:` lines.
+5. Confirm live packets update the rideshare dashboard and the link diagnostics stay nominal.
+
+After recovery, if live telemetry was incomplete:
 
 1. Power off the payload.
 2. Remove the SD card.
-3. Copy or directly select `/nrc_flight_###.csv` from the laptop.
-4. Start the backend with `node backend/server.js`.
-5. Open `http://localhost:3000/nrc`.
-6. Upload the CSV.
-7. Verify the altitude-vs-time chart and apogee marker.
+3. Copy or directly select `/mxr_flight_###.csv` from the laptop.
+4. Open `http://localhost:3000/mach-x-rideshare`.
+5. Upload the CSV.
+6. Verify the altitude-vs-time chart and apogee marker.

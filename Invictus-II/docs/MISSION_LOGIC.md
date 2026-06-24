@@ -39,15 +39,15 @@ UOBRPL competes in three simultaneous national and international competitions, a
 | Parameter | Value |
 |---|---|
 | Target Altitude | 2,200 ft (670 m) |
-| Telemetry | 1 Hz, 433 MHz RFM69HCW |
-| Packet Format | 43-byte binary v2 CRC16 struct (CANSAT source) |
-| NRC Satellite | Heltec LoRa v3 868 MHz (NRC source) |
+| Telemetry | 1 Hz, 433 MHz RFM69HCW for CanSat; 868 MHz SX1262 LoRa for Mach-X Rideshare |
+| Packet Format | CanSat 60-byte binary v3 CRC16 struct; 43-byte v2 remains accepted |
+| Rideshare Payload | Heltec WiFi LoRa 32 V3, ASCII `MXR3:` preferred |
 | Ground Station | `npm start` — Node.js + Socket.io |
 | Rulebook | UKSEDS NRC 2025–26 |
 
 **Source identifiers in backend:**
 - `CANSAT` — INVICTUS II CanSat payload (STM32 + RFM69HCW)
-- `NRC` — NRC satellite (Heltec LoRa v3, ASCII CSV)
+- `RIDESHARE` — Mach-X Rideshare payload (Heltec/SX1262 LoRa, ASCII `MXR3:`/`MXR2:`)
 
 ---
 
@@ -99,7 +99,7 @@ UOBRPL competes in three simultaneous national and international competitions, a
 
 | Vehicle | Project | Competition | Dashboard Tab | Backend Source | Status |
 |---|---|---|---|---|---|
-| **INVICTUS II** | NRC Rocket | UKSEDS NRC | Avionics | `CANSAT` + `NRC` | ✅ Active |
+| **INVICTUS II** | NRC Rocket | UKSEDS NRC | Avionics | `CANSAT` + `RIDESHARE` | ✅ Active |
 | **NOVARIUM II** | ORT Rover | UKSEDS ORT | Rover | `ROVER` | ✅ Active |
 | **MATCHA** | MachX Rocket | EuRoC/Mach-X | Avionics | `MACHX` | 🔜 TBD |
 | **SUGAR** | MachX CanSat | EuRoC/Mach-X | CanSat | `SUGAR` | 🔜 TBD |
@@ -112,9 +112,9 @@ UOBRPL competes in three simultaneous national and international competitions, a
 Invictus-II/
 ├── backend/
 │   ├── server.js           ← UOBRPL Avionics — Express + Socket.io
-│   ├── phase-tracker.js    ← FSM for CANSAT, NRC, MACHX, SUGAR
-│   ├── parser.js           ← Binary (CANSAT/MACHX/SUGAR) + ASCII (NRC)
-│   ├── serial.js           ← Multi-port serial (CANSAT + NRC)
+│   ├── phase-tracker.js    ← FSM for CANSAT, RIDESHARE, MACHX, SUGAR
+│   ├── parser.js           ← Binary (CANSAT/MACHX/SUGAR) + ASCII (RIDESHARE)
+│   ├── serial.js           ← Multi-port serial (CANSAT + RIDESHARE)
 │   ├── rover-proxy.js      ← NOVARIUM II HTTP proxy
 │   └── db.js               ← SQLite — all sources
 ├── dashboard/
@@ -135,7 +135,7 @@ Invictus-II/
 # Mission Logic — Flight State Machine
 
 **System:** Ground Station Flight State Machine
-**Applies to:** All rocket/CanSat sources — CANSAT · NRC · MACHX · SUGAR
+**Applies to:** All rocket/CanSat sources — CANSAT · RIDESHARE · MACHX · SUGAR
 **File:** `backend/phase-tracker.js`
 
 ---
@@ -167,12 +167,26 @@ The FSM runs **one independent state machine per source**:
 
 | Source | Vehicle | Hardware | Packet Format | Accel | Flags |
 |---|---|---|---|---|---|
-| `CANSAT` | INVICTUS II | STM32 + RFM69HCW 433MHz | 43-byte binary v2 | ✅ | ✅ |
-| `NRC` | INVICTUS II | Heltec LoRa v3 868MHz | ASCII CSV `NRC2:...` | ❌ | ✅ |
+| `CANSAT` | INVICTUS II | STM32 + RFM69HCW 433MHz | 60-byte binary v3, 43-byte v2 accepted | ✅ | ✅ |
+| `RIDESHARE` | Mach-X Rideshare | Heltec LoRa v3 868MHz | ASCII CSV `MXR3:...`, `MXR2:...` accepted | ❌ | ✅ |
 | `MACHX` | MATCHA | TBD | TBD (likely 43-byte binary v2 if hardware is reused) | 🔜 | 🔜 |
 | `SUGAR` | SUGAR CanSat | TBD | TBD | 🔜 | 🔜 |
 
 > **Note:** ROVER (NOVARIUM II) does not use the FSM — it is controlled via HTTP, not telemetry.
+
+## 2.1 CanSat Deployment And Recovery Modes
+
+The CanSat flight firmware runs its own telemetry mode state machine in addition to the ground-side FSM:
+
+| Mode | Meaning | Live telemetry behavior |
+|---|---|---|
+| `PRE_DEPLOY` | CanSat is powered before deployment. The rocket shell may block RF completely. | CanSat keeps transmitting; backend and ground receiver keep listening forever. Dashboard shows waiting/no signal and does not show old SQLite history as live data. GPS is parsed in the background but suppressed from live packets. |
+| `DEPLOYED_SCIENCE` | Deployment inferred from launch, apogee/drop, and descent trend. | BMP388, LM75 x4, MPU6500, SD/radio health, altitude, pressure, and temperature are transmitted. GPS remains suppressed. |
+| `GPS_RECOVERY` | Deployed CanSat has descended to `baseline_altitude + 20 m`. | Non-GPS sampling and SD writes stop in firmware quiet mode. Live packets prioritize GPS coordinates for physical recovery. `flags & 0x80` is set. |
+
+No deployment switch is required in this pass. Deployment is inferred from barometric launch/apogee/descent behavior. The GPS module stays physically powered on `5V_BUS`, because the PCB rail is hard-wired, but live GPS coordinates are not emitted until `GPS_RECOVERY`.
+
+Operationally, a blank CanSat dashboard before deployment is normal. The correct setup is two active receivers connected to the backend host at the same time: one CanSat RFM69 ground receiver via `SERIAL_PORT_CANSAT`, and one Mach-X Rideshare LoRa receiver via `SERIAL_PORT_RIDESHARE`.
 
 ---
 

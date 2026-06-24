@@ -29,7 +29,7 @@ async function withMockedServer(fn) {
   process.env.PORT = '0';
   const captured = {
     events: [
-      { source: 'NRC', event_type: 'ASCENDING', altitude_m: 12, timestamp_ms: 3000, received_at: Date.now() },
+      { source: 'RIDESHARE', event_type: 'ASCENDING', altitude_m: 12, timestamp_ms: 3000, received_at: Date.now() },
       { source: 'CANSAT', event_type: 'ASCENDING', altitude_m: 15, timestamp_ms: 3000, received_at: Date.now() }
     ]
   };
@@ -43,6 +43,7 @@ async function withMockedServer(fn) {
         getSignalState: () => ({
           mode: 'hardware',
           CANSAT: { connected: false },
+          RIDESHARE: { connected: false },
           NRC: { connected: false }
         })
       };
@@ -83,7 +84,7 @@ test('DELETE /api/events clears mission log events for the requested source', as
 
     assert.equal(res.status, 200);
     assert.equal(body.ok, true);
-    assert.equal(body.source, 'NRC');
+    assert.equal(body.source, 'RIDESHARE');
     assert.equal(body.cleared, 1);
     assert.deepEqual(captured.events.map((event) => event.source), ['CANSAT']);
   });

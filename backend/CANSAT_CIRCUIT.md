@@ -140,6 +140,56 @@ This file is the source-of-truth wiring map for the STM32 Bluepill CanSat payloa
 - `ANT`: SMA female connector.
 - Frequency: `433.0 MHz`.
 
+## Live Telemetry Contract
+
+CanSat live telemetry uses the STM32/RFM69 path and is separate from the Mach-X Rideshare Heltec/SX1262 path. The backend should have both receivers connected during operations:
+
+- `SERIAL_PORT_CANSAT`: ESP32 WROOM-32 + RFM69HCW ground receiver.
+- `SERIAL_PORT_RIDESHARE`: Heltec WiFi LoRa 32 V3 rideshare ground receiver.
+
+The CanSat firmware transmits continuously, including before deployment. If the rocket shell blocks RF, the dashboard should remain in a waiting/no-signal state and the backend/ground receiver should keep listening indefinitely.
+
+Preferred CanSat packet is binary v3:
+
+- Total length: `60` bytes.
+- Sync: `0xA55A`.
+- Version: `3`.
+- Source ID: `1`.
+- Payload length: `53`.
+- CRC: CRC16-CCITT over bytes `0..57`, stored little-endian at bytes `58..59`.
+
+| Offset | Field |
+|---:|---|
+| 0 | `sync` uint16le |
+| 2 | `version` uint8 |
+| 3 | `source_id` uint8 |
+| 4 | `payload_len` uint8 |
+| 5 | `pkt_id` uint16le |
+| 7 | `timestamp_ms` uint32le |
+| 11 | `mode` uint8: `0 PRE_DEPLOY`, `1 DEPLOYED_SCIENCE`, `2 GPS_RECOVERY` |
+| 12 | `altitude_m` floatle |
+| 16 | `temp_c` floatle |
+| 20 | `pressure_hpa` floatle |
+| 24 | `temp_c_1` floatle |
+| 28 | `temp_c_2` floatle |
+| 32 | `temp_c_3` floatle |
+| 36 | `temp_c_4` floatle |
+| 40 | `accel_z` floatle |
+| 44 | `gyro_x` floatle |
+| 48 | `lat` floatle |
+| 52 | `lon` floatle |
+| 56 | `rssi_dbm` int8, stamped by ground receiver |
+| 57 | `flags` uint8, bit `0x80` means GPS recovery |
+| 58 | `crc16_ccitt` uint16le |
+
+Legacy `43` byte v2 frames remain accepted by the ground receiver and backend.
+
+### CanSat Mission Modes
+
+- `PRE_DEPLOY`: CanSat transmits, but RF may be shielded by the rocket shell. GPS is kept warm in the parser but not emitted live.
+- `DEPLOYED_SCIENCE`: after inferred deployment, live telemetry includes BMP388, LM75 x4, MPU6500, SD/radio health, altitude, pressure, and temperature. GPS remains suppressed.
+- `GPS_RECOVERY`: once deployed altitude is `<= baseline + 20 m`, non-GPS sampling and SD writes stop in firmware quiet mode. Live telemetry prioritizes GPS coordinates for recovery.
+
 ### ESP32-CAM
 
 - All three `GND` pins: `GROUND`.

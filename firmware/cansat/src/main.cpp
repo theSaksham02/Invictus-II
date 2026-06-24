@@ -45,6 +45,11 @@ const uint8_t LM75_ADDRS[4] = { LM75_ADDR_1, LM75_ADDR_2, LM75_ADDR_3, LM75_ADDR
 #define FLAG_IMU_OK       0x10
 #define FLAG_SD_OK        0x20
 #define FLAG_STALE_SENSOR 0x40
+#define FLAG_GPS_RECOVERY 0x80
+
+#define LAUNCH_ALTITUDE_AGL_M 15.0f
+#define APOGEE_DROP_M 20.0f
+#define RECOVERY_ALTITUDE_AGL_M 20.0f
 
 // ─── Globals ─────────────────────────────────────────────────────────────────
 RH_RF69 rf69(RFM69_CS, RFM69_INT);
@@ -69,9 +74,12 @@ const uint32_t GPS_LISTEN_TIMEOUT_MS = 2000;
 
 float baselinePressure = 1013.25f;
 uint8_t baselineSamples = 0;
+float baselineAltitude = 0.0f;
 float maxAltitude = 0.0f;
 uint8_t flags = 0;
 bool radio_ok = false;
+uint8_t missionMode = CANSAT_MODE_PRE_DEPLOY;
+uint8_t apogeeConfirmCount = 0;
 
 // Watchdog timestamps
 uint32_t lastBmpUpdateMs = 0;
@@ -206,6 +214,51 @@ void recoverI2CBus() {
     #endif
 }
 
+void updateMissionMode(float altitudeM) {
+    if (!(flags & FLAG_LAUNCHED) && altitudeM > LAUNCH_ALTITUDE_AGL_M) {
+        flags |= FLAG_LAUNCHED;
+    }
+
+    if (altitudeM > maxAltitude) {
+        maxAltitude = altitudeM;
+    }
+
+    if ((flags & FLAG_LAUNCHED) && !(flags & FLAG_APOGEE)) {
+        if ((maxAltitude - altitudeM) > APOGEE_DROP_M) {
+            if (apogeeConfirmCount < 3) apogeeConfirmCount++;
+        } else {
+            apogeeConfirmCount = 0;
+        }
+
+        if (apogeeConfirmCount >= 3) {
+            flags |= FLAG_APOGEE;
+            missionMode = CANSAT_MODE_DEPLOYED_SCIENCE;
+            pulseIndicator(3);
+        }
+    }
+
+    if (missionMode == CANSAT_MODE_DEPLOYED_SCIENCE &&
+        altitudeM <= (baselineAltitude + RECOVERY_ALTITUDE_AGL_M)) {
+        missionMode = CANSAT_MODE_GPS_RECOVERY;
+        pulseIndicator(6, 30, 40);
+    }
+}
+
+uint8_t buildTransmitFlags(bool gpsFixValid) {
+    uint8_t txFlags = flags;
+
+    if (missionMode == CANSAT_MODE_GPS_RECOVERY) {
+        txFlags |= FLAG_GPS_RECOVERY;
+        txFlags &= ~(FLAG_BMP_OK | FLAG_IMU_OK | FLAG_SD_OK | FLAG_STALE_SENSOR);
+        if (gpsFixValid) txFlags |= FLAG_GPS_FIX;
+        else txFlags &= ~FLAG_GPS_FIX;
+        return txFlags;
+    }
+
+    txFlags &= ~(FLAG_GPS_RECOVERY | FLAG_GPS_FIX);
+    return txFlags;
+}
+
 // ─── Setup ───────────────────────────────────────────────────────────────────
 void setup() {
     #if defined(HAL_AFIO_MODULE_ENABLED)
@@ -286,7 +339,7 @@ void setup() {
     if (sd.begin(SdSpiConfig(SD_CS, DEDICATED_SPI, SD_SCK_MHZ(4), &sdSPI))) {
         logFile = sd.open("machx_flight.csv", O_WRONLY | O_CREAT | O_APPEND);
         if (logFile) {
-            logFile.println("pkt_id,timestamp_ms,altitude_m,temp_c,pressure_hpa,temp_c_1,temp_c_2,temp_c_3,temp_c_4,accel_z,gyro_x,lat,lon,rssi_dbm,flags");
+            logFile.println("pkt_id,timestamp_ms,mission_mode,altitude_m,temp_c,pressure_hpa,temp_c_1,temp_c_2,temp_c_3,temp_c_4,accel_z,gyro_x,lat,lon,rssi_dbm,flags");
             flags |= FLAG_SD_OK;
         }
     }
@@ -315,87 +368,84 @@ void loop() {
             bool timeout = (now - tdmStateStartMs >= GPS_LISTEN_TIMEOUT_MS);
             
             if (gpsReady || timeout) {
-                // 1. Read Sensors
+                bool gpsFixValid = gps.location.isValid() && gps.location.age() < 2000;
+                bool sampleScience = missionMode != CANSAT_MODE_GPS_RECOVERY;
                 bool bmpReadSuccess = false;
-                if (flags & FLAG_BMP_OK && bmp.performReading()) {
-                    temp_bmp = bmp.temperature;
-                    press_hpa = bmp.pressure / 100.0f;
-                    
-                    if (baselineSamples < 20) {
-                        baselinePressure = ((baselinePressure * baselineSamples) + press_hpa) / (baselineSamples + 1);
-                        baselineSamples++;
-                    }
-                    alt_m = bmp.readAltitude(baselinePressure);
-                    if (alt_m > maxAltitude) maxAltitude = alt_m;
-                    bmpReadSuccess = true;
-                    lastBmpUpdateMs = now;
-                }
-                
                 bool lm75Success[4] = {false};
-                for (int i = 0; i < 4; i++) {
-                    float t = readLM75(LM75_ADDRS[i]);
-                    if (t != -999.0f) {
-                        temp_lm75[i] = t;
-                        lastLm75UpdateMs[i] = now;
-                        lm75Success[i] = true;
-                    } else {
-                        temp_lm75[i] = -999.0f;
-                    }
-                }
 
-                // I2C Bus recovery trigger: if BMP and all LM75s fail consecutively
-                static int consecutiveI2cFails = 0;
-                if (!bmpReadSuccess && !lm75Success[0] && !lm75Success[1] && !lm75Success[2] && !lm75Success[3]) {
-                    consecutiveI2cFails++;
-                    if (consecutiveI2cFails >= 3) {
-                        recoverI2CBus();
+                if (sampleScience) {
+                    if (flags & FLAG_BMP_OK && bmp.performReading()) {
+                        temp_bmp = bmp.temperature;
+                        press_hpa = bmp.pressure / 100.0f;
+
+                        if (baselineSamples < 20) {
+                            baselinePressure = ((baselinePressure * baselineSamples) + press_hpa) / (baselineSamples + 1);
+                            baselineSamples++;
+                            baselineAltitude = 0.0f;
+                        }
+                        alt_m = bmp.readAltitude(baselinePressure);
+                        bmpReadSuccess = true;
+                        lastBmpUpdateMs = now;
+                    }
+                    
+                    for (int i = 0; i < 4; i++) {
+                        float t = readLM75(LM75_ADDRS[i]);
+                        if (t != -999.0f) {
+                            temp_lm75[i] = t;
+                            lastLm75UpdateMs[i] = now;
+                            lm75Success[i] = true;
+                        } else {
+                            temp_lm75[i] = -999.0f;
+                        }
+                    }
+
+                    // I2C bus recovery is only attempted during science sampling.
+                    static int consecutiveI2cFails = 0;
+                    if (!bmpReadSuccess && !lm75Success[0] && !lm75Success[1] && !lm75Success[2] && !lm75Success[3]) {
+                        consecutiveI2cFails++;
+                        if (consecutiveI2cFails >= 3) {
+                            recoverI2CBus();
+                            consecutiveI2cFails = 0;
+                        }
+                    } else {
                         consecutiveI2cFails = 0;
                     }
-                } else {
-                    consecutiveI2cFails = 0;
-                }
-                
-                if (gps.location.isValid() && gps.location.age() < 2000) {
-                    gps_lat = gps.location.lat();
-                    gps_lon = gps.location.lng();
-                    flags |= FLAG_GPS_FIX;
-                } else {
-                    flags &= ~FLAG_GPS_FIX;
-                }
-                
-                // Pseudo-logic for mission phase
-                if (!(flags & FLAG_LAUNCHED) && alt_m > 15.0) {
-                    flags |= FLAG_LAUNCHED;
-                }
-                if ((flags & FLAG_LAUNCHED) && !(flags & FLAG_APOGEE) && (maxAltitude - alt_m) > 20.0) {
-                    flags |= FLAG_APOGEE;
-                }
-                
-                // Read IMU
-                readMPU6500();
 
-                // Stale sensor watchdog (stale if older than 3 seconds, or IMU not ok)
-                bool sensorStale = false;
-                if (now - lastBmpUpdateMs > SENSOR_TIMEOUT_MS) {
-                    sensorStale = true;
-                }
-                for (int i = 0; i < 4; i++) {
-                    if (now - lastLm75UpdateMs[i] > SENSOR_TIMEOUT_MS) {
+                    updateMissionMode(alt_m);
+
+                    if (missionMode != CANSAT_MODE_GPS_RECOVERY) {
+                        readMPU6500();
+                    }
+
+                    bool sensorStale = false;
+                    if (now - lastBmpUpdateMs > SENSOR_TIMEOUT_MS) {
                         sensorStale = true;
                     }
-                }
-                if ((flags & FLAG_LAUNCHED) && (!gps.location.isValid() || gps.location.age() > 5000)) {
-                    sensorStale = true;
-                }
-                if (!(flags & FLAG_IMU_OK)) {
-                    sensorStale = true;
+                    for (int i = 0; i < 4; i++) {
+                        if (now - lastLm75UpdateMs[i] > SENSOR_TIMEOUT_MS) {
+                            sensorStale = true;
+                        }
+                    }
+                    if (!(flags & FLAG_IMU_OK)) {
+                        sensorStale = true;
+                    }
+
+                    if (sensorStale) {
+                        flags |= FLAG_STALE_SENSOR;
+                    } else {
+                        flags &= ~FLAG_STALE_SENSOR;
+                    }
                 }
 
-                if (sensorStale) {
-                    flags |= FLAG_STALE_SENSOR;
-                } else {
-                    flags &= ~FLAG_STALE_SENSOR;
+                if (missionMode == CANSAT_MODE_GPS_RECOVERY && gpsFixValid) {
+                    gps_lat = gps.location.lat();
+                    gps_lon = gps.location.lng();
+                } else if (missionMode != CANSAT_MODE_GPS_RECOVERY) {
+                    gps_lat = 0.0f;
+                    gps_lon = 0.0f;
                 }
+
+                uint8_t txFlags = buildTransmitFlags(gpsFixValid);
 
                 TelemetryPacket packet = {};
                 packet.sync = TELEMETRY_SYNC;
@@ -404,15 +454,20 @@ void loop() {
                 packet.payload_len = TELEMETRY_PAYLOAD_LEN;
                 packet.pkt_id = pkt_id;
                 packet.timestamp_ms = now;
+                packet.mode = missionMode;
                 packet.altitude_m = alt_m;
                 packet.temp_c = temp_bmp;
                 packet.pressure_hpa = press_hpa;
+                packet.temp_c_1 = temp_lm75[0];
+                packet.temp_c_2 = temp_lm75[1];
+                packet.temp_c_3 = temp_lm75[2];
+                packet.temp_c_4 = temp_lm75[3];
                 packet.accel_z = accel_z;
                 packet.gyro_x = gyro_x;
                 packet.lat = gps_lat;
                 packet.lon = gps_lon;
                 packet.rssi_dbm = rssi_dbm;
-                packet.flags = flags;
+                packet.flags = txFlags;
                 packet.crc16 = crc16Ccitt((uint8_t*)&packet, sizeof(packet) - sizeof(packet.crc16));
 
                 if (radio_ok) {
@@ -420,17 +475,17 @@ void loop() {
                     rf69.send((uint8_t*)&packet, sizeof(packet));
                 }
 
-                // USB bench output uses the same 43-byte frame that the backend parser accepts.
+                // USB bench output uses the same v3 frame that the backend parser accepts.
                 Serial.write((uint8_t*)&packet, sizeof(packet));
                 
-                // Log to SD with upload-compatible CSV headers and bounded/periodic flushing.
-                if (flags & FLAG_SD_OK) {
-                    char csvLine[192];
+                // Log science data only. GPS recovery avoids SD writes and non-GPS sampling.
+                if ((txFlags & FLAG_SD_OK) && missionMode != CANSAT_MODE_GPS_RECOVERY) {
+                    char csvLine[208];
                     int csvWritten = snprintf(csvLine, sizeof(csvLine),
-                        "%u,%lu,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.6f,%.6f,%d,%u\n",
-                        pkt_id, (unsigned long)now, alt_m, temp_bmp, press_hpa,
+                        "%u,%lu,%u,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.6f,%.6f,%d,%u\n",
+                        pkt_id, (unsigned long)now, missionMode, alt_m, temp_bmp, press_hpa,
                         temp_lm75[0], temp_lm75[1], temp_lm75[2], temp_lm75[3],
-                        accel_z, gyro_x, gps_lat, gps_lon, rssi_dbm, flags
+                        accel_z, gyro_x, gps_lat, gps_lon, rssi_dbm, txFlags
                     );
 
                     if (csvWritten > 0 && csvWritten < (int)sizeof(csvLine)) {

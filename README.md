@@ -47,21 +47,21 @@
 
 ## 🌌 Mission Overview
 
-> *"One flight. One recovered SD card. Sensor data to verified apogee."*
+> *"One flight. Live rideshare telemetry. SD recovery backup."*
 
 **INVICTUS II** is the complete avionics and ground station stack for three UKSEDS competitions:
 
 | Competition | Vehicle | Avionics |
 |---|---|---|
 | **MachX** | Bigger rocket + CanSat inside | STM32 Bluepill · RFM69HCW 433MHz |
-| **NRC** | Smaller standalone rocket | Heltec LoRa V3 · SD recovery + OLED apogee |
+| **Mach-X Rideshare** | Smaller standalone rocket payload | Heltec LoRa V3 · live telemetry + SD/OLED backup |
 | **NRC Rover** | Rocket + Rover deployment (later) | RPi 4B · Flask · BTS7960 |
 
 ```
 Target Altitude  →  2,200 ft (670 m)
-Telemetry Rate   →  1 Hz logging
-Radio Links      →  433 MHz RFM69 for MachX CanSat live tracking
-Ground Station   →  Node.js · SQLite · Socket.io for MachX · NRC SD review
+Telemetry Rate   →  1 Hz live telemetry + SD logging
+Radio Links      →  433 MHz RFM69 for MachX CanSat, 868 MHz SX1262 for Mach-X Rideshare
+Ground Station   →  Node.js · SQLite · Socket.io for MachX CanSat + Mach-X Rideshare
 Rover            →  Raspberry Pi 4B · Flask · BTS7960 · Camera Module 3
 ```
 
@@ -75,20 +75,21 @@ Rover            →  Raspberry Pi 4B · Flask · BTS7960 · Camera Module 3
 │                                                                 │
 │   ┌──────────────────┐         ┌─────────────────────────┐     │
 │   │  STM32 BLUEPILL  │         │   HELTEC LoRa V3        │     │
-│   │  (MachX CanSat)  │         │   (NRC Rocket)          │     │
+│   │  (MachX CanSat)  │         │   (Mach-X Rideshare)    │     │
 │   │  BMP388 · MPU6500│         │   BMP280 · NEO-6M       │     │
 │   │  RFM69HCW 433MHz │         │   SD card + OLED        │     │
 │   └────────┬─────────┘         └──────────┬──────────────┘     │
-│            │ 43-byte binary v2             │  recovery CSV      │
-│            │ CRC16-CCITT                   │  apogee latched    │
+│            │ 43-byte binary v2             │  MXR3 live ASCII   │
+│            │ CRC16-CCITT                   │  CRC16 + SD/OLED backup │
 └────────────┼───────────────────────────────┼────────────────────┘
              │                               │
-             ▼                               ▼ after recovery
+             ▼                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                    💻  GROUND STATION                           │
 │                                                                 │
 │   MachX USB ──► serial.js ──► parser.js ──► phase-tracker.js   │
-│   NRC SD CSV ─► upload API ─► SQLite ─────► altitude chart      │
+│   Rideshare ──► serial.js ──► parser.js ──► phase-tracker.js   │
+│   SD CSV ─────► upload API ─► SQLite ─────► recovery fallback   │
 │                                    │                            │
 │                         ┌──────────┼──────────┐                │
 │                         ▼          ▼           ▼                │
@@ -100,7 +101,7 @@ Rover            →  Raspberry Pi 4B · Flask · BTS7960 · Camera Module 3
 │                                    ▼                            │
 │              ┌──────────────────────────────────────┐          │
 │              │   🖥️  BROWSER DASHBOARD               │          │
-│              │   MachX live · NRC SD review · ROVER  │          │
+│              │   MachX CanSat · Mach-X Rideshare · ROVER │       │
 │              └──────────────────────────────────────┘          │
 └─────────────────────────────────────────────────────────────────┘
              ▲
@@ -121,7 +122,7 @@ Rover            →  Raspberry Pi 4B · Flask · BTS7960 · Camera Module 3
 | System | Brain | Radio | Sensors | Notes |
 |---|---|---|---|---|
 | 🚀 **MachX CanSat** | STM32 Bluepill | RFM69HCW 433MHz | BMP388, MPU-6500, NEO-6M, LM75 | 43-byte binary v2 packet |
-| 🛰️ **NRC Rocket** | Heltec LoRa V3 (ESP32-S3) | SD card | BMP280, NEO-6M, LM75 | Recovery CSV + OLED apogee |
+| 🛰️ **Mach-X Rideshare** | Heltec LoRa V3 (ESP32-S3) | SX1262 868MHz + SD card | BMP280, NEO-6M, LM75 | Live `MXR3:` telemetry + SD/OLED backup |
 | 🤖 **NRC Rover** *(later)* | Raspberry Pi 4B | WiFi | BTS7960 x2, Camera M3 | Flask HTTP server |
 | ⚡ **Power** | TP4056 → XL6009 → AMS1117 | — | — | 45 min endurance |
 
@@ -148,7 +149,7 @@ npm install
 
 # 2. Configure
 cp .env.example .env
-# → Set SERIAL_PORT_CANSAT for MachX live tracking. NRC live ingest is off by default.
+# → Set SERIAL_PORT_CANSAT and SERIAL_PORT_RIDESHARE to different active receivers. Mach-X Rideshare live ingest is on by default.
 
 # 3. Start the monitoring software
 npm start
@@ -193,14 +194,14 @@ GET  /api/rover/data      →  Rover sensor readings
 ### Socket.io Events
 
 ```
-← packet              Live MachX telemetry packets
+← packet              Live MachX CanSat and Mach-X Rideshare telemetry packets
 ← mission_event       IDLE→LAUNCHED→ASCENDING→APOGEE→DESCENDING→LANDED
 ← signal_lost         No packet received for 5 seconds
 ← signal_recovered    Signal resumed after gap
 ← sd_upload_complete  SD card CSV processed
 ← history             Sent on connect: last 60 packets + all events
 
-→ subscribe_source    { source: "CANSAT" | "ALL" }
+→ subscribe_source    { source: "CANSAT" | "RIDESHARE" | "MACHX" | "ALL" }
 → request_history     { source, limit }
 ```
 
@@ -231,13 +232,23 @@ Offset  Size  Type     Field
 41      2     uint16   crc16_ccitt over bytes 0-40
 ```
 
-### NRC Rocket — SD Recovery CSV
+### Mach-X Rideshare — Live MXR3 + SD Recovery CSV
+
+Live packets from the Heltec payload use `MXR3:` over SX1262 LoRa to a second Heltec ground receiver, which forwards valid lines to USB serial. Legacy `MXR2:`, `NRC:`, and `NRC2:` captures are still accepted as compatibility aliases.
+
+```text
+MXR3:<pkt_id>,<timestamp_ms>,<altitude_m>,<temp_c>,<lm75_temp_c>,<pressure_hpa>,<lat>,<lon>,<rssi_dbm>,<flags>,<crc16_hex>
+```
+
+CanSat and rideshare use completely separate live receivers and both must be connected to the backend host when both sources are active. Rideshare ESP32-CAM video is saved locally on the camera SD card; it is not transmitted live.
+
+The same payload also writes a recovery CSV to SD:
 
 ```
 pkt_id,timestamp_ms,altitude_m,temp_c,pressure_hpa,lat,lon,flags,max_altitude_m,apogee_detected
 ```
 
-Optional NRC debug streaming can be enabled for bench work with `ENABLE_NRC_LIVE=true` in the backend and `-DENABLE_NRC_LIVE=1` in the firmware build flags. It is not the NRC competition workflow.
+Set `ENABLE_RIDESHARE_LIVE=false` only when intentionally disabling the Mach-X Rideshare live serial ingest for bench isolation. Legacy `ENABLE_NRC_LIVE=false` is still accepted as a fallback.
 
 ---
 
@@ -268,7 +279,7 @@ Invictus-II/
 ├── 📁 backend/
 │   ├── server.js          ← Express + Socket.io entry point
 │   ├── db.js              ← SQLite schema + queries
-│   ├── parser.js          ← Binary CANSAT + NRC ASCII parser
+│   ├── parser.js          ← Binary CANSAT + Mach-X Rideshare ASCII parser
 │   ├── serial.js          ← SerialPort + auto-reconnect
 │   ├── phase-tracker.js   ← Flight state machine (per source)
 │   ├── rover-proxy.js     ← HTTP proxy → RPi Flask
@@ -277,13 +288,13 @@ Invictus-II/
 │
 ├── 📁 dashboard/          ← ✅ Operational
 │   ├── index.html
-│   ├── nrc.html
+│   ├── nrc.html           ← Legacy redirect to /mach-x-rideshare
 │   ├── ort.html
 │   └── mach-x.html
 │
 ├── 📁 firmware/           ← ✅ Operational
 │   ├── cansat/            ← STM32duino (PlatformIO)
-│   ├── nrc/               ← Heltec SD recovery + OLED apogee
+│   ├── nrc/               ← Heltec Mach-X Rideshare live telemetry + SD/OLED backup
 │   └── rover/             ← RPi Flask Control
 │
 └── README.md

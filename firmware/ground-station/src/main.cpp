@@ -4,9 +4,9 @@
  * Radio: RFM69HCW @ 433.0 MHz
  *
  * Role:
- *   - Receives the 43-byte CANSAT v2 binary telemetry frame over RFM69HCW
+ *   - Receives 43-byte CANSAT v2 and 60-byte CANSAT v3 binary telemetry frames over RFM69HCW
  *   - Validates sync/version/source/payload length and CRC16-CCITT
- *   - Stamps ground-side RSSI into byte 39
+ *   - Stamps ground-side RSSI into the protocol-specific RSSI byte
  *   - Recomputes CRC and forwards the raw frame over USB Serial
  */
 
@@ -23,12 +23,17 @@
 #define GCS_SERIAL_BAUD 115200
 
 #define TELEMETRY_SYNC 0xA55A
-#define TELEMETRY_VERSION 2
+#define TELEMETRY_VERSION_V2 2
+#define TELEMETRY_VERSION_V3 3
 #define TELEMETRY_SOURCE_CANSAT 1
-#define TELEMETRY_PAYLOAD_LEN 36
-#define TELEMETRY_FRAME_BYTES 43
-#define TELEMETRY_RSSI_OFFSET 39
-#define TELEMETRY_CRC_OFFSET 41
+#define TELEMETRY_PAYLOAD_LEN_V2 36
+#define TELEMETRY_PAYLOAD_LEN_V3 53
+#define TELEMETRY_FRAME_BYTES_V2 43
+#define TELEMETRY_FRAME_BYTES_V3 60
+#define TELEMETRY_RSSI_OFFSET_V2 39
+#define TELEMETRY_RSSI_OFFSET_V3 56
+#define TELEMETRY_CRC_OFFSET_V2 41
+#define TELEMETRY_CRC_OFFSET_V3 58
 
 RH_RF69 rf69(RFM69_CS, RFM69_IRQ);
 
@@ -43,17 +48,37 @@ uint16_t crc16Ccitt(const uint8_t* data, size_t len) {
     return crc;
 }
 
-bool validFrame(const uint8_t* buf, uint8_t len) {
-    if (len != TELEMETRY_FRAME_BYTES) return false;
+struct FrameMeta {
+    uint8_t len;
+    uint8_t version;
+    uint8_t payloadLen;
+    uint8_t rssiOffset;
+    uint8_t crcOffset;
+};
+
+bool frameMetaForLength(uint8_t len, FrameMeta* meta) {
+    if (len == TELEMETRY_FRAME_BYTES_V2) {
+        *meta = {TELEMETRY_FRAME_BYTES_V2, TELEMETRY_VERSION_V2, TELEMETRY_PAYLOAD_LEN_V2, TELEMETRY_RSSI_OFFSET_V2, TELEMETRY_CRC_OFFSET_V2};
+        return true;
+    }
+    if (len == TELEMETRY_FRAME_BYTES_V3) {
+        *meta = {TELEMETRY_FRAME_BYTES_V3, TELEMETRY_VERSION_V3, TELEMETRY_PAYLOAD_LEN_V3, TELEMETRY_RSSI_OFFSET_V3, TELEMETRY_CRC_OFFSET_V3};
+        return true;
+    }
+    return false;
+}
+
+bool validFrame(const uint8_t* buf, uint8_t len, FrameMeta* meta) {
+    if (!frameMetaForLength(len, meta)) return false;
     uint16_t sync = static_cast<uint16_t>(buf[0]) | (static_cast<uint16_t>(buf[1]) << 8);
     if (sync != TELEMETRY_SYNC) return false;
-    if (buf[2] != TELEMETRY_VERSION) return false;
+    if (buf[2] != meta->version) return false;
     if (buf[3] != TELEMETRY_SOURCE_CANSAT) return false;
-    if (buf[4] != TELEMETRY_PAYLOAD_LEN) return false;
+    if (buf[4] != meta->payloadLen) return false;
 
-    uint16_t receivedCrc = static_cast<uint16_t>(buf[TELEMETRY_CRC_OFFSET]) |
-        (static_cast<uint16_t>(buf[TELEMETRY_CRC_OFFSET + 1]) << 8);
-    uint16_t expectedCrc = crc16Ccitt(buf, TELEMETRY_FRAME_BYTES - 2);
+    uint16_t receivedCrc = static_cast<uint16_t>(buf[meta->crcOffset]) |
+        (static_cast<uint16_t>(buf[meta->crcOffset + 1]) << 8);
+    uint16_t expectedCrc = crc16Ccitt(buf, meta->len - 2);
     return receivedCrc == expectedCrc;
 }
 
@@ -117,7 +142,8 @@ void loop() {
     uint8_t len = sizeof(buf);
     if (!rf69.recv(buf, &len)) return;
 
-    if (!validFrame(buf, len)) {
+    FrameMeta meta = {};
+    if (!validFrame(buf, len, &meta)) {
         Serial.printf("GCS:WARN rejected frame len=%u\n", len);
         return;
     }
@@ -125,11 +151,11 @@ void loop() {
     int rssi = rf69.lastRssi();
     if (rssi < -127) rssi = -127;
     if (rssi > 20) rssi = 20;
-    buf[TELEMETRY_RSSI_OFFSET] = static_cast<uint8_t>(static_cast<int8_t>(rssi));
+    buf[meta.rssiOffset] = static_cast<uint8_t>(static_cast<int8_t>(rssi));
 
-    uint16_t crc = crc16Ccitt(buf, TELEMETRY_FRAME_BYTES - 2);
-    buf[TELEMETRY_CRC_OFFSET] = static_cast<uint8_t>(crc & 0xFF);
-    buf[TELEMETRY_CRC_OFFSET + 1] = static_cast<uint8_t>((crc >> 8) & 0xFF);
+    uint16_t crc = crc16Ccitt(buf, meta.len - 2);
+    buf[meta.crcOffset] = static_cast<uint8_t>(crc & 0xFF);
+    buf[meta.crcOffset + 1] = static_cast<uint8_t>((crc >> 8) & 0xFF);
 
-    Serial.write(buf, TELEMETRY_FRAME_BYTES);
+    Serial.write(buf, meta.len);
 }

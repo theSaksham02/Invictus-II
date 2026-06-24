@@ -1,6 +1,6 @@
-# Rideshare Payload Testing Guide - NRC Invictus II
+# Mach-X Rideshare Payload Testing Guide - Invictus II
 
-This guide covers the NRC rocket workflow only. NRC is a post-flight SD recovery system: the Heltec records the flight, latches apogee on its OLED, and the laptop reviews the recovered CSV after landing. Mach-X/CanSat live tracking is separate.
+This guide covers the Mach-X Rideshare payload. The flight Heltec sends live `MXR3:` telemetry over SX1262 LoRa to a second Heltec ground receiver, which forwards validated `MXR3:`/`MXR2:` lines over USB serial to the backend. The payload still records the full flight to SD with a latched OLED apogee as the recovery backup.
 
 ## Team Roles
 
@@ -8,8 +8,19 @@ This guide covers the NRC rocket workflow only. NRC is a post-flight SD recovery
 |------|----------------|
 | Hardware Lead | Wiring, soldering checks, power-on sequencing |
 | Sensor Tech | BMP280, LM75, GPS, and SD card verification |
-| Software Lead | Firmware flashing and post-flight review page |
-| Data Analyst | Upload recovered CSV, verify apogee marker, export data |
+| Software Lead | Firmware flashing, live dashboard, and recovery CSV fallback |
+| Data Analyst | Monitor live telemetry, verify apogee marker, export data |
+
+## Live Receiver Topology
+
+The Mach-X Rideshare and CanSat links are separate and must both be connected when both vehicles are active:
+
+| Source | Air hardware | Ground receiver | Backend port |
+|--------|--------------|-----------------|--------------|
+| `CANSAT` | STM32 + RFM69HCW binary frames | CanSat RFM69 ground receiver | `SERIAL_PORT_CANSAT` |
+| `RIDESHARE` | Heltec WiFi LoRa 32 V3 + SX1262 ASCII `MXR3` | second Heltec WiFi LoRa 32 V3 running `firmware/rideshare-ground-station` | `SERIAL_PORT_RIDESHARE` |
+
+The ESP32-CAM is not part of the live telemetry path. It records video locally to the camera SD card and is recovered after flight.
 
 ## Hardware Checklist
 
@@ -39,12 +50,12 @@ pio device monitor --baud 115200
 Expected boot signals:
 
 ```text
-[NRC] Live LoRa telemetry disabled (ENABLE_NRC_LIVE=0)
-[NRC] GPS UART1 started
-[NRC] BMP280 OK @ 0x76
-[NRC] LM75 OK (...)
-[NRC] SD card OK, logging to /nrc_flight_001.csv
-[NRC] Setup complete - SD logging at 1 Hz
+[MXR] LoRa SX1262 OK @ 868 MHz
+[MXR] GPS UART1 started
+[MXR] BMP280 OK
+[MXR] LM75 OK (...)
+[MXR] SD card OK, logging to /mxr_flight_001.csv
+[MXR] Setup complete - live telemetry and SD logging at 1 Hz
 ```
 
 If `BMP280 FAILED`, check GPIO1/GPIO2 and the BMP280 `0x76` address wiring. If `SD card FAILED`, reformat the card as FAT32 and check GPIO38/39/41/42.
@@ -54,12 +65,12 @@ If `BMP280 FAILED`, check GPIO1/GPIO2 and the BMP280 `0x76` address wiring. If `
 The Heltec creates a fresh file per boot:
 
 ```text
-/nrc_flight_001.csv
-/nrc_flight_002.csv
+/mxr_flight_001.csv
+/mxr_flight_002.csv
 ...
 ```
 
-NRC CSV required columns:
+Mach-X Rideshare CSV required columns:
 
 ```csv
 pkt_id,timestamp_ms,altitude_m,temp_c,pressure_hpa,lat,lon,flags,max_altitude_m,apogee_detected
@@ -71,14 +82,22 @@ Current firmware also logs optional recovery columns:
 lm75_temp_c,gps_fix,bmp_ok,sd_ok,apogee_altitude_m
 ```
 
-Optional live LoRa/USB telemetry is disabled by default. Use `-DENABLE_NRC_LIVE=1` in `firmware/nrc/platformio.ini` and `ENABLE_NRC_LIVE=true` for the backend only during bench debugging.
+Live LoRa/USB telemetry is enabled by default. Use `ENABLE_RIDESHARE_LIVE=false` for the backend only when intentionally isolating the CanSat serial path during bench debugging.
+
+Preferred live packets use `MXR3`:
+
+```text
+MXR3:<pkt_id>,<timestamp_ms>,<altitude_m>,<temp_c>,<lm75_temp_c>,<pressure_hpa>,<lat>,<lon>,<rssi_dbm>,<flags>,<crc16_hex>
+```
+
+`MXR2` is still accepted for older captures and firmware.
 
 ## OLED Check
 
 Before apogee, the OLED shows current altitude and running max:
 
 ```text
-NRC INVICTUS II
+MACH-X RIDESHARE
 ALT: 12.3 m
 MAX:120m
 P:42 GPS BAR SD
@@ -87,12 +106,12 @@ P:42 GPS BAR SD
 After apogee detection, the OLED changes to the latched apogee view:
 
 ```text
-NRC APOGEE
+MXR APOGEE
 670 m
 P:842 BAR SD
 ```
 
-The latched `NRC APOGEE` value is the value to read after recovery.
+The latched `MXR APOGEE` value is the value to read after recovery if the live ground station is unavailable.
 
 ## Bench Flight Test
 
@@ -102,26 +121,33 @@ After the test:
 
 1. Power off the avionics.
 2. Remove the SD card.
-3. Confirm the newest `/nrc_flight_###.csv` contains continuous rows.
+3. Confirm the newest `/mxr_flight_###.csv` contains continuous rows.
 4. Confirm `max_altitude_m` rises during ascent.
 5. Confirm `apogee_detected` becomes `1` after descent begins.
 6. Confirm `apogee_altitude_m` is populated after detection.
 
-## Laptop Review
+## Live Ground Station
 
-Start the backend after recovery:
+Start the backend before powered radio tests or launch with both active receivers connected:
 
 ```bash
 node backend/server.js
 ```
 
+Set distinct serial ports before launch, for example:
+
+```bash
+SERIAL_PORT_CANSAT=/dev/ttyUSB1
+SERIAL_PORT_RIDESHARE=/dev/ttyUSB2
+```
+
 Open:
 
 ```text
-http://localhost:3000/nrc
+http://localhost:3000/mach-x-rideshare
 ```
 
-Upload the recovered `/nrc_flight_###.csv`. The page stores the upload, then shows:
+The page updates live from `MXR3:` or legacy `MXR2:` packets while the rideshare rocket is flying. If live telemetry is unavailable after recovery, upload the recovered `/mxr_flight_###.csv`; the page stores the upload, then shows the same data layout from the SD file.
 
 | Field | Meaning |
 |-------|---------|
@@ -138,7 +164,7 @@ Upload the recovered `/nrc_flight_###.csv`. The page stores the upload, then sho
 | Flash firmware | `cd firmware/nrc && pio run --target upload` |
 | Serial monitor | `pio device monitor --baud 115200` |
 | Start backend | `node backend/server.js` |
-| Open NRC review | `http://localhost:3000/nrc` |
+| Open Mach-X Rideshare dashboard | `http://localhost:3000/mach-x-rideshare` |
 | Health check | `curl http://localhost:3000/api/health` |
 
 ## Troubleshooting
@@ -149,5 +175,5 @@ Upload the recovered `/nrc_flight_###.csv`. The page stores the upload, then sho
 | No serial boot output | Use 115200 baud and a data-capable USB-C cable |
 | GPS stays 0,0 | Move outdoors; NEO-6M cold start can take several minutes |
 | SD card failed | Reformat FAT32 and recheck SPI wiring |
-| Review page upload fails | Confirm the CSV has the NRC required columns and at least one data row |
+| Dashboard upload fails | Confirm the CSV has the required columns and at least one data row |
 | Apogee marker looks wrong | Inspect raw altitude rows for pressure-test spikes or timestamp resets |

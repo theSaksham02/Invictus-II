@@ -6,10 +6,10 @@ Do not commit non-PCB, generated, or hand-built flight data here.
 
 Capture formats:
 
-- `*.nrc`: one real `NRC:` or `NRC2:` line per row from the NRC PCB or LoRa ground receiver.
+- `*.mxr`: one real `MXR3:` or `MXR2:` line per row from the Mach-X Rideshare PCB or LoRa ground receiver. Legacy `*.nrc` captures with `NRC:` or `NRC2:` are still accepted for parser regression tests.
 - `*.cansat.hex`: one real framed CanSat packet per row, encoded as lowercase or uppercase hex.
 
-Run `node tests/capture-hardware-fixtures.js --source NRC --port /dev/cu.usbmodemXXXX --out tests/fixtures/hardware/nrc-YYYYMMDD.nrc` after connecting hardware.
+Run `node tests/capture-hardware-fixtures.js --source RIDESHARE --port /dev/cu.usbmodemXXXX --out tests/fixtures/hardware/rideshare-YYYYMMDD.mxr` after connecting hardware.
 
 Acceptance criteria before committing a fixture:
 

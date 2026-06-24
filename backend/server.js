@@ -15,11 +15,15 @@ const { log } = require('./logger');
 const {
   CIRCUIT,
   NRC_PAYLOAD_CIRCUIT,
+  RIDESHARE_PAYLOAD_CIRCUIT,
+  CANSAT_MISSION_MODES,
+  CANSAT_MISSION_MODE_NAMES,
   TELEMETRY_LIMITS,
   decodeFlags,
   deriveSensorHealth,
   packetWarnings
 } = require('./cansat-hardware');
+const { RIDESHARE_SOURCE, normalizeSource } = require('./source-aliases');
 
 const app = express();
 const server = http.createServer(app);
@@ -53,8 +57,8 @@ const SD_UPLOAD_MAX_ROWS = Math.max(
   Number.parseInt(process.env.SD_UPLOAD_MAX_ROWS || '50000', 10) || 50000,
   100
 );
-const TELEMETRY_SOURCES = new Set(['CANSAT', 'NRC', 'MACHX', 'SUGAR']);
-const EXPORT_SOURCES = new Set(['CANSAT', 'NRC', 'ALL', 'MACHX', 'SUGAR']);
+const TELEMETRY_SOURCES = new Set(['CANSAT', RIDESHARE_SOURCE, 'MACHX', 'SUGAR']);
+const EXPORT_SOURCES = new Set(['CANSAT', RIDESHARE_SOURCE, 'ALL', 'MACHX', 'SUGAR']);
 
 const upload = multer({
   dest: 'uploads/',
@@ -87,11 +91,11 @@ class HttpError extends Error {
 }
 
 function parseSource(value, allowedSet, fallback) {
-  const candidate = (value || fallback || '').toString().toUpperCase();
+  const candidate = normalizeSource(value, fallback);
   if (!allowedSet.has(candidate)) {
     throw new HttpError(400, 'Invalid source parameter', {
       source: candidate,
-      allowed: [...allowedSet]
+      allowed: [...allowedSet, 'NRC']
     });
   }
   return candidate;
@@ -201,6 +205,12 @@ function parseOptionalCsvFloat(row, lookup, names) {
   return Number.isFinite(parsed) ? parsed : NaN;
 }
 
+function parseOptionalTemperatureCsvFloat(row, lookup, names) {
+  const parsed = parseOptionalCsvFloat(row, lookup, names);
+  if (parsed === null || Number.isNaN(parsed)) return parsed;
+  return parsed <= -900 ? null : parsed;
+}
+
 function inTelemetryRange(value, field) {
   const limit = TELEMETRY_LIMITS[field];
   if (!limit) return true;
@@ -211,6 +221,18 @@ function optionalInTelemetryRange(value, field) {
   return value === null || inTelemetryRange(value, field);
 }
 
+function parseMissionModeCsv(row, lookup) {
+  const raw = getCsvValue(row, lookup, ['mission_mode', 'mode']);
+  if (raw === undefined || String(raw).trim() === '') return { id: null, name: null };
+  const value = String(raw).trim().toUpperCase();
+  if (/^\d+$/.test(value)) {
+    const id = Number.parseInt(value, 10);
+    return { id, name: CANSAT_MISSION_MODE_NAMES[id] || null };
+  }
+  const id = CANSAT_MISSION_MODES[value] ?? null;
+  return { id, name: id === null ? null : value };
+}
+
 function parseSdPacketRow(row, lookup, raw, receivedAt, source) {
   const accelZ = parseOptionalCsvFloat(row, lookup, ['accel_z', 'acceleration_z']);
   const gyroX = parseOptionalCsvFloat(row, lookup, ['gyro_x', 'gyroscope_x']);
@@ -218,16 +240,24 @@ function parseSdPacketRow(row, lookup, raw, receivedAt, source) {
   const rssiDbm = rssiRaw === undefined || String(rssiRaw).trim() === ''
     ? 0
     : Number.parseInt(rssiRaw, 10);
+  const protocolRaw = getCsvValue(row, lookup, ['protocol_version', 'version']);
+  const protocolVersion = protocolRaw === undefined || String(protocolRaw).trim() === ''
+    ? null
+    : Number.parseInt(protocolRaw, 10);
+  const missionMode = parseMissionModeCsv(row, lookup);
   const packet = {
     source,
+    protocol_version: Number.isInteger(protocolVersion) ? protocolVersion : (source === 'CANSAT' && missionMode.id !== null ? 3 : null),
+    mission_mode_id: missionMode.id,
+    mission_mode: missionMode.name,
     pkt_id: Number.parseInt(getCsvValue(row, lookup, ['pkt_id', 'packet_id', 'id']), 10),
     timestamp_ms: Number.parseInt(getCsvValue(row, lookup, ['timestamp_ms', 'time_ms', 'timestamp']), 10),
     altitude_m: Number.parseFloat(getCsvValue(row, lookup, ['altitude_m', 'alt_m', 'altitude'])),
     temp_c: Number.parseFloat(getCsvValue(row, lookup, ['temp_c', 'temperature_c', 'temperature'])),
-    temp_c_1: parseOptionalCsvFloat(row, lookup, ['temp_c_1', 'temperature_c_1']),
-    temp_c_2: parseOptionalCsvFloat(row, lookup, ['temp_c_2', 'temperature_c_2']),
-    temp_c_3: parseOptionalCsvFloat(row, lookup, ['temp_c_3', 'temperature_c_3']),
-    temp_c_4: parseOptionalCsvFloat(row, lookup, ['temp_c_4', 'temperature_c_4']),
+    temp_c_1: parseOptionalTemperatureCsvFloat(row, lookup, ['temp_c_1', 'temperature_c_1', 'lm75_temp_c']),
+    temp_c_2: parseOptionalTemperatureCsvFloat(row, lookup, ['temp_c_2', 'temperature_c_2']),
+    temp_c_3: parseOptionalTemperatureCsvFloat(row, lookup, ['temp_c_3', 'temperature_c_3']),
+    temp_c_4: parseOptionalTemperatureCsvFloat(row, lookup, ['temp_c_4', 'temperature_c_4']),
     pressure_hpa: Number.parseFloat(getCsvValue(row, lookup, ['pressure_hpa', 'pressure'])),
     accel_z: accelZ,
     gyro_x: gyroX,
@@ -251,8 +281,8 @@ function parseSdPacketRow(row, lookup, raw, receivedAt, source) {
     optionalInTelemetryRange(packet.temp_c_3, 'temp_c_3') &&
     optionalInTelemetryRange(packet.temp_c_4, 'temp_c_4') &&
     inTelemetryRange(packet.pressure_hpa, 'pressure_hpa') &&
-    (source === 'NRC' ? optionalInTelemetryRange(packet.accel_z, 'accel_z') : inTelemetryRange(packet.accel_z, 'accel_z')) &&
-    (source === 'NRC' ? optionalInTelemetryRange(packet.gyro_x, 'gyro_x') : inTelemetryRange(packet.gyro_x, 'gyro_x')) &&
+    (source === RIDESHARE_SOURCE ? optionalInTelemetryRange(packet.accel_z, 'accel_z') : inTelemetryRange(packet.accel_z, 'accel_z')) &&
+    (source === RIDESHARE_SOURCE ? optionalInTelemetryRange(packet.gyro_x, 'gyro_x') : inTelemetryRange(packet.gyro_x, 'gyro_x')) &&
     inTelemetryRange(packet.lat, 'lat') &&
     inTelemetryRange(packet.lon, 'lon') &&
     Number.isInteger(packet.rssi_dbm) &&
@@ -337,12 +367,21 @@ app.get('/', (req, res) => {
   res.send('<h1 style="font-family:monospace;color:#00d4ff;background:#020817;padding:2rem">MACH-26 Ground Station — backend running, index not found.</h1>');
 });
 
-app.get('/avionics', (req, res) => res.redirect('/nrc'));
+app.get('/avionics', (req, res) => res.redirect('/mach-x-rideshare'));
 
-app.get('/nrc', (req, res) => {
-  const dashPath = path.resolve(__dirname, '../dashboard/nrc.html');
+function sendMachXRideshareDashboard(req, res) {
+  const dashPath = path.resolve(__dirname, '../dashboard/mach-x.html');
   if (fs.existsSync(dashPath)) res.sendFile(dashPath);
-  else res.status(404).send('National Rocketry Championship Dashboard missing');
+  else res.status(404).send('Mach-X Rideshare Dashboard missing');
+}
+
+app.get('/mach-x-rideshare', sendMachXRideshareDashboard);
+app.get('/nrc', (req, res) => res.redirect('/mach-x-rideshare'));
+
+app.get('/cansat', (req, res) => {
+  const dashPath = path.resolve(__dirname, '../dashboard/mach-x.html');
+  if (fs.existsSync(dashPath)) res.sendFile(dashPath);
+  else res.status(404).send('CanSat Dashboard missing');
 });
 
 app.get('/ort', (req, res) => {
@@ -360,13 +399,13 @@ app.get('/mach-x', (req, res) => {
 app.get('/api/health', (req, res) => {
   const signal = serial.getSignalState();
   const cansatStats = db.getStats('CANSAT');
-  const nrcStats = db.getStats('NRC');
+  const rideshareStats = db.getStats(RIDESHARE_SOURCE);
 
   res.json({
     status: 'ok',
     uptime_s: Math.floor((Date.now() - uptimeStart) / 1000),
-    serial_connected: Boolean(signal.CANSAT.connected || signal.NRC.connected || signal.MACHX.connected),
-    db_packet_count: cansatStats.count + nrcStats.count,
+    serial_connected: Boolean(signal.CANSAT.connected || signal.RIDESHARE?.connected || signal.NRC?.connected || signal.MACHX.connected),
+    db_packet_count: cansatStats.count + rideshareStats.count,
     signal
   });
 });
@@ -381,7 +420,14 @@ app.get('/api/cansat/hardware', (req, res) => {
 app.get('/api/nrc/hardware', (req, res) => {
   res.json({
     ok: true,
-    circuit: NRC_PAYLOAD_CIRCUIT
+    circuit: RIDESHARE_PAYLOAD_CIRCUIT
+  });
+});
+
+app.get('/api/rideshare/hardware', (req, res) => {
+  res.json({
+    ok: true,
+    circuit: RIDESHARE_PAYLOAD_CIRCUIT
   });
 });
 
@@ -402,9 +448,9 @@ app.get('/api/cansat/status', (req, res) => {
   });
 });
 
-app.get('/api/nrc/status', (req, res) => {
-  const latest = db.getLatest('NRC');
-  const signal = serial.getSignalState().NRC;
+function sendRideshareStatus(req, res) {
+  const latest = db.getLatest(RIDESHARE_SOURCE);
+  const signal = serial.getSignalState().RIDESHARE || serial.getSignalState().NRC;
   res.json({
     ok: true,
     signal,
@@ -417,7 +463,10 @@ app.get('/api/nrc/status', (req, res) => {
         }
       : null
   });
-});
+}
+
+app.get('/api/nrc/status', sendRideshareStatus);
+app.get('/api/rideshare/status', sendRideshareStatus);
 
 app.get('/api/packets', (req, res) => {
   const source = parseSource(req.query.source, TELEMETRY_SOURCES, 'CANSAT');
@@ -430,7 +479,8 @@ app.get('/api/packets', (req, res) => {
 app.get('/api/stats', (req, res) => {
   res.json({
     cansat: db.getStats('CANSAT'),
-    nrc: db.getStats('NRC'),
+    rideshare: db.getStats(RIDESHARE_SOURCE),
+    nrc: db.getStats(RIDESHARE_SOURCE),
     events: db.getAllEvents(),
     uptime_s: Math.floor((Date.now() - uptimeStart) / 1000)
   });
@@ -450,7 +500,7 @@ app.delete('/api/events', (req, res) => {
 
 app.post('/api/upload-sd', upload.single('file'), asyncRoute(async (req, res) => {
   if (!req.file) throw new HttpError(400, 'No file uploaded');
-  const source = parseSource(req.body?.source || req.query?.source, new Set(['CANSAT', 'NRC']), 'CANSAT');
+  const source = parseSource(req.body?.source || req.query?.source, new Set(['CANSAT', RIDESHARE_SOURCE]), 'CANSAT');
 
   const now = Date.now();
   let content = '';
@@ -496,14 +546,20 @@ app.post('/api/upload-sd', upload.single('file'), asyncRoute(async (req, res) =>
   packets.forEach((packet) => {
     packet.upload_id = uploadId || null;
   });
-  db.insertPacketsBulk(packets);
+  const insertResult = db.insertPacketsBulk(packets);
+  const inserted = insertResult.changes ?? packets.length;
+  const skippedDuplicates = insertResult.skipped_duplicates ?? 0;
+  if (uploadId && typeof db.updateUploadRowsInserted === 'function') {
+    db.updateUploadRowsInserted(uploadId, inserted);
+  }
 
   const response = {
     ok: true,
     source,
     upload_id: uploadId || null,
-    inserted: packets.length,
+    inserted,
     skipped,
+    skipped_duplicates: skippedDuplicates,
     duration_s: summarizeDurationSeconds(packets),
     filename: req.file.originalname,
     apogee: summarizeApogee(packets)
@@ -529,7 +585,7 @@ app.get('/api/sd-uploads/:upload_id/packets', (req, res) => {
 app.get('/api/export', (req, res) => {
   const source = parseSource(req.query.source, EXPORT_SOURCES, 'CANSAT');
   const rows = db.exportCsv(source);
-  const columns = ['id', 'source', 'pkt_id', 'timestamp_ms', 'altitude_m', 'temp_c', 'temp_c_1', 'temp_c_2', 'temp_c_3', 'temp_c_4', 'pressure_hpa', 'accel_z', 'gyro_x', 'lat', 'lon', 'rssi_dbm', 'flags', 'received_at'];
+  const columns = ['id', 'source', 'protocol_version', 'mission_mode_id', 'mission_mode', 'pkt_id', 'timestamp_ms', 'altitude_m', 'temp_c', 'temp_c_1', 'temp_c_2', 'temp_c_3', 'temp_c_4', 'pressure_hpa', 'accel_z', 'gyro_x', 'lat', 'lon', 'rssi_dbm', 'flags', 'received_at'];
   const csv = [columns.join(',')]
     .concat(rows.map((row) => columns.map((column) => csvEscape(row[column])).join(',')))
     .join('\n');
@@ -565,7 +621,8 @@ io.on('connection', (socket) => {
   try {
     socket.emit('history', {
       cansat: db.getHistory('CANSAT', 60),
-      nrc: db.getHistory('NRC', 60),
+      rideshare: db.getHistory(RIDESHARE_SOURCE, 60),
+      nrc: db.getHistory(RIDESHARE_SOURCE, 60),
       events: db.getAllEvents()
     });
   } catch (error) {
@@ -574,7 +631,7 @@ io.on('connection', (socket) => {
 
   socket.on('subscribe_source', (data) => {
     if (!data || !data.source) return;
-    const source = data.source.toString().toUpperCase();
+    const source = normalizeSource(data.source);
     if (source === 'ALL' || TELEMETRY_SOURCES.has(source)) {
       socket.data.source = source;
     }

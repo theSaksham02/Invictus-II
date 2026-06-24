@@ -1,9 +1,23 @@
 const LEGACY_PACKET_LENGTH_BYTES = 37;
-const PACKET_LENGTH_BYTES = 43;
+const PACKET_V2_LENGTH_BYTES = 43;
+const PACKET_V3_LENGTH_BYTES = 60;
+const PACKET_LENGTH_BYTES = PACKET_V2_LENGTH_BYTES;
 const PACKET_SYNC = 0xa55a;
 const PACKET_VERSION = 2;
+const PACKET_V3_VERSION = 3;
 const CANSAT_SOURCE_ID = 1;
 const PACKET_PAYLOAD_LENGTH_BYTES = 36;
+const PACKET_V3_PAYLOAD_LENGTH_BYTES = 53;
+
+const CANSAT_MISSION_MODES = Object.freeze({
+  PRE_DEPLOY: 0,
+  DEPLOYED_SCIENCE: 1,
+  GPS_RECOVERY: 2
+});
+
+const CANSAT_MISSION_MODE_NAMES = Object.freeze(Object.fromEntries(
+  Object.entries(CANSAT_MISSION_MODES).map(([name, value]) => [value, name])
+));
 
 const FLAG_BITS = Object.freeze({
   launched: 0x01,
@@ -12,16 +26,22 @@ const FLAG_BITS = Object.freeze({
   bmp_ok: 0x08,
   mpu_ok: 0x10,
   sd_ok: 0x20,
-  stale_sensor: 0x40
+  stale_sensor: 0x40,
+  gps_recovery: 0x80
 });
 
 const CIRCUIT = Object.freeze({
   name: 'INVICTUS II CANSAT',
   controller: 'STM32 Bluepill',
-  telemetry_packet_bytes: PACKET_LENGTH_BYTES,
+  telemetry_packet_bytes: PACKET_V3_LENGTH_BYTES,
+  telemetry_packet_v2_bytes: PACKET_V2_LENGTH_BYTES,
+  telemetry_packet_v3_bytes: PACKET_V3_LENGTH_BYTES,
   legacy_packet_bytes: LEGACY_PACKET_LENGTH_BYTES,
   packet_sync: `0x${PACKET_SYNC.toString(16).toUpperCase()}`,
-  packet_version: PACKET_VERSION,
+  packet_version: PACKET_V3_VERSION,
+  packet_versions_accepted: [2, 3],
+  mission_modes: CANSAT_MISSION_MODES,
+  recovery_altitude_agl_m: 20,
   docs_source: 'backend/CANSAT_CIRCUIT.md',
   firmware: 'firmware/cansat/src/main.cpp',
 
@@ -45,15 +65,16 @@ const CIRCUIT = Object.freeze({
   // Ground Station Receiver — ESP32 WROOM-32 + RFM69HCW 433 MHz
   // The ESP32 bridges the RFM69 radio to the laptop via USB Serial (115200 baud).
   // It is NOT a bare USB dongle — it is a dedicated microcontroller that:
-  //   1. Receives 43-byte binary packets over SPI from the RFM69HCW
+  //   1. Receives 43-byte v2 or 60-byte v3 binary packets over SPI from the RFM69HCW
   //   2. Validates the 0xA55A sync word before forwarding
-  //   3. Stamps ground-side RSSI into byte 39 of the frame
+  //   3. Stamps ground-side RSSI into the frame
   //   4. Forwards the raw frame over USB CDC to the laptop (serial.js reads it)
   ground_station_receiver: {
     mcu: 'ESP32 WROOM-32',
     radio: 'RFM69HCW 433 MHz',
     frequency_mhz: 433.0,
     interface: 'USB Serial (CP2102/CH340) @ 115200 baud',
+    accepted_frame_bytes: [PACKET_V2_LENGTH_BYTES, PACKET_V3_LENGTH_BYTES],
     firmware: 'firmware/ground-station/src/main.cpp',
     pins: {
       rfm69_mosi: 'GPIO23',
@@ -165,7 +186,30 @@ const CIRCUIT = Object.freeze({
     }
   },
   unconnected_controller_pins: ['PC13', 'PC14', 'PC15', 'PA2', 'PA3', 'PB1', 'RESET', '5V', 'PB9', 'PB8', 'PB4', 'PB3', 'PA12', 'PA11'],
-  packet_fields: [
+  packet_fields_v3: [
+    { offset: 0, bytes: 2, type: 'uint16le', name: 'sync' },
+    { offset: 2, bytes: 1, type: 'uint8', name: 'version' },
+    { offset: 3, bytes: 1, type: 'uint8', name: 'source_id' },
+    { offset: 4, bytes: 1, type: 'uint8', name: 'payload_len' },
+    { offset: 5, bytes: 2, type: 'uint16le', name: 'pkt_id' },
+    { offset: 7, bytes: 4, type: 'uint32le', name: 'timestamp_ms' },
+    { offset: 11, bytes: 1, type: 'uint8', name: 'mode' },
+    { offset: 12, bytes: 4, type: 'floatle', name: 'altitude_m' },
+    { offset: 16, bytes: 4, type: 'floatle', name: 'temp_c' },
+    { offset: 20, bytes: 4, type: 'floatle', name: 'pressure_hpa' },
+    { offset: 24, bytes: 4, type: 'floatle', name: 'temp_c_1' },
+    { offset: 28, bytes: 4, type: 'floatle', name: 'temp_c_2' },
+    { offset: 32, bytes: 4, type: 'floatle', name: 'temp_c_3' },
+    { offset: 36, bytes: 4, type: 'floatle', name: 'temp_c_4' },
+    { offset: 40, bytes: 4, type: 'floatle', name: 'accel_z' },
+    { offset: 44, bytes: 4, type: 'floatle', name: 'gyro_x' },
+    { offset: 48, bytes: 4, type: 'floatle', name: 'lat' },
+    { offset: 52, bytes: 4, type: 'floatle', name: 'lon' },
+    { offset: 56, bytes: 1, type: 'int8', name: 'rssi_dbm' },
+    { offset: 57, bytes: 1, type: 'uint8', name: 'flags' },
+    { offset: 58, bytes: 2, type: 'uint16le', name: 'crc16_ccitt' }
+  ],
+  packet_fields_v2: [
     { offset: 0, bytes: 2, type: 'uint16le', name: 'sync' },
     { offset: 2, bytes: 1, type: 'uint8', name: 'version' },
     { offset: 3, bytes: 1, type: 'uint8', name: 'source_id' },
@@ -186,15 +230,15 @@ const CIRCUIT = Object.freeze({
 });
 
 const NRC_PAYLOAD_CIRCUIT = Object.freeze({
-  name: 'INVICTUS II NRC PAYLOAD',
+  name: 'INVICTUS II MACH-X RIDESHARE PAYLOAD',
   controller: 'Heltec WiFi LoRa 32 V3',
   docs_source: 'backend/PAYLOAD_CIRCUIT.md',
   firmware: 'firmware/nrc/src/main.cpp',
   telemetry: {
-    protocol_prefixes: ['NRC:', 'NRC2:'],
-    interface: 'USB Serial @ 115200 baud when bench live ingest is enabled',
-    live_enabled_default: false,
-    note: 'Competition workflow is SD card recovery; live telemetry is bench/debug only.'
+    protocol_prefixes: ['MXR3:', 'MXR2:', 'NRC2:', 'NRC:'],
+    interface: 'SX1262 LoRa and USB Serial @ 115200 baud',
+    live_enabled_default: true,
+    note: 'MXR3 is preferred for live rideshare telemetry because it includes LM75 temperature. MXR2 and NRC/NRC2 remain accepted for compatibility.'
   },
   power: {
     input: 'Battery JST -> Li-ion 2S 3A BMS -> switch terminal block -> LM2596',
@@ -213,7 +257,7 @@ const NRC_PAYLOAD_CIRCUIT = Object.freeze({
       pins: { sda: 'GPIO1', scl: 'GPIO2' },
       devices: [
         { name: 'BMP280', address: '0x76 preferred, 0x77 fallback', connections: { sda: 'pin 4 BMP280 SDA', scl: 'pin 3 BMP280 SCL' } },
-        { name: 'LM75', address: '0x48', connections: { sda: 'pin 3 LM75 SDA', scl: 'pin 4 LM75 SCL' }, telemetry: 'temperature fallback only; no independent telemetry flag/value' }
+        { name: 'LM75', address: '0x48', connections: { sda: 'pin 3 LM75 SDA', scl: 'pin 4 LM75 SCL' }, telemetry: 'reported in MXR3 temp_c_1; fallback source for temp_c if BMP280 temperature fails' }
       ],
       power: {
         bmp280: { vcc: '3V3_BUS', gnd: 'GROUND', csb: '3V3_BUS', sdo: 'GROUND' },
@@ -249,9 +293,9 @@ const NRC_PAYLOAD_CIRCUIT = Object.freeze({
   },
   camera: {
     device: 'ESP32-CAM1',
-    integration: 'power_only',
+    integration: 'local_sd_recording_only',
     backend_streaming: false,
-    reason: 'PAYLOAD_CIRCUIT.md lists IO4, IO2, IO14, IO15, IO13, IO12, IO16, IO0, U0R, and U0T as EMPTY.',
+    reason: 'PAYLOAD_CIRCUIT.md powers ESP32-CAM1 but leaves IO4, IO2, IO14, IO15, IO13, IO12, IO16, IO0, U0R, and U0T unconnected, so camera video is recovered from the camera SD card only.',
     power: { five_volt: 'ESP32-CAM1 pin 8 5V -> 5V_BUS', grounds: ['pin 7 GND', 'pin 12 GND', 'pin 16 GND'] }
   },
   unconnected_controller_pins: [
@@ -306,7 +350,9 @@ function decodeFlags(flags) {
 
 function deriveSensorHealth(packet) {
   const flags = decodeFlags(packet?.flags);
-  if (packet?.source === 'NRC') {
+  const missionMode = packet?.mission_mode || 'PRE_DEPLOY';
+  const gpsRecovery = missionMode === 'GPS_RECOVERY' || flags.gps_recovery;
+  if (packet?.source === 'RIDESHARE' || packet?.source === 'NRC') {
     return {
       bmp280: {
         ok: flags.bmp_ok && Number.isFinite(packet.pressure_hpa) && Number.isFinite(packet.altitude_m),
@@ -314,10 +360,10 @@ function deriveSensorHealth(packet) {
         pins: NRC_PAYLOAD_CIRCUIT.buses.i2c.pins
       },
       lm75: {
-        ok: null,
+        ok: Number.isFinite(packet.temp_c_1),
         bus: 'i2c',
         pins: NRC_PAYLOAD_CIRCUIT.buses.i2c.pins,
-        note: 'Configured as BMP280 temperature fallback; current NRC telemetry has no dedicated LM75 health flag or value.'
+        note: 'MXR3 reports LM75 temperature in temp_c_1. MXR2 legacy packets do not include a dedicated LM75 value.'
       },
       neo6m: {
         ok: flags.gps_fix && Number.isFinite(packet.lat) && Number.isFinite(packet.lon),
@@ -377,22 +423,44 @@ function deriveSensorHealth(packet) {
 
   return {
     bmp388: {
-      ok: flags.bmp_ok && Number.isFinite(packet.pressure_hpa) && Number.isFinite(packet.altitude_m),
+      ok: gpsRecovery || (flags.bmp_ok && Number.isFinite(packet.pressure_hpa) && Number.isFinite(packet.altitude_m)),
+      quiet: gpsRecovery,
+      note: gpsRecovery ? 'Intentionally quiet in GPS recovery mode.' : undefined,
+      bus: 'i2c',
+      pins: CIRCUIT.buses.i2c.pins
+    },
+    lm75: {
+      ok: gpsRecovery || (
+        Number.isFinite(packet.temp_c_1) && packet.temp_c_1 > -900 &&
+        Number.isFinite(packet.temp_c_2) && packet.temp_c_2 > -900 &&
+        Number.isFinite(packet.temp_c_3) && packet.temp_c_3 > -900 &&
+        Number.isFinite(packet.temp_c_4) && packet.temp_c_4 > -900
+      ),
+      quiet: gpsRecovery,
+      note: gpsRecovery ? 'LM75 sampling stops in GPS recovery mode.' : undefined,
       bus: 'i2c',
       pins: CIRCUIT.buses.i2c.pins
     },
     mpu6500: {
-      ok: flags.mpu_ok && Number.isFinite(packet.accel_z) && Number.isFinite(packet.gyro_x),
+      ok: gpsRecovery || (flags.mpu_ok && Number.isFinite(packet.accel_z) && Number.isFinite(packet.gyro_x)),
+      quiet: gpsRecovery,
+      note: gpsRecovery ? 'IMU sampling stops in GPS recovery mode.' : undefined,
       bus: 'avionics_spi',
       pins: CIRCUIT.buses.avionics_spi.pins
     },
     neo6m: {
-      ok: flags.gps_fix && Number.isFinite(packet.lat) && Number.isFinite(packet.lon),
+      ok: gpsRecovery
+        ? flags.gps_fix && Number.isFinite(packet.lat) && Number.isFinite(packet.lon)
+        : true,
+      suppressed: !gpsRecovery,
+      note: gpsRecovery ? undefined : 'GPS live data is suppressed until recovery mode.',
       bus: 'gps_uart',
       pins: CIRCUIT.buses.gps_uart.pins
     },
     sd_card: {
-      ok: flags.sd_ok,
+      ok: gpsRecovery || flags.sd_ok,
+      quiet: gpsRecovery,
+      note: gpsRecovery ? 'SD writes stop in GPS recovery mode.' : undefined,
       bus: 'sd_spi',
       pins: CIRCUIT.buses.sd_spi.pins
     },
@@ -407,13 +475,18 @@ function deriveSensorHealth(packet) {
 function packetWarnings(packet) {
   const warnings = [];
   const flags = decodeFlags(packet?.flags);
+  const missionMode = packet?.mission_mode || 'PRE_DEPLOY';
+  const gpsRecovery = missionMode === 'GPS_RECOVERY' || flags.gps_recovery;
 
-  if (packet?.source === 'NRC') {
+  if (packet?.source === 'RIDESHARE' || packet?.source === 'NRC') {
     if (!flags.bmp_ok) warnings.push('BMP280 flag is not set; altitude, pressure, and temperature may be fallback values.');
+    if (packet?.protocol_version >= 3 && !Number.isFinite(packet.temp_c_1)) {
+      warnings.push('LM75 temperature is unavailable in MXR3 telemetry; BMP280 temperature is the only live temperature source.');
+    }
     if (!flags.gps_fix) warnings.push('NEO-6M GPS fix flag is not set; latitude and longitude may be stale or zero.');
     if (!flags.sd_ok) warnings.push('SD card flag is not set; onboard recovery log may be unavailable.');
     if (Number.isFinite(packet?.pressure_hpa) && packet.pressure_hpa < 300) {
-      warnings.push('Pressure is unusually low for the expected NRC flight envelope.');
+      warnings.push('Pressure is unusually low for the expected Mach-X Rideshare flight envelope.');
     }
     if (Number.isInteger(packet?.rssi_dbm) && packet.rssi_dbm < -110) {
       warnings.push('LoRa RSSI is very weak; expect packet loss.');
@@ -439,10 +512,18 @@ function packetWarnings(packet) {
     return warnings;
   }
 
-  if (!flags.bmp_ok) warnings.push('BMP388 flag is not set; altitude, pressure, and temperature may be fallback values.');
-  if (!flags.mpu_ok) warnings.push('MPU-6500 flag is not set; acceleration and gyro data may be fallback values.');
-  if (!flags.gps_fix) warnings.push('NEO-6M GPS fix flag is not set; latitude and longitude may be stale or zero.');
-  if (!flags.sd_ok) warnings.push('SD card flag is not set; onboard recovery log may be unavailable.');
+  if (missionMode === 'PRE_DEPLOY') {
+    warnings.push('CanSat is in PRE_DEPLOY; RF may be shielded by the rocket shell until deployment.');
+  }
+
+  if (gpsRecovery) {
+    warnings.push('CanSat is in GPS_RECOVERY; non-GPS sensors and SD writes are intentionally quiet.');
+    if (!flags.gps_fix) warnings.push('GPS recovery mode is active but NEO-6M GPS fix is not set yet.');
+  } else {
+    if (!flags.bmp_ok) warnings.push('BMP388 flag is not set; altitude, pressure, and temperature may be fallback values.');
+    if (!flags.mpu_ok) warnings.push('MPU-6500 flag is not set; acceleration and gyro data may be fallback values.');
+    if (!flags.sd_ok) warnings.push('SD card flag is not set; onboard recovery log may be unavailable.');
+  }
 
   if (Number.isFinite(packet?.pressure_hpa) && packet.pressure_hpa < 300) {
     warnings.push('Pressure is unusually low for the expected CanSat flight envelope.');
@@ -460,12 +541,19 @@ function packetWarnings(packet) {
 module.exports = {
   CIRCUIT,
   NRC_PAYLOAD_CIRCUIT,
+  RIDESHARE_PAYLOAD_CIRCUIT: NRC_PAYLOAD_CIRCUIT,
+  CANSAT_MISSION_MODES,
+  CANSAT_MISSION_MODE_NAMES,
   CANSAT_SOURCE_ID,
   FLAG_BITS,
   LEGACY_PACKET_LENGTH_BYTES,
   PACKET_LENGTH_BYTES,
   PACKET_PAYLOAD_LENGTH_BYTES,
   PACKET_SYNC,
+  PACKET_V2_LENGTH_BYTES,
+  PACKET_V3_LENGTH_BYTES,
+  PACKET_V3_PAYLOAD_LENGTH_BYTES,
+  PACKET_V3_VERSION,
   PACKET_VERSION,
   TELEMETRY_LIMITS,
   crc16Ccitt,

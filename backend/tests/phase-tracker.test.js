@@ -33,16 +33,16 @@ function packet(source, pktId, timestampMs, altitudeM, flags = 0) {
   };
 }
 
-test('NRC enters ASCENDING from altitude gain and repeated upward threshold changes', () => {
-  resetState('NRC');
+test('Mach-X Rideshare enters ASCENDING from altitude gain and repeated upward threshold changes', () => {
+  resetState('RIDESHARE');
   const events = [];
   const emit = (event, payload) => events.push({ event, payload });
 
-  processPacket(packet('NRC', 1, 1000, 0), emit);
-  processPacket(packet('NRC', 2, 2000, 6), emit);
-  processPacket(packet('NRC', 3, 3000, 12), emit);
+  processPacket(packet('RIDESHARE', 1, 1000, 0), emit);
+  processPacket(packet('RIDESHARE', 2, 2000, 6), emit);
+  processPacket(packet('RIDESHARE', 3, 3000, 12), emit);
 
-  assert.equal(states.NRC.phase, 'ASCENDING');
+  assert.equal(states.RIDESHARE.phase, 'ASCENDING');
   assert.equal(events.length, 1);
   assert.equal(events[0].event, 'mission_event');
   assert.equal(events[0].payload.event_type, 'ASCENDING');
@@ -60,8 +60,8 @@ test('phase tracker ignores launch flags and stays GROUNDED without altitude thr
   assert.equal(events.length, 0);
 });
 
-test('NRC progresses through APOGEE, DESCENDING, and LANDED from altitude changes', () => {
-  resetState('NRC');
+test('Mach-X Rideshare progresses through APOGEE, DESCENDING, and LANDED from altitude changes', () => {
+  resetState('RIDESHARE');
   const events = [];
   const emit = (event, payload) => events.push({ event, payload });
 
@@ -91,16 +91,30 @@ test('NRC progresses through APOGEE, DESCENDING, and LANDED from altitude change
     [23, 23000, 1.0],
     [24, 24000, 1.0]
   ].forEach(([pktId, timestampMs, altitudeM]) => {
-    processPacket(packet('NRC', pktId, timestampMs, altitudeM), emit);
+    processPacket(packet('RIDESHARE', pktId, timestampMs, altitudeM), emit);
   });
 
-  assert.equal(states.NRC.phase, 'LANDED');
+  assert.equal(states.RIDESHARE.phase, 'LANDED');
   assert.deepEqual(events.map(({ payload }) => payload.event_type), [
     'ASCENDING',
     'APOGEE',
     'DESCENDING',
     'LANDED'
   ]);
+});
+
+test('legacy NRC source still aliases into rideshare phase behavior', () => {
+  resetState('NRC');
+  const events = [];
+  const emit = (event, payload) => events.push({ event, payload });
+
+  processPacket(packet('NRC', 1, 1000, 0), emit);
+  processPacket(packet('NRC', 2, 2000, 6), emit);
+  processPacket(packet('NRC', 3, 3000, 12), emit);
+
+  assert.equal(states.NRC.phase, 'ASCENDING');
+  assert.equal(events.length, 1);
+  assert.equal(events[0].payload.source, 'NRC');
 });
 
 test('MACHX progresses through PAD, LAUNCHED, ASCENT, APOGEE, DESCENT, MAIN, and LANDED', () => {
@@ -144,20 +158,52 @@ test('MACHX progresses through PAD, LAUNCHED, ASCENT, APOGEE, DESCENT, MAIN, and
   ]);
 });
 
-test('phase tracker resets state on timestamp rollback (MCU reboot)', () => {
+test('phase tracker preserves in-flight state and emits MCU_REBOOT on timestamp rollback', () => {
   resetState('MACHX');
   const events = [];
   const emit = (event, payload) => events.push({ event, payload });
 
-  processPacket(packet('MACHX', 1, 1000, 10), emit);
-  processPacket(packet('MACHX', 2, 2000, 15), emit);
-  
-  // MCU resets, timestamp rolls back to 500
-  processPacket(packet('MACHX', 3, 500, 20), emit);
+  [
+    [1, 1000, 0],
+    [2, 2000, 16],
+    [3, 3000, 30],
+    [4, 4000, 45],
+    [5, 5000, 1000]
+  ].forEach(([pktId, timestampMs, altitudeM]) => {
+    processPacket(packet('MACHX', pktId, timestampMs, altitudeM), emit);
+  });
 
-  // Check that the state was reset
+  assert.equal(states.MACHX.phase, 'ASCENT');
+  assert.equal(states.MACHX.max_alt, 1000);
+
+  processPacket(packet('MACHX', 1, 500, 980), emit);
+
   assert.equal(states.MACHX.last_packet_time, 500);
+  assert.equal(states.MACHX.baseline_alt, 0);
+  assert.equal(states.MACHX.max_alt, 1000);
+  assert.equal(states.MACHX.phase, 'ASCENT');
+  assert.equal(events.some(({ payload }) => payload.event_type === 'MCU_REBOOT'), true);
+
+  processPacket(packet('MACHX', 2, 1500, 958), emit);
+  processPacket(packet('MACHX', 3, 2500, 937), emit);
+
+  assert.equal(states.MACHX.phase, 'APOGEE');
+});
+
+test('phase tracker rebaselines on pre-launch timestamp rollback and emits MCU_REBOOT', () => {
+  resetState('MACHX');
+  const events = [];
+  const emit = (event, payload) => events.push({ event, payload });
+
+  processPacket(packet('MACHX', 1, 3000, 10), emit);
+  processPacket(packet('MACHX', 1, 500, 20), emit);
+
+  assert.equal(states.MACHX.phase, 'PAD');
   assert.equal(states.MACHX.baseline_alt, 20);
+  assert.equal(states.MACHX.max_alt, 20);
+  assert.equal(states.MACHX.last_packet_time, 500);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].payload.event_type, 'MCU_REBOOT');
 });
 
 test('phase tracker ignores duplicate and near out-of-order packets without changing phase', () => {

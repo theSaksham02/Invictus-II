@@ -1,9 +1,10 @@
 // UOBRPL Avionics — Flight State Machine
-// Competitions: MachX (CanSat in bigger rocket), NRC (standalone rocket), NRC Rover (later)
-// Sources: CANSAT (MachX — STM32 + RFM69HCW), NRC (NRC Rocket — Heltec LoRa V3 + LoRa 868MHz)
+// Competitions: MachX (CanSat in bigger rocket), Mach-X Rideshare, NRC Rover (later)
+// Sources: CANSAT (MachX — STM32 + RFM69HCW), RIDESHARE (Heltec LoRa V3 + LoRa 868MHz)
 // ROVER (NRC Rover) is HTTP-controlled and does NOT use this FSM.
 
 const { insertEvent } = require('./db');
+const { isRideshareSource } = require('./source-aliases');
 
 const PHASE_GROUNDED = 'GROUNDED';
 const PHASE_ASCENDING = 'ASCENDING';
@@ -16,6 +17,7 @@ const PHASE_LAUNCHED = 'LAUNCHED';
 const PHASE_ASCENT = 'ASCENT';
 const PHASE_DESCENT = 'DESCENT';
 const PHASE_MAIN = 'MAIN';
+const EVENT_MCU_REBOOT = 'MCU_REBOOT';
 
 const LEGACY_LAUNCH_ALTITUDE_DELTA_M = 5.0;
 const MACHX_LAUNCH_ALTITUDE_DELTA_M = 15.0;
@@ -35,7 +37,7 @@ const LANDED_WINDOW_SIZE = 10;
 const TIMESTAMP_REORDER_GRACE_MS = 1000;
 
 function makeState(source) {
-  const isLegacy = source === 'NRC' || source === 'CANSAT';
+  const isLegacy = isRideshareSource(source) || source === 'CANSAT';
   return {
     isLegacy,
     phase: isLegacy ? PHASE_GROUNDED : PHASE_PAD,
@@ -44,6 +46,7 @@ function makeState(source) {
     launch_time: 0,
     apogee_time: 0,
     last_packet_time: 0,
+    last_received_at: 0,
     last_pkt_id: null,
     descent_confirm_count: 0,
     ignored_out_of_order: 0,
@@ -53,10 +56,28 @@ function makeState(source) {
 
 const states = {
   CANSAT: makeState('CANSAT'),
+  RIDESHARE: makeState('RIDESHARE'),
   NRC:    makeState('NRC'),
   MACHX:  makeState('MACHX'),
   SUGAR:  makeState('SUGAR'),
 };
+
+function isInitialPhase(phase) {
+  return phase === PHASE_GROUNDED || phase === PHASE_PAD;
+}
+
+function publishEvent(source, eventType, altitudeM, timestampMs, receivedAt, emitFn) {
+  const ev = {
+    source,
+    event_type: eventType,
+    altitude_m: altitudeM,
+    timestamp_ms: timestampMs,
+    received_at: receivedAt
+  };
+  insertEvent(ev);
+  if (typeof emitFn === 'function') emitFn('mission_event', ev);
+  return ev;
+}
 
 function processPacket(pkt, emitFn) {
   if (!pkt || !states[pkt.source]) return;
@@ -64,6 +85,7 @@ function processPacket(pkt, emitFn) {
 
   let s = states[pkt.source];
   const packetTs = Math.trunc(pkt.timestamp_ms);
+  const receivedAt = Number.isFinite(pkt.received_at) ? Math.trunc(pkt.received_at) : Date.now();
 
   if (s.last_packet_time && packetTs === s.last_packet_time && pkt.pkt_id === s.last_pkt_id) {
     s.ignored_out_of_order++;
@@ -78,12 +100,25 @@ function processPacket(pkt, emitFn) {
       return;
     }
 
-    console.warn(`[PHASE] Rollback detected for ${pkt.source} (${packetTs} < ${s.last_packet_time}). Resetting state.`);
-    resetState(pkt.source);
-    s = states[pkt.source];
+    console.warn(`[PHASE] Timestamp rollback detected for ${pkt.source} (${packetTs} < ${s.last_packet_time}). Treating as MCU reboot.`);
+    try {
+      publishEvent(pkt.source, EVENT_MCU_REBOOT, pkt.altitude_m, packetTs, receivedAt, emitFn);
+    } catch (error) {
+      console.error('[PHASE] MCU reboot event publish failed:', error.message);
+    }
+
+    if (isInitialPhase(s.phase)) {
+      resetState(pkt.source);
+      s = states[pkt.source];
+    } else {
+      s.last_packet_time = 0;
+      s.last_pkt_id = null;
+      s.descent_confirm_count = 0;
+    }
   }
 
   s.last_packet_time = packetTs;
+  s.last_received_at = receivedAt;
   s.last_pkt_id = Number.isInteger(pkt.pkt_id) ? pkt.pkt_id : null;
   if (s.baseline_alt === null) s.baseline_alt = pkt.altitude_m;
   if (pkt.altitude_m > s.max_alt) s.max_alt = pkt.altitude_m;
@@ -171,11 +206,11 @@ function processPacket(pkt, emitFn) {
   if (newPhase !== s.phase) {
     s.phase = newPhase;
     const ev = {
-      source:       pkt.source,
-      event_type:   newPhase,
-      altitude_m:   pkt.altitude_m,
+      source: pkt.source,
+      event_type: newPhase,
+      altitude_m: pkt.altitude_m,
       timestamp_ms: packetTs,
-      received_at:  pkt.received_at
+      received_at: receivedAt
     };
     try {
       insertEvent(ev);

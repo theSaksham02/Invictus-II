@@ -16,8 +16,8 @@ const outPath = arg('out');
 const baudRate = Number.parseInt(arg('baud', '115200'), 10);
 const maxPackets = Number.parseInt(arg('count', '20'), 10);
 
-if (!['NRC', 'CANSAT'].includes(source) || !portPath || !outPath) {
-  console.error('Usage: node tests/capture-hardware-fixtures.js --source NRC|CANSAT --port /dev/cu.usb... --out tests/fixtures/hardware/name.nrc|name.cansat.hex [--baud 115200] [--count 20]');
+if (!['RIDESHARE', 'NRC', 'CANSAT'].includes(source) || !portPath || !outPath) {
+  console.error('Usage: node tests/capture-hardware-fixtures.js --source RIDESHARE|CANSAT --port /dev/cu.usb... --out tests/fixtures/hardware/name.mxr|name.cansat.hex [--baud 115200] [--count 20]');
   process.exit(2);
 }
 
@@ -38,10 +38,10 @@ function record(line) {
   }
 }
 
-if (source === 'NRC') {
+if (source === 'RIDESHARE' || source === 'NRC') {
   port.pipe(new ReadlineParser({ delimiter: '\n' })).on('data', (line) => {
     const trimmed = String(line).trim();
-    if (trimmed.startsWith('NRC:') || trimmed.startsWith('NRC2:')) record(trimmed);
+    if (trimmed.startsWith('MXR3:') || trimmed.startsWith('MXR2:') || trimmed.startsWith('NRC:') || trimmed.startsWith('NRC2:')) record(trimmed);
   });
 } else {
   port.pipe(new CansatFrameParser()).on('data', (frame) => record(frame.toString('hex')));

@@ -1,4 +1,4 @@
-# Cloudzy Deployment Guide — NRC Invictus II Ground Station
+# Cloudzy Deployment Guide — Invictus II Ground Station
 
 ## What You're Deploying
 
@@ -20,7 +20,7 @@
            │ HTTPS
            ▼
     🌍 Team members access from anywhere:
-    https://invictus.yourdomain.com/nrc
+    https://invictus.yourdomain.com/mach-x-rideshare
 ```
 
 ---
@@ -138,9 +138,9 @@ PORT=3000
 
 # Serial ports (not used on cloud — we run in SIM_MODE)
 SERIAL_PORT_CANSAT=/dev/ttyUSB0
-SERIAL_PORT_NRC=/dev/ttyUSB1
+SERIAL_PORT_RIDESHARE=/dev/ttyUSB1
 SERIAL_BAUD_CANSAT=115200
-SERIAL_BAUD_NRC=115200
+SERIAL_BAUD_RIDESHARE=115200
 
 # Database
 DB_FILE=./flight.db
@@ -173,7 +173,7 @@ EOF
 ```
 
 > [!IMPORTANT]
-> **`SIM_MODE=true`** is essential on the cloud since there's no physical Heltec connected. The emulator generates realistic NRC2 packets so the dashboard works live for the team.
+> **`SIM_MODE=true`** is essential on the cloud since there's no physical Heltec connected. The emulator generates realistic Mach-X Rideshare telemetry so the dashboard works live for the team.
 
 ---
 
@@ -321,10 +321,10 @@ The team can now access the dashboard from **anywhere**:
 
 | Dashboard | URL |
 |-----------|-----|
-| **NRC Dashboard** | `http://YOUR_SERVER_IP/nrc` |
+| **Mach-X Rideshare Dashboard** | `http://YOUR_SERVER_IP/mach-x-rideshare` |
 | **CANSAT Dashboard** | `http://YOUR_SERVER_IP/` |
 | **Health Check** | `http://YOUR_SERVER_IP/api/health` |
-| **Export Data** | `http://YOUR_SERVER_IP/api/export?source=NRC` |
+| **Export Data** | `http://YOUR_SERVER_IP/api/export?source=RIDESHARE` |
 
 Share the IP with your team — everyone sees the **same live telemetry** with real-time WebSocket updates.
 
@@ -355,7 +355,7 @@ certbot --nginx -d invictus.yourdomain.com
 # Follow the prompts — choose "redirect HTTP to HTTPS"
 ```
 
-Now the team accesses via: **`https://invictus.yourdomain.com/nrc`** 🔒
+Now the team accesses via: **`https://invictus.yourdomain.com/mach-x-rideshare`**.
 
 ---
 
@@ -390,7 +390,7 @@ socat \
 Then update the `.env`:
 ```bash
 SIM_MODE=false
-SERIAL_PORT_NRC=/dev/ttyVUSB0
+SERIAL_PORT_RIDESHARE=/dev/ttyVUSB0
 ```
 
 And restart:

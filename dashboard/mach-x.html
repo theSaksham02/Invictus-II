@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MACH-X — MISSION CONTROL</title>
+  <title>Mach-X CanSat — Mission Control</title>
   <meta name="description" content="MACH-26 UKSEDS NRC 2025-26 real-time rocket telemetry ground station">
   <!-- Site-wide transparent logo favicon. -->
   <link rel="icon" type="image/png" href="/images/logo_w_tp.png">
@@ -133,6 +133,7 @@
     .pf-label { color: var(--text-3); }
     .pf-val { color: var(--critical); font-weight: bold; }
     .pf-val.ok { color: var(--nominal); }
+    .pf-val.wait, .pf-val.quiet, .pf-val.suppressed { color: var(--warning); }
 
     .metric-card { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 8px 16px; }
     .metric-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; }
@@ -175,7 +176,7 @@
     .uplot { font-family: var(--mono) !important; }
     .u-legend { display: none; }
 
-    #stats-bar { display: flex; align-items: center; justify-content: space-between; padding: 0 16px; font-family: var(--sans); font-size: 0.65rem; font-weight: 600; letter-spacing: 0.1em; color: var(--text-3); }
+    #stats-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 0 16px; font-family: var(--sans); font-size: 0.65rem; font-weight: 600; letter-spacing: 0.1em; color: var(--text-3); }
     #stats-bar span strong { color: var(--text-1); font-family: var(--mono); font-weight: 500; }
 
     /* ═══════════════════════════════════════════════════════════
@@ -221,6 +222,120 @@
     #btn-live:active { transform: translateY(1px); box-shadow: 0 1px 0 rgba(255,255,255,0.4) inset, 0 4px 12px rgba(0,0,0,0.3); }
     #btn-live:focus-visible { outline: 2px solid var(--spx-blue-light); outline-offset: 2px; }
     #btn-live.dim { background: transparent; color: var(--text-2); border-color: var(--border-hi); box-shadow: none; }
+
+    @media (max-width: 900px) {
+      html, body {
+        height: auto;
+        min-height: 100%;
+        overflow: auto;
+      }
+
+      #app {
+        width: 100%;
+        min-height: 100vh;
+        height: auto;
+        grid-template-rows: auto 1fr auto;
+      }
+
+      #header {
+        grid-template-columns: 1fr;
+        gap: 12px;
+        padding: 16px;
+      }
+
+      .header-left, .header-right {
+        width: 100%;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .header-center {
+        width: 100%;
+      }
+
+      #logo {
+        font-size: clamp(1rem, 7vw, 1.45rem);
+        overflow-wrap: anywhere;
+      }
+
+      .phase-badge {
+        width: 100%;
+        text-align: center;
+      }
+
+      .status-voice-control {
+        flex-wrap: wrap;
+      }
+
+      #dashboard {
+        grid-template-columns: minmax(0, 1fr);
+        padding: 10px;
+      }
+
+      #metrics-panel {
+        display: grid;
+        grid-template-columns: 1fr;
+      }
+
+      .preflight-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .metric-card {
+        min-height: 112px;
+      }
+
+      .metric-value {
+        font-size: clamp(1.65rem, 11vw, 2.6rem);
+      }
+
+      #metric-alt .metric-value {
+        font-size: clamp(2.2rem, 14vw, 3.2rem);
+      }
+
+      #charts-panel {
+        grid-template-rows: 240px auto auto;
+      }
+
+      #sparklines-grid {
+        grid-template-columns: 1fr;
+        grid-template-rows: none;
+      }
+
+      .sparkline-card {
+        min-height: 180px;
+      }
+
+      #info-panel {
+        grid-template-rows: 300px 260px auto;
+      }
+
+      #actions-bar {
+        flex-direction: column;
+      }
+
+      .action-btn {
+        min-height: 44px;
+      }
+
+      #timeline-bar {
+        position: sticky;
+        bottom: 0;
+        min-height: 64px;
+        padding: 0 10px;
+        gap: 10px;
+      }
+
+      .scrub-time {
+        width: 64px;
+        font-size: 0.72rem;
+      }
+
+      #btn-live {
+        min-width: 92px;
+        padding: 8px 10px;
+      }
+    }
   </style>
 </head>
 
@@ -228,7 +343,7 @@
   <div id="app">
     <header id="header">
       <div class="header-left">
-        <span id="logo">MACH-X</span>
+        <span id="logo">MACH-X CANSAT</span>
       </div>
       <div class="header-center">
         <div class="phase-badge" id="phase-badge">SYSTEM IDLE</div>
@@ -253,6 +368,7 @@
            <div class="pf-item"><span class="pf-label">MPU6500</span><span id="pf-mpu" class="pf-val">FLT</span></div>
            <div class="pf-item"><span class="pf-label">SD LOG</span><span id="pf-sd" class="pf-val">FLT</span></div>
            <div class="pf-item"><span class="pf-label">GPS_FIX</span><span id="pf-gps" class="pf-val">FLT</span></div>
+           <div class="pf-item"><span class="pf-label">RADIO</span><span id="pf-radio" class="pf-val">FLT</span></div>
         </div>
 
         <div class="metric-card panel" id="metric-alt">
@@ -329,6 +445,8 @@
         <div id="stats-bar" class="panel">
           <span>MAX ALTITUDE: <strong id="stat-max-alt">0000.0</strong></span>
           <span>PACKETS RECEIVED: <strong id="stat-pkts">0000</strong></span>
+          <span>LINK: <strong id="stat-link">WAITING</strong></span>
+          <span>LOSS: <strong id="stat-loss">0 MISS / 0 DUP / 0 OOO</strong></span>
           <span id="stat-mode" style="color: var(--text-2);">SYSTEM ONLINE</span>
         </div>
       </section>
@@ -423,22 +541,52 @@
         return (isNeg ? '-' : '+') + str;
       };
 
-      const sourceByPath = { '/nrc': 'NRC', '/mach-x': 'MACHX', '/ort': 'CANSAT' };
+      const pageConfigs = {
+        RIDESHARE: {
+          title: 'Mach-X Rideshare',
+          logo: 'MACH-X RIDESHARE',
+          preflight: { bmp: 'BMP280', mpu: 'LM75', sd: 'SD LOG', gps: 'GPS_FIX', radio: 'LORA' }
+        },
+        MACHX: {
+          title: 'Mach-X CanSat',
+          logo: 'MACH-X CANSAT',
+          preflight: { bmp: 'BMP388', mpu: 'MPU6500', sd: 'SD LOG', gps: 'GPS_FIX', radio: 'RADIO' }
+        },
+        CANSAT: {
+          title: 'Invictus II CanSat',
+          logo: 'INVICTUS II CANSAT',
+          preflight: { bmp: 'BMP388', mpu: 'LM75/MPU', sd: 'SD LOG', gps: 'GPS_REC', radio: 'RFM69' }
+        }
+      };
+      const normalizeClientSource = (src) => src === 'NRC' ? 'RIDESHARE' : src;
+      const sourceByPath = { '/mach-x-rideshare': 'RIDESHARE', '/nrc': 'RIDESHARE', '/mach-x': 'MACHX', '/cansat': 'CANSAT' };
       const currentPath = window.location.pathname;
-      let source = sourceByPath[currentPath] || (currentPath.endsWith('/nrc.html') ? 'NRC' : 'MACHX');
-      let maxAlt = { CANSAT: 0, NRC: 0, MACHX: 0, SUGAR: 0 };
-      let pktCount = { CANSAT: 0, NRC: 0, MACHX: 0, SUGAR: 0 };
+      let source = sourceByPath[currentPath] || (currentPath.endsWith('/nrc.html') ? 'RIDESHARE' : 'MACHX');
+      const pageConfig = pageConfigs[source] || pageConfigs.MACHX;
+      document.title = pageConfig.title;
+      if ($('logo')) $('logo').textContent = pageConfig.logo;
+      if ($('pf-bmp')?.previousElementSibling) $('pf-bmp').previousElementSibling.textContent = pageConfig.preflight.bmp;
+      if ($('pf-mpu')?.previousElementSibling) $('pf-mpu').previousElementSibling.textContent = pageConfig.preflight.mpu;
+      if ($('pf-sd')?.previousElementSibling) $('pf-sd').previousElementSibling.textContent = pageConfig.preflight.sd;
+      if ($('pf-gps')?.previousElementSibling) $('pf-gps').previousElementSibling.textContent = pageConfig.preflight.gps;
+      if ($('pf-radio')?.previousElementSibling) $('pf-radio').previousElementSibling.textContent = pageConfig.preflight.radio;
+      let maxAlt = { CANSAT: 0, RIDESHARE: 0, NRC: 0, MACHX: 0, SUGAR: 0 };
+      let pktCount = { CANSAT: 0, RIDESHARE: 0, NRC: 0, MACHX: 0, SUGAR: 0 };
       let firstReceivedAt = null;
-      let currentPhase = { CANSAT: 'IDLE', NRC: 'IDLE', MACHX: 'IDLE', SUGAR: 'IDLE' };
+      let currentPhase = { CANSAT: 'IDLE', RIDESHARE: 'IDLE', NRC: 'IDLE', MACHX: 'IDLE', SUGAR: 'IDLE' };
       const flightPhases = new Set(['IDLE', 'GROUNDED', 'PAD', 'LAUNCHED', 'ASCENDING', 'ASCENT', 'APOGEE', 'DESCENDING', 'DESCENT', 'MAIN', 'LANDED']);
       const gyroHistory = [];
       let signalState = {
         mode: 'hardware',
         CANSAT: { connected: false, lost: true },
+        RIDESHARE: { connected: false, lost: true },
         NRC: { connected: false, lost: true }
       };
       
-      const historyDB = { CANSAT: [], NRC: [], MACHX: [], SUGAR: [] };
+      const historyDB = { CANSAT: [], RIDESHARE: [], NRC: [], MACHX: [], SUGAR: [] };
+      const liveDashboardSources = new Set(['CANSAT', 'RIDESHARE', 'MACHX', 'SUGAR']);
+      const liveSessionSeenPacket = { CANSAT: false, RIDESHARE: false, NRC: false, MACHX: false, SUGAR: false };
+      const historySessionLoaded = { CANSAT: false, RIDESHARE: false, NRC: false, MACHX: false, SUGAR: false };
       const metricTrendValues = {};
       let isScrubbing = false;
       let scrubIndex = 0;
@@ -541,7 +689,7 @@
           const dt = (p.timestamp_ms - slice[i-1].timestamp_ms)/1000;
           return dt > 0 ? (p.altitude_m - slice[i-1].altitude_m)/dt : 0;
         });
-        const accelRaw = slice.map(p => ((p.accel_z || 1) - 1) * 9.81);
+        const accelRaw = slice.map(p => ((Number.isFinite(p.accel_z) ? p.accel_z : 1) - 1) * 9.81);
         const rssiRaw = slice.map(p => Number.isFinite(p.rssi_dbm) ? p.rssi_dbm : 0);
 
         upAlt.setData([xs, smoothSeries(altRaw, 0.14)]);
@@ -598,89 +746,137 @@
         const resize = () => { camera.aspect = rktCard.clientWidth / rktCard.clientHeight; camera.updateProjectionMatrix(); renderer.setSize(rktCard.clientWidth, rktCard.clientHeight); };
         window.addEventListener('resize', resize); resize();
 
-        const cansatGroup = new THREE.Group();
         const shellMat = new THREE.MeshStandardMaterial({ color: 0xe2e6ec, metalness: 0.88, roughness: 0.18 });
         const darkMat = new THREE.MeshStandardMaterial({ color: 0x4c5259, metalness: 0.45, roughness: 0.45 });
         const boardMat = new THREE.MeshStandardMaterial({ color: 0x5f7540, metalness: 0.12, roughness: 0.7 });
         const chipMat = new THREE.MeshStandardMaterial({ color: 0x1f242a, metalness: 0.28, roughness: 0.62 });
         const pinMat = new THREE.MeshStandardMaterial({ color: 0xd9ce84, metalness: 0.78, roughness: 0.3 });
 
-        const canRadius = 0.66;
-        const canHeight = 1.7;
+        function buildCansatModel() {
+          const group = new THREE.Group();
+          const canRadius = 0.66;
+          const canHeight = 1.7;
 
-        // Top and bottom covers
-        const topCap = new THREE.Mesh(new THREE.CylinderGeometry(canRadius, canRadius, 0.09, 40), darkMat);
-        topCap.position.y = canHeight / 2;
-        cansatGroup.add(topCap);
+          const topCap = new THREE.Mesh(new THREE.CylinderGeometry(canRadius, canRadius, 0.09, 40), darkMat);
+          topCap.position.y = canHeight / 2;
+          group.add(topCap);
 
-        const bottomCap = new THREE.Mesh(new THREE.CylinderGeometry(canRadius, canRadius, 0.09, 40), darkMat);
-        bottomCap.position.y = -canHeight / 2;
-        cansatGroup.add(bottomCap);
+          const bottomCap = new THREE.Mesh(new THREE.CylinderGeometry(canRadius, canRadius, 0.09, 40), darkMat);
+          bottomCap.position.y = -canHeight / 2;
+          group.add(bottomCap);
 
-        // Central cavity / stack volume
-        const core = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, canHeight - 0.16, 28), new THREE.MeshStandardMaterial({
-          color: 0x0f1216,
-          metalness: 0.25,
-          roughness: 0.8
-        }));
-        cansatGroup.add(core);
+          const core = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, canHeight - 0.16, 28), new THREE.MeshStandardMaterial({
+            color: 0x0f1216,
+            metalness: 0.25,
+            roughness: 0.8
+          }));
+          group.add(core);
 
-        // Vertical metallic shell ribs to mimic slot-cut can structure
-        const ribCount = 8;
-        for (let i = 0; i < ribCount; i++) {
-          const rib = new THREE.Mesh(new THREE.BoxGeometry(0.2, canHeight - 0.12, 0.09), shellMat);
-          const a = (i / ribCount) * Math.PI * 2;
-          rib.position.set(Math.cos(a) * (canRadius - 0.04), 0, Math.sin(a) * (canRadius - 0.04));
-          rib.lookAt(0, 0, 0);
-          cansatGroup.add(rib);
+          for (let i = 0; i < 8; i++) {
+            const rib = new THREE.Mesh(new THREE.BoxGeometry(0.2, canHeight - 0.12, 0.09), shellMat);
+            const a = (i / 8) * Math.PI * 2;
+            rib.position.set(Math.cos(a) * (canRadius - 0.04), 0, Math.sin(a) * (canRadius - 0.04));
+            rib.lookAt(0, 0, 0);
+            group.add(rib);
+          }
+
+          const topRing = new THREE.Mesh(new THREE.TorusGeometry(canRadius - 0.04, 0.03, 12, 50), shellMat);
+          topRing.rotation.x = Math.PI / 2;
+          topRing.position.y = canHeight / 2 - 0.08;
+          group.add(topRing);
+
+          const bottomRing = new THREE.Mesh(new THREE.TorusGeometry(canRadius - 0.04, 0.03, 12, 50), shellMat);
+          bottomRing.rotation.x = Math.PI / 2;
+          bottomRing.position.y = -canHeight / 2 + 0.08;
+          group.add(bottomRing);
+
+          for (let i = 0; i < 5; i++) {
+            const y = -0.55 + i * 0.28;
+            const board = new THREE.Mesh(new THREE.CylinderGeometry(0.47, 0.47, 0.05, 30), boardMat);
+            board.position.y = y;
+            group.add(board);
+
+            const chip = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.06, 0.12), chipMat);
+            chip.position.set(0.1, y + 0.05, 0.06);
+            group.add(chip);
+
+            const connector = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.06, 0.08), pinMat);
+            connector.position.set(-0.14, y + 0.05, -0.1);
+            group.add(connector);
+          }
+
+          for (let i = 0; i < 4; i++) {
+            const bolt = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.03, 10), shellMat);
+            const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+            bolt.position.set(Math.cos(a) * 0.44, canHeight / 2 + 0.05, Math.sin(a) * 0.44);
+            group.add(bolt);
+          }
+
+          for (let i = 0; i < 4; i++) {
+            const wing = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.32, 0.56), shellMat);
+            wing.position.set(0, -canHeight / 2 + 0.15, canRadius + 0.2);
+            const wingPivot = new THREE.Group();
+            wingPivot.rotation.y = (i * Math.PI) / 2;
+            wingPivot.add(wing);
+            group.add(wingPivot);
+          }
+
+          return group;
         }
 
-        // Ring details near top and bottom lip
-        const topRing = new THREE.Mesh(new THREE.TorusGeometry(canRadius - 0.04, 0.03, 12, 50), shellMat);
-        topRing.rotation.x = Math.PI / 2;
-        topRing.position.y = canHeight / 2 - 0.08;
-        cansatGroup.add(topRing);
+        function buildRocketModel() {
+          const group = new THREE.Group();
+          const whiteMat = new THREE.MeshStandardMaterial({ color: 0xf2f5f8, metalness: 0.55, roughness: 0.22 });
+          const stripeMat = new THREE.MeshStandardMaterial({ color: 0x11161c, metalness: 0.35, roughness: 0.34 });
+          const accentMat = new THREE.MeshStandardMaterial({ color: 0x00a3ff, metalness: 0.25, roughness: 0.4 });
+          const engineMat = new THREE.MeshStandardMaterial({ color: 0x1d2228, metalness: 0.8, roughness: 0.28 });
+          const finMat = new THREE.MeshStandardMaterial({ color: 0xd6dde5, metalness: 0.62, roughness: 0.24 });
 
-        const bottomRing = new THREE.Mesh(new THREE.TorusGeometry(canRadius - 0.04, 0.03, 12, 50), shellMat);
-        bottomRing.rotation.x = Math.PI / 2;
-        bottomRing.position.y = -canHeight / 2 + 0.08;
-        cansatGroup.add(bottomRing);
+          const body = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.36, 2.45, 48), whiteMat);
+          body.position.y = 0;
+          group.add(body);
 
-        // Internal board stack visible through slots
-        for (let i = 0; i < 5; i++) {
-          const y = -0.55 + i * 0.28;
-          const board = new THREE.Mesh(new THREE.CylinderGeometry(0.47, 0.47, 0.05, 30), boardMat);
-          board.position.y = y;
-          cansatGroup.add(board);
+          const nose = new THREE.Mesh(new THREE.ConeGeometry(0.32, 0.78, 48), whiteMat);
+          nose.position.y = 1.62;
+          group.add(nose);
 
-          const chip = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.06, 0.12), chipMat);
-          chip.position.set(0.1, y + 0.05, 0.06);
-          cansatGroup.add(chip);
+          const lowerBand = new THREE.Mesh(new THREE.CylinderGeometry(0.365, 0.365, 0.08, 48), stripeMat);
+          lowerBand.position.y = -0.9;
+          group.add(lowerBand);
 
-          const connector = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.06, 0.08), pinMat);
-          connector.position.set(-0.14, y + 0.05, -0.1);
-          cansatGroup.add(connector);
+          const upperBand = new THREE.Mesh(new THREE.CylinderGeometry(0.335, 0.335, 0.07, 48), accentMat);
+          upperBand.position.y = 0.72;
+          group.add(upperBand);
+
+          const payloadWindow = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.32, 0.012), accentMat);
+          payloadWindow.position.set(0, 0.24, 0.363);
+          group.add(payloadWindow);
+
+          const engine = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.34, 0.36, 36), engineMat);
+          engine.position.y = -1.42;
+          group.add(engine);
+
+          const nozzle = new THREE.Mesh(new THREE.ConeGeometry(0.31, 0.34, 36, 1, true), engineMat);
+          nozzle.rotation.x = Math.PI;
+          nozzle.position.y = -1.75;
+          group.add(nozzle);
+
+          for (let i = 0; i < 4; i++) {
+            const fin = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.56, 0.34), finMat);
+            fin.position.set(0, -1.02, 0.49);
+            const pivot = new THREE.Group();
+            pivot.rotation.y = (i * Math.PI) / 2;
+            pivot.add(fin);
+            group.add(pivot);
+          }
+
+          group.scale.setScalar(0.96);
+          group.rotation.z = 0.16;
+          return group;
         }
 
-        // Small top bolt details
-        for (let i = 0; i < 4; i++) {
-          const bolt = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.03, 10), shellMat);
-          const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
-          bolt.position.set(Math.cos(a) * 0.44, canHeight / 2 + 0.05, Math.sin(a) * 0.44);
-          cansatGroup.add(bolt);
-        }
-
-        // Four bottom wings/fins
-        for (let i = 0; i < 4; i++) {
-          const wing = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.32, 0.56), shellMat);
-          wing.position.set(0, -canHeight / 2 + 0.15, canRadius + 0.2);
-          const wingPivot = new THREE.Group();
-          wingPivot.rotation.y = (i * Math.PI) / 2;
-          wingPivot.add(wing);
-          cansatGroup.add(wingPivot);
-        }
-
-        scene.add(cansatGroup);
+        const vehicleGroup = source === 'RIDESHARE' ? buildRocketModel() : buildCansatModel();
+        scene.add(vehicleGroup);
 
         const gridHelper = new THREE.GridHelper(40, 40, 0x333333, 0x111111); gridHelper.position.y = -3; scene.add(gridHelper);
         scene.add(new THREE.AmbientLight(0x222222, 2.0));
@@ -694,9 +890,9 @@
           const time = clock.getElapsedTime();
           rktPitchCurrent += (rktPitchTarget - rktPitchCurrent) * 0.08;
           rktAccelCurrent += (rktAccelTarget - rktAccelCurrent) * 0.1;
-          cansatGroup.rotation.x = rktPitchCurrent;
-          cansatGroup.rotation.z += rktRollRate * 0.015;
-          cansatGroup.position.y = Math.sin(time * 1.5) * 0.08;
+          vehicleGroup.rotation.x = rktPitchCurrent;
+          vehicleGroup.rotation.z += rktRollRate * 0.015;
+          vehicleGroup.position.y = Math.sin(time * 1.5) * 0.08;
 
           const speed = Math.max(0.01, rktAccelCurrent * 0.1);
           gridHelper.position.z += speed; if (gridHelper.position.z > 1) gridHelper.position.z -= 1;
@@ -708,34 +904,115 @@
         animate();
 
         window.update3D = (pkt) => {
-          rktRollRate = pkt.gyro_x || 0;
-          rktPitchTarget = (pkt.accel_z && Math.abs(pkt.accel_z - 1) > 0.5) ? 0 : Math.min(Math.PI/2, Math.abs(pkt.gyro_x)*0.01);
-          rktAccelTarget = pkt.accel_z || 1;
+          const gyroX = Number.isFinite(pkt.gyro_x) ? pkt.gyro_x : 0;
+          const accelZ = Number.isFinite(pkt.accel_z) ? pkt.accel_z : 1;
+          rktRollRate = gyroX;
+          rktPitchTarget = Math.abs(accelZ - 1) > 0.5 ? 0 : Math.min(Math.PI/2, Math.abs(gyroX)*0.01);
+          rktAccelTarget = accelZ;
         };
       } else { window.update3D = () => {}; }
 
       // PREFLIGHT CHECKLIST
       function isTelemetrySourceActive(src) {
-        const state = signalState[src] || {};
+        const state = signalState[normalizeClientSource(src)] || signalState[src] || {};
         return state.connected && !state.lost;
+      }
+
+      function updateLinkDiagnosticsUI(src = source) {
+        const normalized = normalizeClientSource(src);
+        const state = signalState[normalized] || signalState[src] || {};
+        const diag = state.diagnostics || {};
+        const linkEl = $('stat-link');
+        const lossEl = $('stat-loss');
+        if (!linkEl || !lossEl) return;
+
+        const ageMs = Number.isFinite(diag.last_packet_age_ms)
+          ? diag.last_packet_age_ms
+          : Number.isFinite(state.last_seen_ms) && state.last_seen_ms > 0
+            ? Math.max(0, Date.now() - state.last_seen_ms)
+            : null;
+        const ageText = ageMs === null ? 'NO PKT' : `${(ageMs / 1000).toFixed(1)}S`;
+        const connected = Boolean(state.connected);
+        const lost = Boolean(state.lost);
+        const liveDisabled = state.live_enabled === false;
+
+        linkEl.textContent = liveDisabled
+          ? 'DISABLED'
+          : connected && !lost
+            ? `OK ${ageText}`
+            : connected
+              ? `LOST ${ageText}`
+              : `OFF ${ageText}`;
+        linkEl.style.color = liveDisabled ? 'var(--warning)' : connected && !lost ? 'var(--nominal)' : 'var(--critical)';
+
+        const missed = Number.isFinite(diag.missed_packets) ? diag.missed_packets : 0;
+        const duplicate = Number.isFinite(diag.duplicate_packets) ? diag.duplicate_packets : 0;
+        const outOfOrder = Number.isFinite(diag.out_of_order_packets) ? diag.out_of_order_packets : 0;
+        lossEl.textContent = `${missed} MISS / ${duplicate} DUP / ${outOfOrder} OOO`;
+        lossEl.style.color = missed || duplicate || outOfOrder ? 'var(--warning)' : 'var(--text-1)';
       }
 
       function updatePreflight(pkt) {
         const flags = pkt?.flags || 0;
-        const active = isTelemetrySourceActive(pkt?.source || source);
-        const up = (id, ok) => {
-           const el = $(id); el.textContent = ok ? 'OK' : 'FLT'; el.className = 'pf-val ' + (ok ? 'ok' : '');
+        const src = normalizeClientSource(pkt?.source || source);
+        const active = isTelemetrySourceActive(src);
+        const setStatus = (id, text, cls = '') => {
+           const el = $(id);
+           if (!el) return;
+           el.textContent = text;
+           el.className = 'pf-val ' + cls;
+        };
+        const up = (id, ok) => setStatus(id, ok ? 'OK' : 'FLT', ok ? 'ok' : '');
+        if (liveDashboardSources.has(src) && !pkt) {
+          setStatus('pf-bmp', 'WAIT', 'wait');
+          setStatus('pf-mpu', 'WAIT', 'wait');
+          setStatus('pf-sd', 'WAIT', 'wait');
+          setStatus('pf-gps', src === 'CANSAT' ? 'SUPP' : 'WAIT', src === 'CANSAT' ? 'suppressed' : 'wait');
+          setStatus('pf-radio', active ? 'LISTEN' : 'WAIT', 'wait');
+          updateLinkDiagnosticsUI(src);
+          return;
+        }
+        if (src === 'CANSAT' && (pkt?.mission_mode === 'GPS_RECOVERY' || (flags & 0x80))) {
+          setStatus('pf-bmp', 'QUIET', 'quiet');
+          setStatus('pf-mpu', 'QUIET', 'quiet');
+          setStatus('pf-sd', 'QUIET', 'quiet');
+          up('pf-gps', active && (flags & 0x04) && Number.isFinite(pkt?.lat) && Number.isFinite(pkt?.lon));
+          up('pf-radio', active && Number.isFinite(pkt?.rssi_dbm));
+          updateLinkDiagnosticsUI(src);
+          return;
+        }
+        if (src === 'CANSAT' && pkt?.mission_mode !== 'GPS_RECOVERY') {
+          setStatus('pf-gps', 'SUPP', 'suppressed');
         };
         up('pf-bmp', active && (flags & 0x08) && Number.isFinite(pkt?.pressure_hpa) && Number.isFinite(pkt?.altitude_m));
-        up('pf-mpu', active && (flags & 0x10) && Number.isFinite(pkt?.accel_z) && Number.isFinite(pkt?.gyro_x));
+        if (src === 'RIDESHARE') {
+          up('pf-mpu', active && Number.isFinite(pkt?.temp_c_1));
+        } else {
+          up('pf-mpu', active && (flags & 0x10) && Number.isFinite(pkt?.accel_z) && Number.isFinite(pkt?.gyro_x));
+        }
         up('pf-sd', active && (flags & 0x20));
-        up('pf-gps', active && (flags & 0x04) && Number.isFinite(pkt?.lat) && Number.isFinite(pkt?.lon));
+        if (!(src === 'CANSAT' && pkt?.mission_mode !== 'GPS_RECOVERY')) {
+          up('pf-gps', active && (flags & 0x04) && Number.isFinite(pkt?.lat) && Number.isFinite(pkt?.lon));
+        }
+        up('pf-radio', active && Number.isFinite(pkt?.rssi_dbm));
+        updateLinkDiagnosticsUI(src);
       }
 
       // UI UPDATER
       function updateUIState(pkt) {
         if(!pkt) return;
-        const src = pkt.source || source;
+        const src = normalizeClientSource(pkt.source || source);
+        if (src === 'CANSAT') {
+          if (pkt.mission_mode === 'GPS_RECOVERY' || (pkt.flags & 0x80)) {
+            setModeBadge('GPS RECOVERY', 'var(--nominal)');
+            const sb = $('val-stability');
+            if (sb) { sb.textContent = 'GPS RECOVERY'; sb.style.color = 'var(--nominal)'; }
+          } else if (pkt.mission_mode === 'DEPLOYED_SCIENCE') {
+            setModeBadge('DEPLOYED SCIENCE', 'var(--text-1)');
+          } else {
+            setModeBadge('WAITING DEPLOYMENT', 'var(--warning)');
+          }
+        }
         updateMetricValue('val-alt', pkt.altitude_m, pad(pkt.altitude_m, 4));
         if($('cam-alt')) $('cam-alt').textContent = parseFloat(pkt.altitude_m).toFixed(1) + 'M';
         if (pkt.altitude_m > maxAlt[src]) maxAlt[src] = pkt.altitude_m;
@@ -745,25 +1022,29 @@
 
         updateMetricValue('val-temp', pkt.temp_c, pad(pkt.temp_c, 2));
         updateMetricValue('val-press', pkt.pressure_hpa, pad(pkt.pressure_hpa, 4));
-        const accel = (pkt.accel_z - 1.0) * 9.81;
+        const accelZ = Number.isFinite(pkt.accel_z) ? pkt.accel_z : 1;
+        const gyroX = Number.isFinite(pkt.gyro_x) ? pkt.gyro_x : 0;
+        const accel = (accelZ - 1.0) * 9.81;
         updateMetricValue('val-accel', accel, pad(accel, 2));
         if($('cur-accel')) $('cur-accel').textContent = pad(accel, 2);
-        $('hud-gforce').textContent = parseFloat(pkt.accel_z || 1).toFixed(2) + ' G';
+        $('hud-gforce').textContent = accelZ.toFixed(2) + ' G';
         $('val-rssi').textContent = (pkt.rssi_dbm || '-00') + ' DBM';
         if($('cur-rssi')) $('cur-rssi').textContent = (pkt.rssi_dbm ?? '-00');
         
-        $('hud-gyro').textContent = pad(pkt.gyro_x, 2) + '°/S';
-        $('hud-pitch').textContent = parseFloat(pkt.accel_z > 1.5 ? 90 : 0).toFixed(2) + '°';
+        $('hud-gyro').textContent = pad(gyroX, 2) + '°/S';
+        $('hud-pitch').textContent = parseFloat(accelZ > 1.5 ? 90 : 0).toFixed(2) + '°';
 
         $('cur-alt').textContent = pad(pkt.altitude_m, 4);
         $('cur-temp').textContent = pad(pkt.temp_c, 2);
         $('cur-press').textContent = pad(pkt.pressure_hpa, 4);
 
-        gyroHistory.push(Math.abs(pkt.gyro_x || 0)); if (gyroHistory.length > 10) gyroHistory.shift();
+        gyroHistory.push(Math.abs(gyroX)); if (gyroHistory.length > 10) gyroHistory.shift();
         const rms = Math.sqrt(gyroHistory.reduce((a, v) => a + v * v, 0) / gyroHistory.length);
         const sb = $('val-stability');
-        if (rms < 10) { sb.textContent = 'NOMINAL'; sb.style.color = 'var(--text-1)'; }
-        else { sb.textContent = 'WARNING'; sb.style.color = 'var(--warning)'; }
+        if (!(src === 'CANSAT' && (pkt.mission_mode === 'GPS_RECOVERY' || (pkt.flags & 0x80)))) {
+          if (rms < 10) { sb.textContent = 'NOMINAL'; sb.style.color = 'var(--text-1)'; }
+          else { sb.textContent = 'WARNING'; sb.style.color = 'var(--warning)'; }
+        }
 
         // Velocity calc
         const arr = historyDB[src];
@@ -783,20 +1064,23 @@
         $('scrub-display').textContent = 'T+' + (pkt.timestamp_ms/1000).toFixed(1) + 'S';
       }
 
-      function processPacket(pkt) {
+      function processPacket(pkt, options = {}) {
         if (!pkt || isNaN(pkt.altitude_m)) return;
-        const src = pkt.source || source;
-        historyDB[src].push(pkt);
-        if(pkt.pkt_id) pktCount[src] = Math.max(pktCount[src], pkt.pkt_id);
+        const src = normalizeClientSource(pkt.source || source);
+        if (src !== source) return;
+        const normalizedPacket = { ...pkt, source: src };
+        if (!options.fromHistory) liveSessionSeenPacket[src] = true;
+        historyDB[src].push(normalizedPacket);
+        if(Number.isFinite(pkt.pkt_id)) pktCount[src] = Math.max(pktCount[src], pkt.pkt_id);
         $('stat-pkts').textContent = String(pktCount[src]).padStart(4, '0');
 
         $('scrubber').max = historyDB[source].length - 1;
         if (!isScrubbing) {
            scrubIndex = historyDB[source].length - 1;
            $('scrubber').value = scrubIndex;
-           updateUIState(pkt);
+           updateUIState(normalizedPacket);
         }
-        if (!firstReceivedAt) firstReceivedAt = pkt.received_at || Date.now();
+        if (!options.fromHistory && !firstReceivedAt) firstReceivedAt = pkt.received_at || Date.now();
       }
 
       // SCRUBBER
@@ -821,7 +1105,8 @@
 
       // EVENTS
       function addEvent(evt) {
-        if (evt?.source && evt.source !== source) return;
+        const evtSource = normalizeClientSource(evt?.source || source);
+        if (evt?.source && evtSource !== source) return;
         const list = $('events-list');
         const row = document.createElement('div'); row.className = 'event-row';
         const d = new Date(evt.received_at || Date.now());
@@ -837,6 +1122,7 @@
 
       function updatePhase(phase, src) {
         if (!flightPhases.has(phase)) return;
+        src = normalizeClientSource(src || source);
         if(src) currentPhase[src] = phase;
         if(src && src !== source) return;
         const b = $('phase-badge');
@@ -871,9 +1157,11 @@
           signalState = data.signal || signalState;
           const latest = historyDB[source][historyDB[source].length - 1];
           updatePreflight(latest || null);
+          updateLinkDiagnosticsUI(source);
         } catch (error) {
           signalState = { ...signalState, mode: 'hardware' };
           updatePreflight(null);
+          updateLinkDiagnosticsUI(source);
         }
       }
 
@@ -883,34 +1171,121 @@
       // SOCKET.IO
       let socket = null;
       function setModeBadge(text, color) { $('stat-mode').textContent = text; $('stat-mode').style.color = color; }
+      function showWaitingState(src = source) {
+        src = normalizeClientSource(src);
+        if (!liveDashboardSources.has(src) || liveSessionSeenPacket[src]) return;
+        const label = src === 'CANSAT'
+          ? 'WAITING CANSAT DEPLOYMENT'
+          : src === 'RIDESHARE'
+            ? 'WAITING RIDESHARE LINK'
+            : 'WAITING TELEMETRY';
+        setModeBadge(label, 'var(--warning)');
+        $('phase-badge').textContent = 'NO SIGNAL';
+        $('phase-badge').className = 'phase-badge';
+        updatePreflight(null);
+      }
+
+      function resetRenderedHistory(src = source) {
+        historyDB[src] = [];
+        maxAlt[src] = 0;
+        pktCount[src] = 0;
+        firstReceivedAt = null;
+        historySessionLoaded[src] = false;
+        scrubIndex = 0;
+        $('scrubber').max = 0;
+        $('scrubber').value = 0;
+        $('stat-pkts').textContent = '0000';
+        $('stat-max-alt').textContent = pad(0, 4);
+        if (trail) trail.setLatLngs([]);
+        gyroHistory.length = 0;
+      }
+
+      function packetsFromHistoryPayload(data) {
+        let pkts = data.packets;
+        if (!pkts && source === 'CANSAT') pkts = data.cansat;
+        if (!pkts && source === 'RIDESHARE') pkts = data.rideshare || data.nrc;
+        if (!pkts && source === 'MACHX') pkts = data.machx;
+        if (!Array.isArray(pkts)) return null;
+        return pkts.filter(p => normalizeClientSource(p?.source || source) === source);
+      }
+
+      function renderHistoryPayload(data) {
+        if (!data) return;
+        const payloadSource = data.source ? normalizeClientSource(data.source) : null;
+        if (payloadSource && payloadSource !== source) return;
+
+        const pkts = packetsFromHistoryPayload(data);
+        if (pkts) {
+          const activePackets = extractActiveMissionPackets(pkts);
+          resetRenderedHistory(source);
+          historySessionLoaded[source] = activePackets.length > 0;
+          activePackets.forEach(p => processPacket(p, { fromHistory: true }));
+          if (activePackets.length) {
+            scrubIndex = activePackets.length - 1;
+            $('scrubber').max = activePackets.length - 1;
+            $('scrubber').value = scrubIndex;
+            updateUIState(historyDB[source][scrubIndex]);
+            renderTrail();
+            const latestTimestamp = historyDB[source][scrubIndex]?.timestamp_ms;
+            if (Number.isFinite(latestTimestamp)) {
+              const e = Math.max(0, Math.floor(latestTimestamp / 1000));
+              $('mission-timer').textContent = `${String(Math.floor(e/3600)).padStart(2,'0')}:${String(Math.floor((e%3600)/60)).padStart(2,'0')}:${String(e%60).padStart(2,'0')}`;
+            }
+          }
+        }
+
+        let renderedPhaseFromEvents = false;
+        if (Array.isArray(data.events)) {
+          const sourceEvents = data.events.filter(e => normalizeClientSource(e?.source || source) === source);
+          $('events-list').innerHTML = '';
+          sourceEvents.forEach(e => addEvent(e));
+          const phaseEvents = sourceEvents.filter(e => flightPhases.has(e.event_type));
+          if (phaseEvents.length) {
+            updatePhase(phaseEvents[phaseEvents.length - 1].event_type, source);
+            renderedPhaseFromEvents = true;
+          }
+        }
+
+        if (historySessionLoaded[source] && !renderedPhaseFromEvents && !liveSessionSeenPacket[source]) {
+          const b = $('phase-badge');
+          b.textContent = 'HISTORY';
+          b.className = 'phase-badge';
+          setModeBadge('RECOVERED HISTORY', 'var(--text-2)');
+        }
+
+        if ((!pkts || pkts.length === 0) && !historyDB[source].length && !liveSessionSeenPacket[source]) {
+          showWaitingState(source);
+        }
+      }
 
       function attachSocketHandlers(s) {
         s.on('connect', () => {
-          setModeBadge('SYSTEM ONLINE', 'var(--text-1)');
+          if (liveDashboardSources.has(source)) showWaitingState(source);
+          else setModeBadge('SYSTEM ONLINE', 'var(--text-1)');
           s.emit('subscribe_source', { source });
           s.emit('request_history', { source, limit: 1000 });
         });
         s.on('disconnect', () => setModeBadge('OFFLINE', 'var(--critical)'));
-        s.on('history', data => {
-          if (!data) return;
-          let pkts = data.cansat || data.nrc ? (source === 'CANSAT' ? data.cansat : data.nrc) : data.packets;
-          if (data.events && data.events.length) {
-             $('events-list').innerHTML = ''; data.events.forEach(e => addEvent(e));
-             const srcEvts = data.events.filter(e => e.source === source && flightPhases.has(e.event_type));
-             if (srcEvts.length) updatePhase(srcEvts[srcEvts.length - 1].event_type, source);
-          }
-          if (pkts && pkts.length) {
-             pkts = extractActiveMissionPackets(pkts);
-             historyDB[source] = [];
-             pkts.forEach(p => processPacket(p));
-          }
-        });
+        s.on('history', renderHistoryPayload);
         s.on('packet', payload => {
           const pkt = payload && payload.data ? payload.data : payload;
           if (!pkt || isNaN(pkt.altitude_m)) return;
+          if (normalizeClientSource(pkt.source || source) !== source) return;
           processPacket(pkt);
         });
         s.on('mission_event', evt => { addEvent(evt); updatePhase(evt.event_type, evt.source); });
+        s.on('signal_lost', evt => {
+          const src = normalizeClientSource(evt?.source || source);
+          signalState[src] = { ...(signalState[src] || {}), connected: true, lost: true, last_seen_ms: evt?.last_seen_ms || 0 };
+          addEvent({ ...evt, source: src, event_type: 'SIGNAL_LOST', altitude_m: 0, received_at: Date.now() });
+          updateLinkDiagnosticsUI(src);
+        });
+        s.on('signal_recovered', evt => {
+          const src = normalizeClientSource(evt?.source || source);
+          signalState[src] = { ...(signalState[src] || {}), connected: true, lost: false };
+          addEvent({ ...evt, source: src, event_type: 'SIGNAL_RECOVERED', altitude_m: 0, received_at: Date.now() });
+          updateLinkDiagnosticsUI(src);
+        });
         s.on('server_error', payload => setModeBadge(payload?.message || 'SERVER ERROR', 'var(--critical)'));
       }
 

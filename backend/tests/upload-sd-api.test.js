@@ -40,6 +40,7 @@ async function withMockedServer(fn, env = {}) {
         getSignalState: () => ({
           mode: 'hardware',
           CANSAT: { connected: false },
+          RIDESHARE: { connected: false },
           NRC: { connected: false }
         })
       };
@@ -74,18 +75,18 @@ async function withMockedServer(fn, env = {}) {
   }
 }
 
-test('POST /api/upload-sd accepts NRC CSV with apogee columns and returns apogee summary', async () => {
+test('POST /api/upload-sd accepts RIDESHARE CSV with apogee columns and returns apogee summary', async () => {
   await withMockedServer(async (baseUrl, captured) => {
     const csv = [
-      'pkt_id,timestamp_ms,altitude_m,temp_c,pressure_hpa,lat,lon,rssi_dbm,flags,max_altitude_m,apogee_detected',
-      '1,1000,0.00,22.10,1013.20,0,0,-70,40,0.00,0',
-      '2,2000,42.50,22.00,1008.20,0,0,-69,41,42.50,0',
-      '3,3000,61.25,21.80,1001.50,0,0,-68,43,61.25,1',
-      '4,4000,55.00,21.70,1004.10,0,0,-67,43,61.25,1'
+      'pkt_id,timestamp_ms,altitude_m,altitude_ft,temp_c,lm75_temp_c,pressure_hpa,lat,lon,gps_fix,flags,bmp_ok,sd_ok,max_altitude_m,max_altitude_ft,apogee_detected,apogee_altitude_m,apogee_altitude_ft',
+      '1,1000,0.00,0.00,22.10,21.90,1013.20,0,0,0,40,1,1,0.00,0.00,0,,',
+      '2,2000,42.50,139.44,22.00,21.80,1008.20,0,0,0,41,1,1,42.50,139.44,0,,',
+      '3,3000,61.25,200.95,21.80,21.65,1001.50,0,0,0,43,1,1,61.25,200.95,1,61.25,200.95',
+      '4,4000,55.00,180.45,21.70,-999.00,1004.10,0,0,0,43,1,1,61.25,200.95,1,61.25,200.95'
     ].join('\n');
 
     const fd = new FormData();
-    fd.append('source', 'NRC');
+    fd.append('source', 'RIDESHARE');
     fd.append('file', new Blob([csv], { type: 'text/csv' }), 'flight.csv');
 
     const res = await fetch(`${baseUrl}/api/upload-sd`, {
@@ -96,7 +97,7 @@ test('POST /api/upload-sd accepts NRC CSV with apogee columns and returns apogee
 
     assert.equal(res.status, 201);
     assert.equal(body.ok, true);
-    assert.equal(body.source, 'NRC');
+    assert.equal(body.source, 'RIDESHARE');
     assert.equal(body.upload_id, 1);
     assert.equal(body.inserted, 4);
     assert.equal(body.skipped, 0);
@@ -107,8 +108,10 @@ test('POST /api/upload-sd accepts NRC CSV with apogee columns and returns apogee
       pkt_id: 3
     });
     assert.equal(captured.packets.length, 4);
+    assert.equal(captured.packets[0].temp_c_1, 21.9);
+    assert.equal(captured.packets[3].temp_c_1, null);
     assert.equal(captured.uploads.length, 1);
-    assert.equal(captured.uploads[0].source, 'NRC');
+    assert.equal(captured.uploads[0].source, 'RIDESHARE');
     assert.equal(captured.packets.every((packet) => packet.upload_id === 1), true);
 
     const packetsRes = await fetch(`${baseUrl}/api/sd-uploads/${body.upload_id}/packets`);
@@ -116,18 +119,42 @@ test('POST /api/upload-sd accepts NRC CSV with apogee columns and returns apogee
     assert.equal(packetsRes.status, 200);
     assert.equal(packetsBody.ok, true);
     assert.equal(packetsBody.upload_id, 1);
-    assert.equal(packetsBody.source, 'NRC');
+    assert.equal(packetsBody.source, 'RIDESHARE');
     assert.equal(packetsBody.count, 4);
     assert.deepEqual(packetsBody.packets.map((packet) => packet.pkt_id), [1, 2, 3, 4]);
+  });
+});
+
+test('POST /api/upload-sd aliases legacy NRC source to RIDESHARE', async () => {
+  await withMockedServer(async (baseUrl, captured) => {
+    const csv = [
+      'pkt_id,timestamp_ms,altitude_m,temp_c,pressure_hpa,lat,lon,rssi_dbm,flags',
+      '1,1000,0.00,22.10,1013.20,0,0,-70,40'
+    ].join('\n');
+
+    const fd = new FormData();
+    fd.append('source', 'NRC');
+    fd.append('file', new Blob([csv], { type: 'text/csv' }), 'legacy.csv');
+
+    const res = await fetch(`${baseUrl}/api/upload-sd`, {
+      method: 'POST',
+      body: fd
+    });
+    const body = await res.json();
+
+    assert.equal(res.status, 201);
+    assert.equal(body.source, 'RIDESHARE');
+    assert.equal(captured.uploads[0].source, 'RIDESHARE');
+    assert.equal(captured.packets[0].source, 'RIDESHARE');
   });
 });
 
 test('POST /api/upload-sd keeps CANSAT upload behavior compatible', async () => {
   await withMockedServer(async (baseUrl, captured) => {
     const csv = [
-      'pkt_id,timestamp_ms,altitude_m,temp_c,pressure_hpa,accel_z,gyro_x,lat,lon,flags',
-      '1,1000,0.00,22.10,1013.20,1.00,0.10,0,0,40',
-      '2,2000,12.50,22.00,1008.20,1.20,0.20,0,0,41'
+      'pkt_id,timestamp_ms,mission_mode,altitude_m,temp_c,pressure_hpa,temp_c_1,temp_c_2,temp_c_3,temp_c_4,accel_z,gyro_x,lat,lon,rssi_dbm,flags',
+      '1,1000,0,0.00,22.10,1013.20,21.10,21.20,21.30,21.40,1.00,0.10,0,0,-90,40',
+      '2,2000,1,12.50,22.00,1008.20,21.00,21.10,21.20,21.30,1.20,0.20,0,0,-88,41'
     ].join('\n');
 
     const fd = new FormData();
@@ -147,6 +174,10 @@ test('POST /api/upload-sd keeps CANSAT upload behavior compatible', async () => 
     assert.equal(body.inserted, 2);
     assert.equal(body.duration_s, 1);
     assert.equal(captured.uploads[0].source, 'CANSAT');
+    assert.equal(captured.packets[0].mission_mode, 'PRE_DEPLOY');
+    assert.equal(captured.packets[1].mission_mode, 'DEPLOYED_SCIENCE');
+    assert.equal(captured.packets[0].protocol_version, 3);
+    assert.equal(captured.packets[1].temp_c_4, 21.30);
     assert.equal(captured.packets.every((packet) => packet.upload_id === 1), true);
   });
 });

@@ -2,6 +2,7 @@ const { Transform } = require('stream');
 const {
   LEGACY_PACKET_LENGTH_BYTES,
   PACKET_LENGTH_BYTES,
+  PACKET_V3_LENGTH_BYTES,
   PACKET_SYNC
 } = require('./cansat-hardware');
 const { parseCansat } = require('./parser');
@@ -34,11 +35,12 @@ class CansatFrameParser extends Transform {
 
   drainFrames() {
     const minFrameBytes = Math.min(PACKET_LENGTH_BYTES, LEGACY_PACKET_LENGTH_BYTES);
+    const maxFrameBytes = Math.max(PACKET_V3_LENGTH_BYTES, PACKET_LENGTH_BYTES, LEGACY_PACKET_LENGTH_BYTES);
     while (this.buffer.length >= minFrameBytes) {
       const frameOffset = this.findNextFrameOffset();
 
       if (frameOffset < 0) {
-        const keep = PACKET_LENGTH_BYTES - 1;
+        const keep = maxFrameBytes - 1;
         const drop = Math.max(0, this.buffer.length - keep);
         if (drop > 0) this.dropBytes(drop);
         return;
@@ -59,13 +61,16 @@ class CansatFrameParser extends Transform {
     }
 
     if (this.buffer.length > this.maxBufferBytes) {
-      this.dropBytes(this.buffer.length - (PACKET_LENGTH_BYTES - 1));
+      this.dropBytes(this.buffer.length - (maxFrameBytes - 1));
     }
   }
 
   findNextFrameOffset() {
     const maxStart = this.buffer.length - Math.min(PACKET_LENGTH_BYTES, LEGACY_PACKET_LENGTH_BYTES);
     for (let offset = 0; offset <= maxStart; offset++) {
+      const v3Candidate = this.buffer.subarray(offset, offset + PACKET_V3_LENGTH_BYTES);
+      if (v3Candidate.length === PACKET_V3_LENGTH_BYTES && parseCansat(v3Candidate)) return offset;
+
       const v2Candidate = this.buffer.subarray(offset, offset + PACKET_LENGTH_BYTES);
       if (v2Candidate.length === PACKET_LENGTH_BYTES && parseCansat(v2Candidate)) return offset;
 
@@ -83,6 +88,10 @@ class CansatFrameParser extends Transform {
   }
 
   detectFrameLengthAtStart() {
+    if (this.buffer.length >= PACKET_V3_LENGTH_BYTES) {
+      const candidate = this.buffer.subarray(0, PACKET_V3_LENGTH_BYTES);
+      if (parseCansat(candidate)) return PACKET_V3_LENGTH_BYTES;
+    }
     if (this.buffer.length >= PACKET_LENGTH_BYTES) {
       const candidate = this.buffer.subarray(0, PACKET_LENGTH_BYTES);
       if (parseCansat(candidate)) return PACKET_LENGTH_BYTES;

@@ -1,4 +1,6 @@
 const Database = require('better-sqlite3');
+const { createHash } = require('crypto');
+const { sourceAliases } = require('./source-aliases');
 
 const dbFile = process.env.DB_FILE || './flight.db';
 const db = new Database(dbFile);
@@ -27,6 +29,7 @@ db.exec(`
     rssi_dbm INTEGER,
     flags INTEGER,
     raw TEXT,
+    packet_hash TEXT,
     received_at INTEGER NOT NULL,
     upload_id INTEGER
   );
@@ -63,13 +66,18 @@ ensureColumn('packets', 'temp_c_1', 'REAL');
 ensureColumn('packets', 'temp_c_2', 'REAL');
 ensureColumn('packets', 'temp_c_3', 'REAL');
 ensureColumn('packets', 'temp_c_4', 'REAL');
+ensureColumn('packets', 'protocol_version', 'INTEGER');
+ensureColumn('packets', 'mission_mode_id', 'INTEGER');
+ensureColumn('packets', 'mission_mode', 'TEXT');
+ensureColumn('packets', 'packet_hash', 'TEXT');
 ensureColumn('sd_uploads', 'source', "TEXT NOT NULL DEFAULT 'CANSAT'");
 db.exec(`CREATE INDEX IF NOT EXISTS idx_packets_upload_id ON packets(upload_id);`);
+db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_packets_source_hash_unique ON packets(source, packet_hash) WHERE packet_hash IS NOT NULL;`);
 
 const statements = {
   insertPacket: db.prepare(`
-    INSERT INTO packets (source, pkt_id, timestamp_ms, altitude_m, temp_c, temp_c_1, temp_c_2, temp_c_3, temp_c_4, pressure_hpa, accel_z, gyro_x, lat, lon, rssi_dbm, flags, raw, received_at, upload_id)
-    VALUES (@source, @pkt_id, @timestamp_ms, @altitude_m, @temp_c, @temp_c_1, @temp_c_2, @temp_c_3, @temp_c_4, @pressure_hpa, @accel_z, @gyro_x, @lat, @lon, @rssi_dbm, @flags, @raw, @received_at, @upload_id)
+    INSERT INTO packets (source, protocol_version, mission_mode_id, mission_mode, pkt_id, timestamp_ms, altitude_m, temp_c, temp_c_1, temp_c_2, temp_c_3, temp_c_4, pressure_hpa, accel_z, gyro_x, lat, lon, rssi_dbm, flags, raw, packet_hash, received_at, upload_id)
+    VALUES (@source, @protocol_version, @mission_mode_id, @mission_mode, @pkt_id, @timestamp_ms, @altitude_m, @temp_c, @temp_c_1, @temp_c_2, @temp_c_3, @temp_c_4, @pressure_hpa, @accel_z, @gyro_x, @lat, @lon, @rssi_dbm, @flags, @raw, @packet_hash, @received_at, @upload_id)
   `),
   insertEvent: db.prepare(`
     INSERT INTO mission_events (source, event_type, altitude_m, timestamp_ms, received_at)
@@ -79,10 +87,15 @@ const statements = {
     INSERT INTO sd_uploads (source, filename, rows_inserted, uploaded_at)
     VALUES (@source, @filename, @rows_inserted, @uploaded_at)
   `),
+  updateUploadRowsInserted: db.prepare(`
+    UPDATE sd_uploads
+    SET rows_inserted = ?
+    WHERE id = ?
+  `),
   getRecentPackets: db.prepare(`
     SELECT * FROM packets
     WHERE source = ? AND (? = 0 OR received_at > ?)
-    ORDER BY received_at DESC
+    ORDER BY received_at DESC, timestamp_ms DESC, pkt_id DESC, id DESC
     LIMIT ?
   `),
   getPacketStats: db.prepare(`
@@ -97,7 +110,7 @@ const statements = {
   getLatestPacket: db.prepare(`
     SELECT * FROM packets
     WHERE source = ?
-    ORDER BY received_at DESC
+    ORDER BY received_at DESC, timestamp_ms DESC, pkt_id DESC, id DESC
     LIMIT 1
   `),
   getEvents: db.prepare(`SELECT * FROM mission_events ORDER BY received_at ASC`),
@@ -115,7 +128,7 @@ const statements = {
     WHERE (? = 'ALL' OR source = ?)
   `),
   exportPackets: db.prepare(`
-    SELECT id, source, pkt_id, timestamp_ms, altitude_m, temp_c, temp_c_1, temp_c_2, temp_c_3, temp_c_4, pressure_hpa, accel_z, gyro_x, lat, lon, rssi_dbm, flags, received_at
+    SELECT id, source, protocol_version, mission_mode_id, mission_mode, pkt_id, timestamp_ms, altitude_m, temp_c, temp_c_1, temp_c_2, temp_c_3, temp_c_4, pressure_hpa, accel_z, gyro_x, lat, lon, rssi_dbm, flags, received_at
     FROM packets
     WHERE (? = 'ALL' OR source = ?)
     ORDER BY received_at ASC
@@ -123,9 +136,21 @@ const statements = {
 };
 
 const insertPacketTx = db.transaction((packets) => {
+  let changes = 0;
+  let skippedDuplicates = 0;
   for (const packet of packets) {
-    statements.insertPacket.run(packet);
+    try {
+      const result = statements.insertPacket.run(packet);
+      changes += result.changes || 0;
+    } catch (error) {
+      if (isDuplicatePacketError(error)) {
+        skippedDuplicates++;
+        continue;
+      }
+      throw error;
+    }
   }
+  return { changes, skipped_duplicates: skippedDuplicates };
 });
 
 function runOrThrow(operation, fn) {
@@ -137,9 +162,39 @@ function runOrThrow(operation, fn) {
   }
 }
 
+function sourceWhereClause(source, column = 'source') {
+  const aliases = sourceAliases(source);
+  return {
+    aliases,
+    clause: aliases.map(() => `${column} = ?`).join(' OR ')
+  };
+}
+
+function computePacketHash(packet) {
+  if (!packet || !packet.source) return null;
+  const identity = [
+    packet.source,
+    packet.protocol_version ?? '',
+    packet.pkt_id ?? '',
+    packet.timestamp_ms ?? '',
+    packet.raw ?? ''
+  ].join('\x1f');
+  return createHash('sha256').update(identity).digest('hex');
+}
+
+function isDuplicatePacketError(error) {
+  return error && (
+    error.code === 'SQLITE_CONSTRAINT_UNIQUE' ||
+    (error.code === 'SQLITE_CONSTRAINT' && /idx_packets_source_hash_unique|UNIQUE constraint failed: packets\.source, packets\.packet_hash/.test(error.message || ''))
+  );
+}
+
 function toPacketRow(packet) {
   return {
     source: packet.source,
+    protocol_version: packet.protocol_version ?? null,
+    mission_mode_id: packet.mission_mode_id ?? null,
+    mission_mode: packet.mission_mode ?? null,
     pkt_id: packet.pkt_id,
     timestamp_ms: packet.timestamp_ms,
     altitude_m: packet.altitude_m,
@@ -156,13 +211,22 @@ function toPacketRow(packet) {
     rssi_dbm: packet.rssi_dbm,
     flags: packet.flags,
     raw: packet.raw,
+    packet_hash: packet.packet_hash ?? computePacketHash(packet),
     received_at: packet.received_at,
     upload_id: packet.upload_id ?? null
   };
 }
 
 function insertPacket(packet) {
-  return runOrThrow('insertPacket', () => statements.insertPacket.run(toPacketRow(packet)));
+  return runOrThrow('insertPacket', () => {
+    try {
+      const result = statements.insertPacket.run(toPacketRow(packet));
+      return { changes: result.changes || 0, duplicate: false };
+    } catch (error) {
+      if (isDuplicatePacketError(error)) return { changes: 0, duplicate: true };
+      throw error;
+    }
+  });
 }
 
 function insertPacketsBulk(packets) {
@@ -170,11 +234,10 @@ function insertPacketsBulk(packets) {
     throw new TypeError('[DB] insertPacketsBulk requires an array of packets');
   }
   if (packets.length === 0) {
-    return { changes: 0 };
+    return { changes: 0, skipped_duplicates: 0 };
   }
   return runOrThrow('insertPacketsBulk', () => {
-    insertPacketTx(packets.map(toPacketRow));
-    return { changes: packets.length };
+    return insertPacketTx(packets.map(toPacketRow));
   });
 }
 
@@ -184,6 +247,10 @@ function insertEvent(event) {
 
 function insertUpload(upload) {
   return runOrThrow('insertUpload', () => statements.insertUpload.run(upload));
+}
+
+function updateUploadRowsInserted(id, rowsInserted) {
+  return runOrThrow('updateUploadRowsInserted', () => statements.updateUploadRowsInserted.run(rowsInserted, id));
 }
 
 function getUpload(id) {
@@ -202,14 +269,29 @@ function getHistory(source, limit = DEFAULT_HISTORY_LIMIT, since = 0) {
   const sinceTs = Number.parseInt(since, 10) || 0;
 
   return runOrThrow('getHistory', () => {
-    const rows = statements.getRecentPackets.all(source, sinceTs, sinceTs, boundedLimit);
+    const { aliases, clause } = sourceWhereClause(source);
+    const rows = db.prepare(`
+      SELECT * FROM packets
+      WHERE (${clause}) AND (? = 0 OR received_at > ?)
+      ORDER BY received_at DESC, timestamp_ms DESC, pkt_id DESC, id DESC
+      LIMIT ?
+    `).all(...aliases, sinceTs, sinceTs, boundedLimit);
     return rows.reverse();
   });
 }
 
 function getStats(source) {
   return runOrThrow('getStats', () => {
-    return statements.getPacketStats.get(source) || {
+    const { aliases, clause } = sourceWhereClause(source);
+    return db.prepare(`
+      SELECT
+        COUNT(*) as count,
+        MAX(altitude_m) as max_alt_m,
+        MIN(temp_c) as min_temp_c,
+        MIN(received_at) as first_packet_at,
+        MAX(received_at) as last_packet_at
+      FROM packets WHERE ${clause}
+    `).get(...aliases) || {
       count: 0,
       max_alt_m: null,
       min_temp_c: null,
@@ -220,7 +302,15 @@ function getStats(source) {
 }
 
 function getLatest(source) {
-  return runOrThrow('getLatest', () => statements.getLatestPacket.get(source) || null);
+  return runOrThrow('getLatest', () => {
+    const { aliases, clause } = sourceWhereClause(source);
+    return db.prepare(`
+      SELECT * FROM packets
+      WHERE ${clause}
+      ORDER BY received_at DESC, timestamp_ms DESC, pkt_id DESC, id DESC
+      LIMIT 1
+    `).get(...aliases) || null;
+  });
 }
 
 function getAllEvents() {
@@ -228,11 +318,24 @@ function getAllEvents() {
 }
 
 function clearEvents(source = 'ALL') {
-  return runOrThrow('clearEvents', () => statements.deleteEvents.run(source, source));
+  return runOrThrow('clearEvents', () => {
+    if (source === 'ALL') return statements.deleteEvents.run(source, source);
+    const { aliases, clause } = sourceWhereClause(source);
+    return db.prepare(`DELETE FROM mission_events WHERE ${clause}`).run(...aliases);
+  });
 }
 
 function exportCsv(source) {
-  return runOrThrow('exportCsv', () => statements.exportPackets.all(source, source));
+  return runOrThrow('exportCsv', () => {
+    if (source === 'ALL') return statements.exportPackets.all(source, source);
+    const { aliases, clause } = sourceWhereClause(source);
+    return db.prepare(`
+      SELECT id, source, protocol_version, mission_mode_id, mission_mode, pkt_id, timestamp_ms, altitude_m, temp_c, temp_c_1, temp_c_2, temp_c_3, temp_c_4, pressure_hpa, accel_z, gyro_x, lat, lon, rssi_dbm, flags, received_at
+      FROM packets
+      WHERE ${clause}
+      ORDER BY received_at ASC
+    `).all(...aliases);
+  });
 }
 
 function close() {
@@ -245,6 +348,7 @@ module.exports = {
   insertPacketsBulk,
   insertEvent,
   insertUpload,
+  updateUploadRowsInserted,
   getUpload,
   getUploadPackets,
   getHistory,
@@ -254,5 +358,6 @@ module.exports = {
   clearEvents,
   exportCsv,
   close,
-  MAX_HISTORY_LIMIT
+  MAX_HISTORY_LIMIT,
+  computePacketHash
 };

@@ -1,4 +1,4 @@
-# NRC Rocket Video Recorder (ESP32-CAM)
+# Mach-X Rideshare Rocket Video Recorder (ESP32-CAM)
 
 This directory contains autonomous, fail-safe video recording firmware designed for an **AI-Thinker ESP32-CAM module** pointing down from the bottom of the payload bay.
 
