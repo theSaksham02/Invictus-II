@@ -38,6 +38,12 @@
 #endif
 
 // ═══════════════════════════════════════════════════════════════════════════
+//  HARDWARE CONFIGURATION OPTIONS
+// ═══════════════════════════════════════════════════════════════════════════
+#define HAS_SD_CARD     0   // Set to 1 if SD card module is physically connected
+#define HAS_LM75        0   // Set to 1 if LM75 temperature sensor is physically connected
+
+// ═══════════════════════════════════════════════════════════════════════════
 //  PIN DEFINITIONS — Heltec WiFi LoRa 32 V3 (verified against circuit)
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -319,12 +325,17 @@ void setup() {
         displayBootStep("BMP280 FAILED");
     }
 
+#if HAS_LM75
     // ── LM75 probe ──────────────────────────────────────────────────
     displayBootStep("CHECK LM75");
     float lm75_test = readLM75();
     Serial.printf("[MXR] LM75 %s (%.1f°C)\n",
         isfinite(lm75_test) ? "OK" : "FAILED", lm75_test);
+#else
+    Serial.println("[MXR] LM75 temperature sensor disabled in config");
+#endif
 
+#if HAS_SD_CARD
     // ── SD Card on custom SPI bus ────────────────────────────────────
     Serial.println("[MXR] Initializing SD card...");
     displayBootStep("INIT SD");
@@ -337,6 +348,10 @@ void setup() {
     } else {
         Serial.println("[MXR] SD card FAILED");
     }
+#else
+    Serial.println("[MXR] SD card disabled in config");
+    sd_ok = false;
+#endif
 
     // ── Boot status on OLED ──────────────────────────────────────────
     display.clearBuffer();
@@ -410,11 +425,13 @@ void loop() {
             }
         }
 
+#if HAS_LM75
         // If BMP280 temp failed, try LM75 as fallback
         lm75_temp = readLM75();
         if (!isfinite(bmp_temp) && isfinite(lm75_temp)) {
             temp = lm75_temp;
         }
+#endif
 
         // ── Read GPS ─────────────────────────────────────────────────
         double lat = 0, lon = 0;
@@ -472,6 +489,7 @@ void loop() {
         Serial.println(buffer);
 #endif
 
+#if HAS_SD_CARD
         // ── Log to SD card ───────────────────────────────────────────
         if (sd_ok && logFile) {
             char lm75Field[16] = "";
@@ -489,6 +507,7 @@ void loop() {
                 max_altitude, max_altitude * 3.28084f, apogee_detected ? 1u : 0u, apogeeField, apogeeFieldFt);
             if (pkt_id % LOG_FLUSH_EVERY == 0) logFile.flush();
         }
+#endif
 
         // ── Update OLED ──────────────────────────────────────────────
         displayStatus(alt, max_altitude, apogee_altitude_m, flags, pkt_id);
