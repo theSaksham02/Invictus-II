@@ -121,14 +121,27 @@ void setup() {
   Serial.println("[MXR-GS] Booting rideshare LoRa ground receiver");
 
   loraSPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_NSS);
-  const int state = radio.begin(LORA_FREQ, LORA_BW, LORA_SF, LORA_CR, LORA_SW, LORA_POWER, LORA_PREAMBLE);
-  if (state != RADIOLIB_ERR_NONE) {
+  // Initialize LoRa radio with default parameters, then configure individually
+  int state = radio.begin();
+  bool gs_lora_ok = false;
+  if (state == RADIOLIB_ERR_NONE) {
+    state = radio.setFrequency(LORA_FREQ);
+    if (state == RADIOLIB_ERR_NONE) state = radio.setBandwidth(LORA_BW);
+    if (state == RADIOLIB_ERR_NONE) state = radio.setSpreadingFactor(LORA_SF);
+    if (state == RADIOLIB_ERR_NONE) state = radio.setCodingRate(LORA_CR);
+    if (state == RADIOLIB_ERR_NONE) state = radio.setSyncWord(LORA_SW);
+    if (state == RADIOLIB_ERR_NONE) state = radio.setOutputPower(LORA_POWER);
+    if (state == RADIOLIB_ERR_NONE) state = radio.setPreambleLength(LORA_PREAMBLE);
+    if (state == RADIOLIB_ERR_NONE) {
+      radio.setDio2AsRfSwitch(true);
+      gs_lora_ok = true;
+      Serial.println("[MXR-GS] SX1262 OK @ 868 MHz, forwarding CRC-valid MXR2/MXR3 packets (RF Switch ON)");
+    }
+  }
+  if (!gs_lora_ok) {
     Serial.printf("[MXR-GS] SX1262 init failed: %d\n", state);
     while (true) delay(1000);
   }
-
-  radio.setDio2AsRfSwitch(true);
-  Serial.println("[MXR-GS] SX1262 OK @ 868 MHz, forwarding CRC-valid MXR2/MXR3 packets (RF Switch ON)");
 }
 
 void loop() {

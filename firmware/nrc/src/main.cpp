@@ -283,13 +283,24 @@ void setup() {
     Serial.println("[MXR] Initializing LoRa SX1262...");
     displayBootStep("INIT LORA");
     loraSPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_NSS);
-    int state = radio.begin(LORA_FREQ, LORA_BW, LORA_SF, LORA_CR, LORA_SW, LORA_POWER, LORA_PREAMBLE);
+    // Initialize LoRa radio with default parameters, then configure individually
+    int state = radio.begin();
     if (state == RADIOLIB_ERR_NONE) {
-        radio.setDio2AsRfSwitch(true);
-        lora_ok = true;
-        Serial.println("[MXR] LoRa SX1262 OK @ 868 MHz");
-        displayBootStep("LORA OK");
-    } else {
+        state = radio.setFrequency(LORA_FREQ);
+        if (state == RADIOLIB_ERR_NONE) state = radio.setBandwidth(LORA_BW);
+        if (state == RADIOLIB_ERR_NONE) state = radio.setSpreadingFactor(LORA_SF);
+        if (state == RADIOLIB_ERR_NONE) state = radio.setCodingRate(LORA_CR);
+        if (state == RADIOLIB_ERR_NONE) state = radio.setSyncWord(LORA_SW);
+        if (state == RADIOLIB_ERR_NONE) state = radio.setOutputPower(LORA_POWER);
+        if (state == RADIOLIB_ERR_NONE) state = radio.setPreambleLength(LORA_PREAMBLE);
+        if (state == RADIOLIB_ERR_NONE) {
+            radio.setDio2AsRfSwitch(true);
+            lora_ok = true;
+            Serial.println("[MXR] LoRa SX1262 OK @ 868 MHz");
+            displayBootStep("LORA OK");
+        }
+    }
+    if (!lora_ok) {
         Serial.printf("[MXR] LoRa FAILED (err %d)\n", state);
         displayBootStep("LORA FAILED");
     }
