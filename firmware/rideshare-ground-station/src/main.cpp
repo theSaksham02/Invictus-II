@@ -127,6 +127,7 @@ void setup() {
     while (true) delay(1000);
   }
 
+  radio.setDio2AsRfSwitch(true);
   Serial.println("[MXR-GS] SX1262 OK @ 868 MHz, forwarding CRC-valid MXR2/MXR3 packets");
 }
 

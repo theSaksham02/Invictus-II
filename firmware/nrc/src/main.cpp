@@ -279,6 +279,7 @@ void setup() {
     loraSPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_NSS);
     int state = radio.begin(LORA_FREQ, LORA_BW, LORA_SF, LORA_CR, LORA_SW, LORA_POWER, LORA_PREAMBLE);
     if (state == RADIOLIB_ERR_NONE) {
+        radio.setDio2AsRfSwitch(true);
         lora_ok = true;
         Serial.println("[MXR] LoRa SX1262 OK @ 868 MHz");
         displayBootStep("LORA OK");
