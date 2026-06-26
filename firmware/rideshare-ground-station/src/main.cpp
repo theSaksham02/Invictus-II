@@ -148,14 +148,10 @@ void loop() {
   String packet;
   const int state = radio.receive(packet);
   if (state == RADIOLIB_ERR_NONE) {
-    String outLine;
-    const int packetRssi = static_cast<int>(round(radio.getRSSI()));
-    if (validateAndRestamp(packet, packetRssi, outLine)) {
-      Serial.println(outLine);
-    } else {
-      Serial.println("[MXR-GS] rejected malformed or CRC-invalid packet");
-    }
-  } else if (state != RADIOLIB_ERR_RX_TIMEOUT) {
-    Serial.printf("[MXR-GS] receive error: %d\n", state);
+    Serial.printf("\n[GS-RAW] Packet received: '%s' | RSSI: %d dBm\n", packet.c_str(), (int)round(radio.getRSSI()));
+  } else if (state == RADIOLIB_ERR_RX_TIMEOUT) {
+    Serial.print(".");  // Print a dot on timeout to prove the loop is active and waiting
+  } else {
+    Serial.printf("\n[GS-RAW] Receive error: %d\n", state);
   }
 }
