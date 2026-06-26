@@ -22,7 +22,7 @@
 #define LORA_FREQ       868.0
 #define LORA_BW         125.0
 #define LORA_SF         9
-#define LORA_CR         7
+#define LORA_CR         5
 #define LORA_SW         0x12
 #define LORA_POWER      14
 #define LORA_PREAMBLE   8

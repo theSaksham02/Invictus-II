@@ -82,7 +82,7 @@
 #define LORA_FREQ       868.0  // MHz
 #define LORA_BW         125.0  // kHz
 #define LORA_SF         9      // Spreading factor (range vs speed tradeoff)
-#define LORA_CR         7      // Coding rate 4/7
+#define LORA_CR         5      // Coding rate 4/5 (aligned with reference guide)
 #define LORA_SW         0x12   // Sync word (private network)
 #define LORA_POWER      14     // dBm (max allowed under ETSI)
 #define LORA_PREAMBLE   8
