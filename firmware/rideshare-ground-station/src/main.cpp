@@ -134,8 +134,11 @@ void setup() {
     if (state == RADIOLIB_ERR_NONE) state = radio.setPreambleLength(LORA_PREAMBLE);
     if (state == RADIOLIB_ERR_NONE) {
       radio.setDio2AsRfSwitch(true);
-      gs_lora_ok = true;
-      Serial.println("[MXR-GS] SX1262 OK @ 868 MHz, forwarding CRC-valid MXR2/MXR3 packets (RF Switch ON)");
+      state = radio.startReceive();
+      if (state == RADIOLIB_ERR_NONE) {
+        gs_lora_ok = true;
+        Serial.println("[MXR-GS] SX1262 OK @ 868 MHz, forwarding CRC-valid MXR2/MXR3 packets (RF Switch ON)");
+      }
     }
   }
   if (!gs_lora_ok) {
@@ -145,17 +148,21 @@ void setup() {
 }
 
 void loop() {
-  String packet;
-  const int state = radio.receive(packet);
-  if (state == RADIOLIB_ERR_NONE) {
-    String outLine;
-    const int packetRssi = static_cast<int>(round(radio.getRSSI()));
-    if (validateAndRestamp(packet, packetRssi, outLine)) {
-      Serial.println(outLine);
+  if (digitalRead(LORA_DIO1) == HIGH) {
+    String packet;
+    const int state = radio.readData(packet);
+    if (state == RADIOLIB_ERR_NONE) {
+      String outLine;
+      const int packetRssi = static_cast<int>(round(radio.getRSSI()));
+      if (validateAndRestamp(packet, packetRssi, outLine)) {
+        Serial.println(outLine);
+      } else {
+        Serial.println("[MXR-GS] rejected malformed or CRC-invalid packet");
+      }
     } else {
-      Serial.println("[MXR-GS] rejected malformed or CRC-invalid packet");
+      Serial.printf("[MXR-GS] receive error: %d\n", state);
     }
-  } else if (state != RADIOLIB_ERR_RX_TIMEOUT) {
-    Serial.printf("[MXR-GS] receive error: %d\n", state);
+    // Restart continuous receive mode
+    radio.startReceive();
   }
 }
