@@ -384,30 +384,18 @@ void setup() {
 #endif
 
 #if HAS_SD_CARD
-    // ── SD Card on custom SPI bus (with retry at progressive clock speeds) ──
+    // ── SD Card on custom SPI bus ────────────────────────────────────
     Serial.println("[MXR] Initializing SD card...");
     displayBootStep("INIT SD");
 
-    pinMode(SD_CS, OUTPUT);
-    digitalWrite(SD_CS, HIGH);
-    sdSPI.begin(SD_SCK, SD_MISO, SD_MOSI, -1);
-
-    // Try multiple SPI frequencies — some SD cards / wiring only work at low speeds
-    const uint32_t sdFreqs[] = {4000000, 2000000, 1000000, 500000};
-    for (uint32_t freq : sdFreqs) {
-        Serial.printf("[MXR] SD trying %lu Hz...\n", (unsigned long)freq);
-        if (SD.begin(SD_CS, sdSPI, freq)) {
-            if (openFreshLogFile()) {
-                sd_ok = true;
-                Serial.printf("[MXR] SD card OK at %lu Hz, logging to %s\n", (unsigned long)freq, log_filename);
-            }
-            break;
+    sdSPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
+    if (SD.begin(SD_CS, sdSPI)) {
+        if (openFreshLogFile()) {
+            sd_ok = true;
+            Serial.printf("[MXR] SD card OK, logging to %s\n", log_filename);
         }
-        SD.end();
-        delay(100);
-    }
-    if (!sd_ok) {
-        Serial.println("[MXR] SD card FAILED at all frequencies");
+    } else {
+        Serial.println("[MXR] SD card FAILED");
     }
 #else
     Serial.println("[MXR] SD card disabled in config");
