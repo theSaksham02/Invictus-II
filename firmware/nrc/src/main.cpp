@@ -518,6 +518,28 @@ void setup() {
         Serial.printf("[MXR] SD card OK, logging to %s\n", log_filename);
     } else {
         Serial.println("[MXR] SD card FAILED");
+        Serial.println("[MXR] Entering 10-second hardware pin-toggle test...");
+        Serial.println("[MXR] Use your multimeter to verify if CS, SCK, and MOSI alternate between 3.3V and 0V:");
+        
+        sdSPI.end(); // Release SPI control to allow manual digital write
+        pinMode(SD_CS, OUTPUT);
+        pinMode(SD_SCK, OUTPUT);
+        pinMode(SD_MOSI, OUTPUT);
+        
+        for (int i = 0; i < 5; i++) {
+            Serial.printf("[MXR]   Cycle %d: Setting pins HIGH (3.3V)... Check CS, SCK, MOSI pads on SD module\n", i + 1);
+            digitalWrite(SD_CS, HIGH);
+            digitalWrite(SD_SCK, HIGH);
+            digitalWrite(SD_MOSI, HIGH);
+            delay(1000);
+            
+            Serial.printf("[MXR]   Cycle %d: Setting pins LOW (0V)... Check CS, SCK, MOSI pads on SD module\n", i + 1);
+            digitalWrite(SD_CS, LOW);
+            digitalWrite(SD_SCK, LOW);
+            digitalWrite(SD_MOSI, LOW);
+            delay(1000);
+        }
+        Serial.println("[MXR] Pin-toggle test complete.");
     }
 #else
     Serial.println("[MXR] SD card disabled in config");
