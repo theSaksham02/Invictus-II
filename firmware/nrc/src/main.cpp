@@ -438,14 +438,10 @@ void setup() {
     // ── Call SD.begin using the dedicated sdSPI instance ─────────────
     bool sd_init = false;
     for (int attempt = 0; attempt < 3 && !sd_init; attempt++) {
-        // SD Spec: 80 idle clocks with CS HIGH before CMD0 to enter SPI mode
-        digitalWrite(SD_CS, HIGH);
-        sdSPI.beginTransaction(SPISettings(400000, MSBFIRST, SPI_MODE0));
-        for (int i = 0; i < 10; i++) sdSPI.transfer(0xFF);
-        sdSPI.endTransaction();
+        digitalWrite(SD_CS, HIGH); // Ensure CS is high before init
 
-        // Init at 400 kHz on the DEDICATED bus
-        if (SD.begin(SD_CS, sdSPI, 400000)) {
+        // Init on the DEDICATED bus. (The ESP32 SD library handles dummy clocks internally)
+        if (SD.begin(SD_CS, sdSPI)) {
             sd_init = true;
             Serial.printf("[MXR] SD init OK (attempt %d)\n", attempt + 1);
         } else {
