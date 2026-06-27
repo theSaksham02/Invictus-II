@@ -129,11 +129,17 @@ SPIClass sdSPI(HSPI);
 File logFile;
 
 bool initSDCard() {
-  // 1. Hold LoRa CS high so it stays quiet on the other bus
+  // 1. Force release JTAG and I2C default pins AFTER display.begin() has finished
+  gpio_reset_pin((gpio_num_t)SD_CS);
+  gpio_reset_pin((gpio_num_t)SD_SCK);
+  gpio_reset_pin((gpio_num_t)SD_MOSI);
+  gpio_reset_pin((gpio_num_t)SD_MISO);
+
+  // 2. Hold LoRa CS high so it stays quiet on the other bus
   pinMode(LORA_NSS, OUTPUT);
   digitalWrite(LORA_NSS, HIGH);
 
-  // 2. Explicitly override JTAG pin states before assigning to SPI
+  // 3. Explicitly override pin states before assigning to SPI
   pinMode(SD_CS, OUTPUT);
   digitalWrite(SD_CS, HIGH);
   pinMode(SD_SCK, OUTPUT);
