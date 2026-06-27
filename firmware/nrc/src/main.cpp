@@ -305,6 +305,36 @@ void startGPS() {
     SerialGPS.begin(9600, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN); // safe fallback
 }
 
+// Raw CMD0 probe — bypasses SD library to test bare SPI communication
+uint8_t probeRawCmd0(SPIClass &spi, uint8_t cs) {
+    // SD Spec: 74+ idle clocks with CS HIGH before first command
+    digitalWrite(cs, HIGH);
+    spi.beginTransaction(SPISettings(400000, MSBFIRST, SPI_MODE0));
+    for (int i = 0; i < 10; i++) spi.transfer(0xFF);  // 80 clocks
+    spi.endTransaction();
+    delay(2);
+
+    // Send CMD0 (GO_IDLE_STATE): 0x40 0x00 0x00 0x00 0x00 0x95
+    spi.beginTransaction(SPISettings(400000, MSBFIRST, SPI_MODE0));
+    digitalWrite(cs, LOW);
+    delayMicroseconds(50);
+    spi.transfer(0x40);
+    spi.transfer(0x00);
+    spi.transfer(0x00);
+    spi.transfer(0x00);
+    spi.transfer(0x00);
+    spi.transfer(0x95);  // Valid CRC for CMD0
+
+    // Poll for R1 response (up to 16 bytes)
+    uint8_t r1 = 0xFF;
+    for (int i = 0; i < 16 && r1 == 0xFF; i++) {
+        r1 = spi.transfer(0xFF);
+    }
+    digitalWrite(cs, HIGH);
+    spi.endTransaction();
+    return r1;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 //  SETUP
 // ═══════════════════════════════════════════════════════════════════════════
@@ -416,22 +446,70 @@ void setup() {
     displayBootStep("INIT SD");
 
     pinMode(SD_CS, OUTPUT);
-    digitalWrite(SD_CS, HIGH); // Deselect card — SD.begin() will manage CS from here
+    digitalWrite(SD_CS, HIGH);
     delay(10);
 
-    sdSPI.begin(SD_SCK, SD_MISO, SD_MOSI);  // *** NO CS PIN *** — SD.begin() manages CS via GPIO
+    int sd_miso = SD_MISO;  // Track active pin mapping (may swap)
+    int sd_mosi = SD_MOSI;
+
+    // ── Step 1: Raw CMD0 diagnostic probe (bypasses SD library) ─────
+    sdSPI.begin(SD_SCK, sd_miso, sd_mosi);
+    uint8_t r1 = probeRawCmd0(sdSPI, SD_CS);
+    Serial.printf("[MXR] SD probe (MOSI=%d, MISO=%d): R1=0x%02X\n", sd_mosi, sd_miso, r1);
+
+    if (r1 == 0xFF) {
+        // No response — try swapping MOSI/MISO (common module mislabel)
+        Serial.println("[MXR] No response. Trying MOSI/MISO swap...");
+        sdSPI.end();
+        sd_miso = SD_MOSI;  // swap
+        sd_mosi = SD_MISO;  // swap
+        sdSPI.begin(SD_SCK, sd_miso, sd_mosi);
+        r1 = probeRawCmd0(sdSPI, SD_CS);
+        Serial.printf("[MXR] SD probe SWAPPED (MOSI=%d, MISO=%d): R1=0x%02X\n", sd_mosi, sd_miso, r1);
+
+        if (r1 != 0xFF) {
+            Serial.println("[MXR] *** MOSI/MISO SWAPPED on PCB! Auto-corrected. ***");
+        } else {
+            Serial.println("[MXR] No response either way. Hardware checklist:");
+            Serial.println("[MXR]   1. Is GND shared between SD module and Heltec?");
+            Serial.println("[MXR]   2. Is 3V3 reaching SD module VCC?");
+            Serial.println("[MXR]   3. Is SCK wire connected to GPIO 39?");
+            Serial.println("[MXR]   4. Is the microSD card inserted and FAT32?");
+            // Restore original mapping for SD.begin() attempt
+            sd_miso = SD_MISO;
+            sd_mosi = SD_MOSI;
+            sdSPI.end();
+            sdSPI.begin(SD_SCK, sd_miso, sd_mosi);
+        }
+    } else if (r1 == 0x01) {
+        Serial.println("[MXR] SD card responded to CMD0! SPI link confirmed.");
+    } else {
+        Serial.printf("[MXR] Unexpected CMD0 response 0x%02X\n", r1);
+    }
+
+    // ── Step 2: Full SD.begin() with idle clocks and retry ──────────
+    // Reset SPI bus cleanly for SD library
+    sdSPI.end();
+    delay(100);
+    sdSPI.begin(SD_SCK, sd_miso, sd_mosi);
 
     bool sd_init = false;
     for (int attempt = 0; attempt < 3 && !sd_init; attempt++) {
-        if (SD.begin(SD_CS, sdSPI, 400000)) { // 400kHz for reliable initialization
+        // SD Spec: 80 idle clocks with CS HIGH before CMD0
+        digitalWrite(SD_CS, HIGH);
+        sdSPI.beginTransaction(SPISettings(400000, MSBFIRST, SPI_MODE0));
+        for (int i = 0; i < 10; i++) sdSPI.transfer(0xFF);
+        sdSPI.endTransaction();
+
+        if (SD.begin(SD_CS, sdSPI, 400000)) {
             sd_init = true;
             Serial.printf("[MXR] SD init OK (attempt %d)\n", attempt + 1);
         } else {
             Serial.printf("[MXR] SD init failed (attempt %d)\n", attempt + 1);
             SD.end();
-            sdSPI.end();           // Full SPI bus reset
-            delay(500);            // Let card power-cycle internally
-            sdSPI.begin(SD_SCK, SD_MISO, SD_MOSI);  // Reinitialize SPI bus cleanly
+            sdSPI.end();
+            delay(500);
+            sdSPI.begin(SD_SCK, sd_miso, sd_mosi);
         }
     }
 
