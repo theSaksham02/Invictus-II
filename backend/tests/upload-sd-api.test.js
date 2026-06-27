@@ -125,6 +125,33 @@ test('POST /api/upload-sd accepts RIDESHARE CSV with apogee columns and returns 
   });
 });
 
+test('POST /api/upload-sd skips RIDESHARE rows with contradictory SD health columns', async () => {
+  await withMockedServer(async (baseUrl, captured) => {
+    const csv = [
+      'pkt_id,timestamp_ms,altitude_m,temp_c,lm75_temp_c,pressure_hpa,lat,lon,gps_fix,flags,bmp_ok,sd_ok',
+      '1,1000,0.00,22.10,21.90,1013.20,0,0,0,40,1,1',
+      '2,2000,42.50,22.00,21.80,1008.20,0,0,0,40,1,0'
+    ].join('\n');
+
+    const fd = new FormData();
+    fd.append('source', 'RIDESHARE');
+    fd.append('file', new Blob([csv], { type: 'text/csv' }), 'flight.csv');
+
+    const res = await fetch(`${baseUrl}/api/upload-sd`, {
+      method: 'POST',
+      body: fd
+    });
+    const body = await res.json();
+
+    assert.equal(res.status, 201);
+    assert.equal(body.ok, true);
+    assert.equal(body.inserted, 1);
+    assert.equal(body.skipped, 1);
+    assert.equal(captured.packets.length, 1);
+    assert.equal(captured.packets[0].pkt_id, 1);
+  });
+});
+
 test('POST /api/upload-sd aliases legacy NRC source to RIDESHARE', async () => {
   await withMockedServer(async (baseUrl, captured) => {
     const csv = [

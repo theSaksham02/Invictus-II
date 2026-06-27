@@ -353,9 +353,12 @@ function deriveSensorHealth(packet) {
   const missionMode = packet?.mission_mode || 'PRE_DEPLOY';
   const gpsRecovery = missionMode === 'GPS_RECOVERY' || flags.gps_recovery;
   if (packet?.source === 'RIDESHARE' || packet?.source === 'NRC') {
+    const telemetryDegraded = flags.stale_sensor || !flags.bmp_ok;
     return {
       bmp280: {
         ok: flags.bmp_ok && Number.isFinite(packet.pressure_hpa) && Number.isFinite(packet.altitude_m),
+        degraded: flags.stale_sensor,
+        note: flags.stale_sensor ? 'Telemetry is using the last valid BMP280 sample.' : undefined,
         bus: 'i2c',
         pins: NRC_PAYLOAD_CIRCUIT.buses.i2c.pins
       },
@@ -371,7 +374,11 @@ function deriveSensorHealth(packet) {
         pins: NRC_PAYLOAD_CIRCUIT.buses.gps_uart.pins
       },
       sd_card: {
-        ok: flags.sd_ok,
+        ok: flags.sd_ok && !telemetryDegraded,
+        degraded: flags.sd_ok && telemetryDegraded,
+        note: flags.sd_ok && telemetryDegraded
+          ? 'SD flag is set, but packet telemetry is degraded; verify recovered CSV before treating SD as healthy.'
+          : undefined,
         bus: 'sd_spi',
         pins: NRC_PAYLOAD_CIRCUIT.buses.sd_spi.pins
       },
@@ -480,6 +487,7 @@ function packetWarnings(packet) {
 
   if (packet?.source === 'RIDESHARE' || packet?.source === 'NRC') {
     if (!flags.bmp_ok) warnings.push('BMP280 flag is not set; altitude, pressure, and temperature may be fallback values.');
+    if (flags.stale_sensor) warnings.push('Telemetry is using stale BMP280 data from the last valid barometer sample.');
     if (packet?.protocol_version >= 3 && !Number.isFinite(packet.temp_c_1)) {
       warnings.push('LM75 temperature is unavailable in MXR3 telemetry; BMP280 temperature is the only live temperature source.');
     }

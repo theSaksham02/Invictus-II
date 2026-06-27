@@ -159,6 +159,19 @@ test('parseRideshare maps missing MXR3 LM75 sentinel to null', () => {
   assert.equal(parsed.temp_c_1, null);
 });
 
+test('parseRideshare accepts stale BMP280 telemetry with last valid pressure and warnings', () => {
+  const flags = 0x20 | 0x40;
+  const body = `9,9000,12.50,20.00,19.75,1010.00,25.000000,55.000000,-80,${flags}`;
+  const crcHex = crc16Ccitt(Buffer.from(body, 'utf8')).toString(16).padStart(4, '0').toUpperCase();
+  const parsed = parseRideshare(`MXR3:${body},${crcHex}`);
+
+  assert.ok(parsed, 'parseRideshare should keep degraded packets with valid fallback pressure');
+  assert.equal(parsed.flags_decoded.bmp_ok, false);
+  assert.equal(parsed.flags_decoded.stale_sensor, true);
+  assert.equal(parsed.sensor_health.sd_card.degraded, true);
+  assert.match(parsed.warnings.join('\n'), /stale BMP280 data/);
+});
+
 test('parseRideshare keeps NRC2 legacy prefix compatible', () => {
   const body = '1,1000,12.50,20.00,1010.00,25.000000,55.000000,-80,40';
   const crcHex = crc16Ccitt(Buffer.from(body, 'utf8')).toString(16).padStart(4, '0').toUpperCase();

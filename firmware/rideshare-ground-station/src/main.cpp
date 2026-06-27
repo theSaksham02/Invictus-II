@@ -10,6 +10,8 @@
 #include <Arduino.h>
 #include <RadioLib.h>
 #include <SPI.h>
+#include <ctype.h>
+#include <string.h>
 
 #define LORA_NSS        8
 #define LORA_DIO1       14
@@ -30,6 +32,9 @@
 SPIClass loraSPI(FSPI);
 SX1262 radio = new Module(LORA_NSS, LORA_DIO1, LORA_RST, LORA_BUSY, loraSPI);
 
+static constexpr size_t MAX_PACKET_LEN = 191;
+static constexpr size_t MAX_BODY_LEN = 159;
+
 uint16_t crc16Ccitt(const uint8_t* data, size_t len) {
   uint16_t crc = 0xFFFF;
   for (size_t i = 0; i < len; i++) {
@@ -43,76 +48,93 @@ uint16_t crc16Ccitt(const uint8_t* data, size_t len) {
   return crc;
 }
 
-bool isHex4(const String& value) {
-  if (value.length() != 4) return false;
+bool isHex4(const char* value) {
+  if (!value || strlen(value) != 4) return false;
   for (uint8_t i = 0; i < 4; i++) {
-    const char c = value.charAt(i);
+    const char c = value[i];
     const bool ok = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
     if (!ok) return false;
   }
   return true;
 }
 
-int splitCsvFields(const String& body, String* fields, int maxFields) {
+int splitCsvFields(char* body, char** fields, int maxFields) {
   int count = 0;
-  int start = 0;
-  while (count < maxFields) {
-    const int comma = body.indexOf(',', start);
-    if (comma < 0) {
-      fields[count++] = body.substring(start);
-      return count;
-    }
-    fields[count++] = body.substring(start, comma);
-    start = comma + 1;
+  char* cursor = body;
+  while (cursor && count < maxFields) {
+    fields[count++] = cursor;
+    char* comma = strchr(cursor, ',');
+    if (!comma) return count;
+    *comma = '\0';
+    cursor = comma + 1;
   }
   return count;
 }
 
-String joinCsvFields(String* fields, int count) {
-  String out;
+bool buildCsvBody(char** fields, int count, char* out, size_t outLen) {
+  size_t used = 0;
+  if (!out || outLen == 0) return false;
+  out[0] = '\0';
   for (int i = 0; i < count; i++) {
-    if (i > 0) out += ",";
-    out += fields[i];
+    const int written = snprintf(out + used, outLen - used, "%s%s", i > 0 ? "," : "", fields[i]);
+    if (written < 0 || (size_t)written >= outLen - used) return false;
+    used += (size_t)written;
   }
-  return out;
+  return true;
 }
 
-bool validateAndRestamp(String packet, int packetRssi, String& outLine) {
-  packet.trim();
-  const bool isMxr3 = packet.startsWith("MXR3:");
-  const bool isMxr2 = packet.startsWith("MXR2:");
+void trimAscii(char* value) {
+  if (!value) return;
+  size_t len = strlen(value);
+  while (len > 0 && isspace((unsigned char)value[len - 1])) value[--len] = '\0';
+  char* start = value;
+  while (*start && isspace((unsigned char)*start)) start++;
+  if (start != value) memmove(value, start, strlen(start) + 1);
+}
+
+bool validateAndRestamp(char* packet, int packetRssi, char* outLine, size_t outLineLen) {
+  trimAscii(packet);
+  const bool isMxr3 = strncmp(packet, "MXR3:", 5) == 0;
+  const bool isMxr2 = strncmp(packet, "MXR2:", 5) == 0;
   if (!isMxr3 && !isMxr2) return false;
 
-  const String prefix = isMxr3 ? "MXR3:" : "MXR2:";
-  const String bodyWithCrc = packet.substring(5);
-  const int lastComma = bodyWithCrc.lastIndexOf(',');
-  if (lastComma < 0) return false;
+  const char* prefix = isMxr3 ? "MXR3:" : "MXR2:";
+  char* body = packet + 5;
+  char* lastComma = strrchr(body, ',');
+  if (!lastComma) return false;
 
-  const String body = bodyWithCrc.substring(0, lastComma);
-  const String crcField = bodyWithCrc.substring(lastComma + 1);
+  *lastComma = '\0';
+  const char* crcField = lastComma + 1;
   if (!isHex4(crcField)) return false;
 
-  const uint16_t expected = static_cast<uint16_t>(strtoul(crcField.c_str(), nullptr, 16));
-  const uint16_t actual = crc16Ccitt(reinterpret_cast<const uint8_t*>(body.c_str()), body.length());
+  const uint16_t expected = static_cast<uint16_t>(strtoul(crcField, nullptr, 16));
+  const uint16_t actual = crc16Ccitt(reinterpret_cast<const uint8_t*>(body), strlen(body));
   if (expected != actual) return false;
 
-  String fields[10];
-  const int fieldCount = splitCsvFields(body, fields, 10);
+  char bodyCopy[MAX_BODY_LEN + 1];
+  if (strlen(body) > MAX_BODY_LEN) return false;
+  strncpy(bodyCopy, body, sizeof(bodyCopy));
+  bodyCopy[sizeof(bodyCopy) - 1] = '\0';
+
+  char* fields[10];
+  const int fieldCount = splitCsvFields(bodyCopy, fields, 10);
   if ((isMxr3 && fieldCount != 10) || (isMxr2 && fieldCount != 9)) return false;
+  if (strchr(fields[fieldCount - 1], ',') != nullptr) return false;
 
   const int rssiIndex = isMxr3 ? 8 : 7;
-  fields[rssiIndex] = String(packetRssi);
+  char rssiField[8];
+  snprintf(rssiField, sizeof(rssiField), "%d", packetRssi);
+  fields[rssiIndex] = rssiField;
 
-  const String restampedBody = joinCsvFields(fields, fieldCount);
+  char restampedBody[MAX_BODY_LEN + 1];
+  if (!buildCsvBody(fields, fieldCount, restampedBody, sizeof(restampedBody))) return false;
   const uint16_t restampedCrc = crc16Ccitt(
-    reinterpret_cast<const uint8_t*>(restampedBody.c_str()),
-    restampedBody.length()
+    reinterpret_cast<const uint8_t*>(restampedBody),
+    strlen(restampedBody)
   );
 
-  char crcHex[5];
-  snprintf(crcHex, sizeof(crcHex), "%04X", restampedCrc);
-  outLine = prefix + restampedBody + "," + String(crcHex);
-  return true;
+  const int written = snprintf(outLine, outLineLen, "%s%s,%04X", prefix, restampedBody, restampedCrc);
+  return written > 0 && (size_t)written < outLineLen;
 }
 
 void setup() {
@@ -149,12 +171,15 @@ void setup() {
 
 void loop() {
   if (digitalRead(LORA_DIO1) == HIGH) {
-    String packet;
-    const int state = radio.readData(packet);
+    uint8_t rawPacket[MAX_PACKET_LEN + 1] = {0};
+    const int state = radio.readData(rawPacket, MAX_PACKET_LEN);
     if (state == RADIOLIB_ERR_NONE) {
-      String outLine;
+      char packet[MAX_PACKET_LEN + 1];
+      char outLine[MAX_PACKET_LEN + 1];
       const int packetRssi = static_cast<int>(round(radio.getRSSI()));
-      if (validateAndRestamp(packet, packetRssi, outLine)) {
+      memcpy(packet, rawPacket, MAX_PACKET_LEN);
+      packet[MAX_PACKET_LEN] = '\0';
+      if (packet[0] != '\0' && validateAndRestamp(packet, packetRssi, outLine, sizeof(outLine))) {
         Serial.println(outLine);
       } else {
         Serial.println("[MXR-GS] rejected malformed or CRC-invalid packet");

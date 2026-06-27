@@ -126,6 +126,9 @@ HardwareSerial SerialGPS(1);     // UART1 for GPS
 
 // ================== SD CARD (FSPI — default SPI object) ==================
 File logFile;
+bool sd_fault_latched = false;
+const char* sd_fault_reason = "NONE";
+bool sd_ok = false;
 
 bool initSDCard() {
   // 1. Force release JTAG and I2C default pins AFTER display.begin() has finished
@@ -165,6 +168,47 @@ bool initSDCard() {
   return false;
 }
 
+bool sdCanWrite() {
+  return !sd_fault_latched && logFile;
+}
+
+bool sdHealthy() {
+  return sd_ok && sdCanWrite();
+}
+
+void latchSdFault(const char* reason) {
+  if (sd_fault_latched) return;
+  sd_fault_latched = true;
+  sd_fault_reason = reason;
+  sd_ok = false;
+  Serial.printf("[MXR] SD FAULT: %s\n", reason);
+  if (logFile) {
+    logFile.flush();
+    logFile.close();
+  }
+}
+
+bool checkedSdWrite(const char* text, const char* reason) {
+  if (!sdCanWrite()) return false;
+  const size_t expected = strlen(text);
+  const size_t written = logFile.print(text);
+  if (written != expected || logFile.getWriteError()) {
+    latchSdFault(reason);
+    return false;
+  }
+  return true;
+}
+
+bool checkedSdFlush(const char* reason) {
+  if (!sdCanWrite()) return false;
+  logFile.flush();
+  if (logFile.getWriteError()) {
+    latchSdFault(reason);
+    return false;
+  }
+  return true;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 //  STATE VARIABLES
 // ═══════════════════════════════════════════════════════════════════════════
@@ -173,6 +217,7 @@ float baseline_pressure = 1013.25f;
 float baseline_pressure_sum = 0.0f;
 uint8_t baseline_count = 0;
 float baseline_altitude = 0.0f;
+bool baseline_locked = false;
 float max_altitude = 0.0f;
 uint8_t launch_consecutive = 0;
 bool launched = false;
@@ -182,8 +227,11 @@ float apogee_altitude_m = NAN;
 uint32_t last_baro_ms = 0;
 uint32_t last_gps_ms = 0;
 bool baro_ok = false;
-bool sd_ok = false;
 bool lora_ok = false;
+bool has_valid_baro_sample = false;
+float last_valid_altitude_m = 0.0f;
+float last_valid_pressure_hpa = 1013.25f;
+float last_valid_temp_c = 0.0f;
 
 int16_t last_rssi = 0;   // Updated after each LoRa TX
 char log_filename[24] = "/mxr_flight_001.csv";
@@ -239,6 +287,8 @@ float readLM75() {
 
 
 bool openFreshLogFile() {
+    sd_fault_latched = false;
+    sd_fault_reason = "NONE";
     for (uint16_t index = 1; index <= 999; index++) {
         snprintf(log_filename, sizeof(log_filename), "/mxr_flight_%03u.csv", (unsigned)index);
         if (SD.exists(log_filename)) continue;
@@ -246,12 +296,12 @@ bool openFreshLogFile() {
         logFile = SD.open(log_filename, FILE_WRITE);
         if (!logFile) return false;
 
-        logFile.println(
+        const char* header =
             "pkt_id,timestamp_ms,altitude_m,altitude_ft,temp_c,lm75_temp_c,pressure_hpa,"
             "lat,lon,gps_fix,flags,bmp_ok,sd_ok,max_altitude_m,max_altitude_ft,"
-            "apogee_detected,apogee_altitude_m,apogee_altitude_ft"
-        );
-        logFile.flush();
+            "apogee_detected,apogee_altitude_m,apogee_altitude_ft\n";
+        if (!checkedSdWrite(header, "HEADER_WRITE")) return false;
+        if (!checkedSdFlush("HEADER_FLUSH")) return false;
         return true;
     }
     return false;
@@ -277,7 +327,7 @@ void displayStatus(float alt, float maxAlt, float apogeeAlt, uint8_t flags, uint
         snprintf(statusLine, sizeof(statusLine), "P:%lu %s%s",
             (unsigned long)pktCount,
             (flags & FLAG_BARO_OK) ? "BAR " : "--- ",
-            (flags & FLAG_SD_OK) ? "SD" : "--");
+            sd_fault_latched ? "SDF" : (flags & FLAG_SD_OK) ? "SD" : "--");
         display.drawStr(0, 58, statusLine);
         display.sendBuffer();
         return;
@@ -301,7 +351,7 @@ void displayStatus(float alt, float maxAlt, float apogeeAlt, uint8_t flags, uint
     snprintf(line, sizeof(line), "P:%lu %s%s%s", pktCount,
         (flags & FLAG_GPS_FIX)  ? "GPS " : "--- ",
         (flags & FLAG_BARO_OK)  ? "BAR " : "--- ",
-        (flags & FLAG_SD_OK)    ? "SD"   : "--");
+        sd_fault_latched ? "SDF" : (flags & FLAG_SD_OK) ? "SD" : "--");
     display.drawStr(0, 58, line);
 
     display.sendBuffer();
@@ -467,6 +517,9 @@ void setup() {
         if (openFreshLogFile()) {
             sd_ok = true;
             Serial.printf("[MXR] SD card OK, logging to %s\n", log_filename);
+        } else {
+            sd_ok = false;
+            if (!sd_fault_latched) Serial.println("[MXR] SD log file open/write failed");
         }
     } else {
         sd_ok = false;
@@ -486,7 +539,7 @@ void setup() {
         baro_ok ? "OK" : "XX");
     display.drawStr(0, 24, line);
     snprintf(line, sizeof(line), "SD:%s GPS:WAIT",
-        sd_ok ? "OK" : "XX");
+        sdHealthy() ? "OK" : sd_fault_latched ? "FLT" : "XX");
     display.drawStr(0, 38, line);
     display.drawStr(0, 52, "READY");
     display.sendBuffer();
@@ -517,7 +570,9 @@ void loop() {
         uint32_t now = millis();
 
         // ── Read barometer ───────────────────────────────────────────
-        float temp = 0, press = 0, alt = 0;
+        float temp = has_valid_baro_sample ? last_valid_temp_c : 0.0f;
+        float press = has_valid_baro_sample ? last_valid_pressure_hpa : baseline_pressure;
+        float alt = has_valid_baro_sample ? last_valid_altitude_m : 0.0f;
         float bmp_temp = NAN;
         float lm75_temp = NAN;
         uint8_t flags = 0;
@@ -528,22 +583,42 @@ void loop() {
             float p = bmp.readPressure() / 100.0f;  // Pa → hPa
 
             if (isfinite(t) && isfinite(p) && p > 100.0f) {
+                bool countedBaselineThisSample = false;
+                if (baseline_count == 0) {
+                    baseline_pressure = p;
+                    baseline_pressure_sum = p;
+                    baseline_count = 1;
+                    baseline_altitude = 0.0f;
+                    countedBaselineThisSample = true;
+                }
+
+                float candidateAlt = bmp.readAltitude(baseline_pressure);
+
+                if (!baseline_locked && !launched) {
+                    const float candidateGain = candidateAlt - baseline_altitude;
+                    if (baseline_count >= BASELINE_SAMPLES || candidateGain > LAUNCH_ALT_DELTA_M) {
+                        baseline_locked = true;
+                    } else if (!countedBaselineThisSample) {
+                        baseline_pressure_sum += p;
+                        baseline_count++;
+                        baseline_pressure = baseline_pressure_sum / baseline_count;
+                        candidateAlt = bmp.readAltitude(baseline_pressure);
+                        baseline_altitude = 0.0f;
+                        if (baseline_count >= BASELINE_SAMPLES) baseline_locked = true;
+                    }
+                }
+
                 temp = t;
                 bmp_temp = t;
                 press = p;
+                alt = candidateAlt;
                 bmp_ok_this_sample = true;
-
-                // Averaged baseline calibration (first N readings)
-                if (baseline_count < BASELINE_SAMPLES) {
-                    baseline_pressure_sum += press;
-                    baseline_count++;
-                    baseline_pressure = baseline_pressure_sum / baseline_count;
-                }
-
-                alt = bmp.readAltitude(baseline_pressure);
-                if (baseline_count <= BASELINE_SAMPLES) baseline_altitude = alt;
                 if (alt > max_altitude) max_altitude = alt;
 
+                has_valid_baro_sample = true;
+                last_valid_altitude_m = alt;
+                last_valid_pressure_hpa = press;
+                last_valid_temp_c = temp;
                 last_baro_ms = now;
                 flags |= FLAG_BARO_OK;
             }
@@ -581,15 +656,18 @@ void loop() {
         }
 
         // ── Launch detection (altitude-based) ────────────────────────
-        if (!launched) {
+        if (bmp_ok_this_sample && !launched) {
             float gain = alt - baseline_altitude;
             launch_consecutive = (gain > LAUNCH_ALT_DELTA_M) ? launch_consecutive + 1 : 0;
-            if (launch_consecutive >= LAUNCH_CONFIRM_COUNT) launched = true;
+            if (launch_consecutive >= LAUNCH_CONFIRM_COUNT) {
+                launched = true;
+                baseline_locked = true;
+            }
         }
         if (launched) flags |= FLAG_LAUNCHED;
 
         // ── Apogee detection ─────────────────────────────────────────
-        if (launched && !apogee_detected) {
+        if (bmp_ok_this_sample && launched && !apogee_detected) {
             if ((max_altitude - alt) > APOGEE_DROP_M) {
                 apogee_detected = true;
                 apogee_altitude_m = max_altitude;
@@ -598,8 +676,44 @@ void loop() {
         if (apogee_detected) flags |= FLAG_APOGEE;
 
         // ── Health flags ─────────────────────────────────────────────
-        if ((now - last_baro_ms) > SENSOR_STALE_MS) flags |= FLAG_STALE_SENSOR;
-        if (sd_ok && logFile) flags |= FLAG_SD_OK;
+        if (!bmp_ok_this_sample || (now - last_baro_ms) > SENSOR_STALE_MS) flags |= FLAG_STALE_SENSOR;
+        if (sdHealthy()) flags |= FLAG_SD_OK;
+
+        // ── GPS character diagnostic print (every 10s) ────────────────
+        static uint32_t last_gps_diag = 0;
+        if (millis() - last_gps_diag > 10000) {
+            last_gps_diag = millis();
+            Serial.printf("[MXR] GPS Diagnostic: Chars Processed = %lu, Sentences with Fix = %lu, Failed Checksums = %lu\n",
+                (unsigned long)gps.charsProcessed(), (unsigned long)gps.sentencesWithFix(), (unsigned long)gps.failedChecksum());
+        }
+
+#if HAS_SD_CARD
+        // ── Log to SD card ───────────────────────────────────────────
+        if (sdHealthy()) {
+            char lm75Field[16] = "";
+            char apogeeField[16] = "";
+            if (isfinite(lm75_temp)) snprintf(lm75Field, sizeof(lm75Field), "%.2f", lm75_temp);
+            if (isfinite(apogee_altitude_m)) snprintf(apogeeField, sizeof(apogeeField), "%.2f", apogee_altitude_m);
+
+            char apogeeFieldFt[16] = "";
+            if (isfinite(apogee_altitude_m)) snprintf(apogeeFieldFt, sizeof(apogeeFieldFt), "%.2f", apogee_altitude_m * 3.28084f);
+            char row[256];
+            int rowLen = snprintf(row, sizeof(row), "%u,%lu,%.2f,%.2f,%.2f,%s,%.2f,%.6f,%.6f,%u,%u,%u,%u,%.2f,%.2f,%u,%s,%s\n",
+                (unsigned)pkt_id, (unsigned long)now, alt, alt * 3.28084f, temp, lm75Field, press,
+                lat, lon, gps_fix ? 1u : 0u, (unsigned)flags,
+                bmp_ok_this_sample ? 1u : 0u,
+                sdHealthy() ? 1u : 0u,
+                max_altitude, max_altitude * 3.28084f, apogee_detected ? 1u : 0u, apogeeField, apogeeFieldFt);
+            if (rowLen <= 0 || rowLen >= (int)sizeof(row)) {
+                latchSdFault("ROW_FORMAT");
+            } else if (!checkedSdWrite(row, "ROW_WRITE")) {
+                // Fault already latched.
+            } else if (pkt_id % LOG_FLUSH_EVERY == 0) {
+                checkedSdFlush("ROW_FLUSH");
+            }
+            if (!sdHealthy()) flags &= ~FLAG_SD_OK;
+        }
+#endif
 
 #if ENABLE_RIDESHARE_LIVE
         // ── Build MXR3 packet string (live telemetry) ────────────────
@@ -623,34 +737,6 @@ void loop() {
 
         // ── USB Serial debug ─────────────────────────────────────────
         Serial.println(buffer);
-#endif
-
-        // ── GPS character diagnostic print (every 10s) ────────────────
-        static uint32_t last_gps_diag = 0;
-        if (millis() - last_gps_diag > 10000) {
-            last_gps_diag = millis();
-            Serial.printf("[MXR] GPS Diagnostic: Chars Processed = %lu, Sentences with Fix = %lu, Failed Checksums = %lu\n",
-                (unsigned long)gps.charsProcessed(), (unsigned long)gps.sentencesWithFix(), (unsigned long)gps.failedChecksum());
-        }
-
-#if HAS_SD_CARD
-        // ── Log to SD card ───────────────────────────────────────────
-        if (sd_ok && logFile) {
-            char lm75Field[16] = "";
-            char apogeeField[16] = "";
-            if (isfinite(lm75_temp)) snprintf(lm75Field, sizeof(lm75Field), "%.2f", lm75_temp);
-            if (isfinite(apogee_altitude_m)) snprintf(apogeeField, sizeof(apogeeField), "%.2f", apogee_altitude_m);
-
-            char apogeeFieldFt[16] = "";
-            if (isfinite(apogee_altitude_m)) snprintf(apogeeFieldFt, sizeof(apogeeFieldFt), "%.2f", apogee_altitude_m * 3.28084f);
-            logFile.printf("%u,%lu,%.2f,%.2f,%.2f,%s,%.2f,%.6f,%.6f,%u,%u,%u,%u,%.2f,%.2f,%u,%s,%s\n",
-                (unsigned)pkt_id, (unsigned long)now, alt, alt * 3.28084f, temp, lm75Field, press,
-                lat, lon, gps_fix ? 1u : 0u, (unsigned)flags,
-                bmp_ok_this_sample ? 1u : 0u,
-                (sd_ok && logFile) ? 1u : 0u,
-                max_altitude, max_altitude * 3.28084f, apogee_detected ? 1u : 0u, apogeeField, apogeeFieldFt);
-            if (pkt_id % LOG_FLUSH_EVERY == 0) logFile.flush();
-        }
 #endif
 
         // ── Update OLED ──────────────────────────────────────────────

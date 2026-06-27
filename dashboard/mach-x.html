@@ -963,6 +963,7 @@
            el.className = 'pf-val ' + cls;
         };
         const up = (id, ok) => setStatus(id, ok ? 'OK' : 'FLT', ok ? 'ok' : '');
+        const sdHealth = pkt?.sensor_health?.sd_card;
         if (liveDashboardSources.has(src) && !pkt) {
           setStatus('pf-bmp', 'WAIT', 'wait');
           setStatus('pf-mpu', 'WAIT', 'wait');
@@ -990,7 +991,9 @@
         } else {
           up('pf-mpu', active && (flags & 0x10) && Number.isFinite(pkt?.accel_z) && Number.isFinite(pkt?.gyro_x));
         }
-        up('pf-sd', active && (flags & 0x20));
+        if (sdHealth?.degraded) setStatus('pf-sd', 'DEG', 'wait');
+        else if (sdHealth && typeof sdHealth.ok === 'boolean') up('pf-sd', active && sdHealth.ok);
+        else up('pf-sd', active && (flags & 0x20));
         if (!(src === 'CANSAT' && pkt?.mission_mode !== 'GPS_RECOVERY')) {
           up('pf-gps', active && (flags & 0x04) && Number.isFinite(pkt?.lat) && Number.isFinite(pkt?.lon));
         }
@@ -1258,6 +1261,20 @@
         }
       }
 
+      async function renderUploadedPackets(uploadId) {
+        if (!uploadId) return;
+        const res = await fetch(apiUrl('/api/sd-uploads/' + encodeURIComponent(uploadId) + '/packets'));
+        const payload = await res.json().catch(() => ({}));
+        if (!res.ok || payload.ok === false) {
+          throw new Error(payload.error || `upload packets ${res.status}`);
+        }
+        renderHistoryPayload({
+          source: normalizeClientSource(payload.source || source),
+          packets: payload.packets || []
+        });
+        setModeBadge('RECOVERED HISTORY', 'var(--text-2)');
+      }
+
       function attachSocketHandlers(s) {
         s.on('connect', () => {
           if (liveDashboardSources.has(source)) showWaitingState(source);
@@ -1274,6 +1291,11 @@
           processPacket(pkt);
         });
         s.on('mission_event', evt => { addEvent(evt); updatePhase(evt.event_type, evt.source); });
+        s.on('sd_upload_complete', evt => {
+          const src = normalizeClientSource(evt?.source || source);
+          if (src !== source || !evt?.upload_id) return;
+          renderUploadedPackets(evt.upload_id).catch(error => setModeBadge(error.message || 'UPLOAD LOAD FAILED', 'var(--critical)'));
+        });
         s.on('signal_lost', evt => {
           const src = normalizeClientSource(evt?.source || source);
           signalState[src] = { ...(signalState[src] || {}), connected: true, lost: true, last_seen_ms: evt?.last_seen_ms || 0 };
@@ -1296,12 +1318,23 @@
 
       // SD UPLOAD
       window.uploadSD = () => $('file-sd').click();
-      $('file-sd').addEventListener('change', e => {
+      $('file-sd').addEventListener('change', async e => {
         const file = e.target.files[0];
         if (!file) return;
         const fd = new FormData(); fd.append('file', file); fd.append('source', source);
         $('btn-upload').textContent = 'UPLOADING...';
-        fetch(apiUrl('/api/upload-sd'), { method: 'POST', body: fd }).finally(() => { $('btn-upload').textContent = 'UPLOAD SD'; e.target.value = ''; });
+        setModeBadge('UPLOADING SD', 'var(--warning)');
+        try {
+          const res = await fetch(apiUrl('/api/upload-sd'), { method: 'POST', body: fd });
+          const payload = await res.json().catch(() => ({}));
+          if (!res.ok || payload.ok === false) throw new Error(payload.error || `upload ${res.status}`);
+          await renderUploadedPackets(payload.upload_id);
+        } catch (error) {
+          setModeBadge(error.message || 'UPLOAD FAILED', 'var(--critical)');
+        } finally {
+          $('btn-upload').textContent = 'UPLOAD SD';
+          e.target.value = '';
+        }
       });
       window.exportCSV = () => window.open(apiUrl('/api/export?source=' + source), '_blank');
 

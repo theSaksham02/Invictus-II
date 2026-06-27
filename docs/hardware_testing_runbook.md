@@ -211,6 +211,18 @@ The new device is the board port. It will look similar to one of these:
 
 Write the port down. In the commands below, replace `/dev/cu.usbserial-XXXX` with your real port.
 
+Keep a space between the port and the next option. This is correct:
+
+```bash
+--port /dev/cu.usbserial-0001 --baud 115200
+```
+
+This is wrong because `--baud` becomes part of the port name:
+
+```bash
+--port /dev/cu.usbserial-0001--baud 115200
+```
+
 ## A3. Flash the Rideshare Ground Receiver
 
 Connect only the rideshare ground receiver Heltec to USB.
@@ -241,6 +253,8 @@ Expected boot output:
 [MXR-GS] Booting rideshare LoRa ground receiver
 [MXR-GS] SX1262 OK @ 868 MHz, forwarding CRC-valid MXR2/MXR3 packets
 ```
+
+The Heltec OLED can stay blank in this ground-receiver firmware. Judge this board by the USB serial output, not by the screen.
 
 Close the monitor by pressing:
 

@@ -123,6 +123,16 @@ test('GET /mach-x-rideshare serves the Mach-X Rideshare mission-control dashboar
   });
 });
 
+test('Mach-X Rideshare dashboard renders successful SD uploads', () => {
+  const dashboard = fs.readFileSync(path.resolve(__dirname, '../../dashboard/mach-x.html'), 'utf8');
+
+  assert.match(dashboard, /async function renderUploadedPackets/);
+  assert.match(dashboard, /\/api\/sd-uploads\/'\s*\+\s*encodeURIComponent\(uploadId\)\s*\+\s*'\/packets/);
+  assert.match(dashboard, /s\.on\('sd_upload_complete'/);
+  assert.match(dashboard, /await renderUploadedPackets\(payload\.upload_id\)/);
+  assert.match(dashboard, /UPLOAD FAILED/);
+});
+
 test('GET /cansat serves the CanSat dashboard with waiting and recovery states', async () => {
   await withMockedServer(async (baseUrl) => {
     const res = await fetch(`${baseUrl}/cansat`);
@@ -241,6 +251,29 @@ test('Mach-X Rideshare firmware uses MXR3 live telemetry prefix', () => {
   assert.match(platformio, /-DARDUINO_USB_CDC_ON_BOOT=0/);
 });
 
+test('Mach-X Rideshare firmware latches SD faults and clears SD_OK after write failure', () => {
+  const firmware = fs.readFileSync(path.resolve(__dirname, '../../firmware/nrc/src/main.cpp'), 'utf8');
+
+  assert.match(firmware, /bool\s+sd_fault_latched\s*=\s*false/);
+  assert.match(firmware, /void\s+latchSdFault/);
+  assert.match(firmware, /bool\s+checkedSdWrite/);
+  assert.match(firmware, /logFile\.getWriteError\(\)/);
+  assert.match(firmware, /flags\s*&=\s*~FLAG_SD_OK/);
+  assert.match(firmware, /checkedSdWrite\(header,\s*"HEADER_WRITE"\)/);
+  assert.match(firmware, /checkedSdWrite\(row,\s*"ROW_WRITE"\)/);
+});
+
+test('Mach-X Rideshare firmware freezes baseline and preserves stale barometer telemetry', () => {
+  const firmware = fs.readFileSync(path.resolve(__dirname, '../../firmware/nrc/src/main.cpp'), 'utf8');
+
+  assert.match(firmware, /bool\s+baseline_locked\s*=\s*false/);
+  assert.match(firmware, /candidateGain\s*>\s*LAUNCH_ALT_DELTA_M/);
+  assert.match(firmware, /float\s+last_valid_pressure_hpa\s*=\s*1013\.25f/);
+  assert.match(firmware, /has_valid_baro_sample\s*\?\s*last_valid_pressure_hpa\s*:\s*baseline_pressure/);
+  assert.match(firmware, /flags\s*\|=\s*FLAG_STALE_SENSOR/);
+  assert.doesNotMatch(firmware, /baseline_count\s*<=\s*BASELINE_SAMPLES\)\s*baseline_altitude\s*=\s*alt/);
+});
+
 test('Mach-X Rideshare ground receiver matches flight LoRa settings and forwards MXR telemetry', () => {
   const firmware = fs.readFileSync(path.resolve(__dirname, '../../firmware/rideshare-ground-station/src/main.cpp'), 'utf8');
   const platformio = fs.readFileSync(path.resolve(__dirname, '../../firmware/rideshare-ground-station/platformio.ini'), 'utf8');
@@ -251,10 +284,19 @@ test('Mach-X Rideshare ground receiver matches flight LoRa settings and forwards
   assert.match(firmware, /#define LORA_CR\s+5/);
   assert.match(firmware, /#define LORA_SW\s+0x12/);
   assert.match(firmware, /#define LORA_PREAMBLE\s+8/);
-  assert.match(firmware, /packet\.startsWith\("MXR3:"\)/);
-  assert.match(firmware, /packet\.startsWith\("MXR2:"\)/);
+  assert.match(firmware, /strncmp\(packet,\s*"MXR3:"/);
+  assert.match(firmware, /strncmp\(packet,\s*"MXR2:"/);
   assert.match(firmware, /Serial\.println\(outLine\)/);
   assert.match(platformio, /-DARDUINO_USB_CDC_ON_BOOT=0/);
+});
+
+test('Mach-X Rideshare ground receiver avoids Arduino String packet parsing', () => {
+  const firmware = fs.readFileSync(path.resolve(__dirname, '../../firmware/rideshare-ground-station/src/main.cpp'), 'utf8');
+
+  assert.doesNotMatch(firmware, /\bString\b/);
+  assert.match(firmware, /uint8_t\s+rawPacket\[MAX_PACKET_LEN \+ 1\]/);
+  assert.match(firmware, /radio\.readData\(rawPacket,\s*MAX_PACKET_LEN\)/);
+  assert.match(firmware, /char\*\s+fields\[10\]/);
 });
 
 test('Mach-X Rideshare sensor health uses payload circuit pin mappings', () => {

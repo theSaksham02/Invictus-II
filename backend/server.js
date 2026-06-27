@@ -205,6 +205,13 @@ function parseOptionalCsvFloat(row, lookup, names) {
   return Number.isFinite(parsed) ? parsed : NaN;
 }
 
+function parseOptionalCsvInt(row, lookup, names) {
+  const rawValue = getCsvValue(row, lookup, names);
+  if (rawValue === undefined || rawValue === null || String(rawValue).trim() === '') return null;
+  const parsed = Number.parseInt(rawValue, 10);
+  return Number.isInteger(parsed) ? parsed : NaN;
+}
+
 function parseOptionalTemperatureCsvFloat(row, lookup, names) {
   const parsed = parseOptionalCsvFloat(row, lookup, names);
   if (parsed === null || Number.isNaN(parsed)) return parsed;
@@ -236,6 +243,9 @@ function parseMissionModeCsv(row, lookup) {
 function parseSdPacketRow(row, lookup, raw, receivedAt, source) {
   const accelZ = parseOptionalCsvFloat(row, lookup, ['accel_z', 'acceleration_z']);
   const gyroX = parseOptionalCsvFloat(row, lookup, ['gyro_x', 'gyroscope_x']);
+  const csvGpsOk = parseOptionalCsvInt(row, lookup, ['gps_fix', 'gps_ok']);
+  const csvBmpOk = parseOptionalCsvInt(row, lookup, ['bmp_ok', 'baro_ok']);
+  const csvSdOk = parseOptionalCsvInt(row, lookup, ['sd_ok', 'sd_card_ok']);
   const rssiRaw = getCsvValue(row, lookup, ['rssi_dbm', 'rssi']);
   const rssiDbm = rssiRaw === undefined || String(rssiRaw).trim() === ''
     ? 0
@@ -268,6 +278,19 @@ function parseSdPacketRow(row, lookup, raw, receivedAt, source) {
     raw,
     received_at: receivedAt
   };
+
+  if (source === RIDESHARE_SOURCE) {
+    const healthColumns = [
+      { value: csvGpsOk, bit: 0x04 },
+      { value: csvBmpOk, bit: 0x08 },
+      { value: csvSdOk, bit: 0x20 }
+    ];
+    for (const { value, bit } of healthColumns) {
+      if (value === null) continue;
+      if (value !== 0 && value !== 1) return null;
+      if (((packet.flags & bit) !== 0) !== (value === 1)) return null;
+    }
+  }
 
   return (
     Number.isInteger(packet.pkt_id) &&
@@ -572,7 +595,12 @@ app.get('/api/sd-uploads/:upload_id/packets', (req, res) => {
   const uploadId = parseRequiredBoundedInt(req.params.upload_id, 1, Number.MAX_SAFE_INTEGER, 'upload_id');
   const uploadRecord = db.getUpload(uploadId);
   if (!uploadRecord) throw new HttpError(404, 'SD upload not found', { upload_id: uploadId });
-  const packets = db.getUploadPackets(uploadId);
+  const packets = db.getUploadPackets(uploadId).map((packet) => ({
+    ...packet,
+    flags_decoded: decodeFlags(packet.flags),
+    sensor_health: deriveSensorHealth(packet),
+    warnings: packetWarnings(packet)
+  }));
   res.json({
     ok: true,
     upload_id: uploadId,
