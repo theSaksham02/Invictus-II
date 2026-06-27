@@ -111,9 +111,8 @@
 //  GLOBAL OBJECTS
 // ═══════════════════════════════════════════════════════════════════════════
 
-// LoRa radio — SX1262 via RadioLib
-SPIClass loraSPI(HSPI); // Swapped to HSPI (SPI3) for ESP32-S3
-SX1262 radio = new Module(LORA_NSS, LORA_DIO1, LORA_RST, LORA_BUSY, loraSPI);
+// LoRa radio — SX1262 via RadioLib (using default SPI/FSPI as requested)
+SX1262 radio = new Module(LORA_NSS, LORA_DIO1, LORA_RST, LORA_BUSY, SPI);
 
 // OLED display — U8g2, HW I2C on internal OLED bus
 U8G2_SSD1306_128X64_NONAME_F_HW_I2C display(U8G2_R0, OLED_RST, OLED_SCL, OLED_SDA);
@@ -124,9 +123,49 @@ Adafruit_BMP280 bmp(&sensorI2C);
 TinyGPSPlus gps;
 HardwareSerial SerialGPS(1);     // UART1 for GPS
 
-// SD Card — custom SPI bus explicitly on FSPI (SPI2)
-SPIClass sdSPI(FSPI);
+// ================== SD CARD (HSPI — SEPARATE FROM LoRa) ==================
+// Use HSPI (SPI3_HOST) so LoRa can stay on FSPI (default SPI)
+SPIClass sdSPI(HSPI);
 File logFile;
+
+bool initSDCard() {
+  // 1. Hold LoRa CS high so it stays quiet
+  pinMode(LORA_NSS, OUTPUT);
+  digitalWrite(LORA_NSS, HIGH);
+
+  // 2. Hold SD CS high
+  pinMode(SD_CS, OUTPUT);
+  digitalWrite(SD_CS, HIGH);
+
+  // 3. Pull‑up on MISO (prevents floating 0xFF)
+  pinMode(SD_MISO, INPUT_PULLUP);
+
+  // 4. Start the dedicated SPI bus. 
+  // Safety: Omitted SD_CS here to prevent hardware matrix lock-out on S3!
+  sdSPI.begin(SD_SCK, SD_MISO, SD_MOSI);
+
+  // 5. Send >74 clock pulses while CS is HIGH (wakes the card into SPI mode)
+  digitalWrite(SD_CS, HIGH);
+  for (int i = 0; i < 10; i++) {
+    sdSPI.transfer(0xFF);
+  }
+
+  delay(10);
+
+  // 6. Try mounting at 400 kHz, retry up to 3 times
+  for (int attempt = 1; attempt <= 3; attempt++) {
+    if (SD.begin(SD_CS, sdSPI, 400000)) {   // <--- note the low speed
+      Serial.println("[MXR] SD card OK");
+      return true;
+    }
+    Serial.printf("[MXR] SD init failed (attempt %d)\n", attempt);
+    // Toggle CS to reset the card
+    digitalWrite(SD_CS, LOW);  delay(50);
+    digitalWrite(SD_CS, HIGH); delay(50);
+  }
+  Serial.println("[MXR] SD card FAILED");
+  return false;
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  STATE VARIABLES
@@ -341,7 +380,7 @@ void setup() {
     // ── LoRa SX1262 init (live telemetry) ───────────────────────────
     Serial.println("[MXR] Initializing LoRa SX1262...");
     displayBootStep("INIT LORA");
-    loraSPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_NSS);
+    SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_NSS);
     // Initialize LoRa radio with default parameters, then configure individually
     int state = radio.begin();
     if (state == RADIOLIB_ERR_NONE) {
@@ -423,41 +462,16 @@ void setup() {
 #endif
 
 #if HAS_SD_CARD
-    // ── SD Card on custom SPI bus ────────────────────────────────────
     Serial.println("[MXR] Initializing SD card...");
     displayBootStep("INIT SD");
 
-    pinMode(SD_CS, OUTPUT);
-    digitalWrite(SD_CS, HIGH); // Ensure CS starts HIGH (deselect)
-    pinMode(SD_MISO, INPUT_PULLUP); // Add pullup in case it's floating
-    delay(10);
-
-    // CRITICAL FIX: Explicitly use FSPI host and DO NOT pass CS pin
-    sdSPI.begin(SD_SCK, SD_MISO, SD_MOSI);
-
-    // ── Call SD.begin using the dedicated sdSPI instance ─────────────
-    bool sd_init = false;
-    for (int attempt = 0; attempt < 3 && !sd_init; attempt++) {
-        digitalWrite(SD_CS, HIGH); // Ensure CS is high before init
-
-        // Init on the DEDICATED bus. (The ESP32 SD library handles dummy clocks internally)
-        if (SD.begin(SD_CS, sdSPI)) {
-            sd_init = true;
-            Serial.printf("[MXR] SD init OK (attempt %d)\n", attempt + 1);
-        } else {
-            Serial.printf("[MXR] SD init failed (attempt %d)\n", attempt + 1);
-            // Toggle CS to reset card state machine
-            digitalWrite(SD_CS, LOW);  delay(50);
-            digitalWrite(SD_CS, HIGH); delay(50);
+    if (initSDCard()) {
+        if (openFreshLogFile()) {
+            sd_ok = true;
+            Serial.printf("[MXR] SD card OK, logging to %s\n", log_filename);
         }
-    }
-
-    if (sd_init && openFreshLogFile()) {
-        sd_ok = true;
-        Serial.printf("[MXR] SD card OK, logging to %s\n", log_filename);
     } else {
-        Serial.println("[MXR] SD card FAILED");
-        digitalWrite(SD_CS, HIGH); // Hold CS HIGH to avoid selecting the card
+        sd_ok = false;
     }
 #else
     Serial.println("[MXR] SD card disabled in config");
