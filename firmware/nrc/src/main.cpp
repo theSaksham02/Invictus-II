@@ -111,7 +111,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 // LoRa radio — SX1262 via RadioLib
-SPIClass loraSPI(FSPI);
+SPIClass loraSPI(HSPI); // Swapped to HSPI (SPI3) for ESP32-S3
 SX1262 radio = new Module(LORA_NSS, LORA_DIO1, LORA_RST, LORA_BUSY, loraSPI);
 
 // OLED display — U8g2, HW I2C on internal OLED bus
@@ -124,7 +124,7 @@ TinyGPSPlus gps;
 HardwareSerial SerialGPS(1);     // UART1 for GPS
 
 // SD Card — custom SPI bus
-SPIClass sdSPI(HSPI);
+SPIClass sdSPI(FSPI); // Swapped to FSPI (SPI2) for ESP32-S3 SD stability
 File logFile;
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -278,6 +278,33 @@ void displayBootStep(const char* line1, const char* line2 = "") {
     display.sendBuffer();
 }
 
+void startGPS() {
+    const uint32_t bauds[] = {9600, 57600, 115200, 38400, 4800};
+    for (uint8_t i = 0; i < sizeof(bauds)/sizeof(bauds[0]); i++) {
+        SerialGPS.end();
+        SerialGPS.setRxBufferSize(1024);
+        SerialGPS.begin(bauds[i], SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
+        Serial.printf("[MXR] GPS trying %lu baud...\n", (unsigned long)bauds[i]);
+        uint32_t t0 = millis();
+        uint32_t got = 0;
+        uint32_t dollar = 0;
+        while (millis() - t0 < 1200) {
+            while (SerialGPS.available()) {
+                char c = SerialGPS.read();
+                got++;
+                if (c == '$') dollar++;          // NMEA sentences begin with '$'
+            }
+        }
+        Serial.printf("[MXR]   chars=%lu, '$'=%lu\n", (unsigned long)got, (unsigned long)dollar);
+        if (dollar >= 2) {
+            Serial.printf("[MXR] GPS locked @ %lu baud\n", (unsigned long)bauds[i]);
+            return;
+        }
+    }
+    Serial.println("[MXR] GPS: no NMEA on any baud -> check TX->GPIO7 wire / 3V3 / antenna");
+    SerialGPS.begin(9600, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN); // safe fallback
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 //  SETUP
 // ═══════════════════════════════════════════════════════════════════════════
@@ -331,10 +358,8 @@ void setup() {
     // ── GPS on UART1 ─────────────────────────────────────────────────
     Serial.println("[MXR] Initializing GPS UART1...");
     displayBootStep("INIT GPS");
-    SerialGPS.begin(9600, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
-    delay(100);
+    startGPS();
     Serial.printf("[MXR] GPS UART1 pins: RX=%d, TX=%d\n", GPS_RX_PIN, GPS_TX_PIN);
-    Serial.println("[MXR] GPS UART1 started");
 
     // ── I2C bus for BMP280 + LM75 ────────────────────────────────────
     Serial.println("[MXR] Initializing sensor I2C...");
