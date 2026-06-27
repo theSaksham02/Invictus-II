@@ -388,8 +388,12 @@ void setup() {
     Serial.println("[MXR] Initializing SD card...");
     displayBootStep("INIT SD");
 
+    pinMode(SD_CS, OUTPUT);
+    digitalWrite(SD_CS, HIGH); // Hold CS high to avoid floating states
+    delay(10);
+
     sdSPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
-    if (SD.begin(SD_CS, sdSPI)) {
+    if (SD.begin(SD_CS, sdSPI, 1000000)) { // Initialize at 1MHz for bench wire stability
         if (openFreshLogFile()) {
             sd_ok = true;
             Serial.printf("[MXR] SD card OK, logging to %s\n", log_filename);
