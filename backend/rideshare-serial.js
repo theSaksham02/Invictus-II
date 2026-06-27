@@ -49,7 +49,7 @@ function createRideshareSerial({
       const parser = ridesharePort.pipe(new ReadlineParser({ delimiter: '\n' }));
       parser.on('data', (line) => {
         const trimmed = typeof line === 'string' ? line.trim() : '';
-        if (!trimmed.startsWith('MXR4:') && !trimmed.startsWith('MXR3:') && !trimmed.startsWith('MXR2:') && !trimmed.startsWith('NRC2:') && !trimmed.startsWith('NRC:')) return;
+        if (!trimmed.startsWith('MXR3:') && !trimmed.startsWith('MXR2:') && !trimmed.startsWith('NRC2:') && !trimmed.startsWith('NRC:')) return;
         const parsed = parseRideshare(line);
         if (parsed) {
           handlePacket(parsed);

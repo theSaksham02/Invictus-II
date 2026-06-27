@@ -235,10 +235,10 @@ const NRC_PAYLOAD_CIRCUIT = Object.freeze({
   docs_source: 'backend/PAYLOAD_CIRCUIT.md',
   firmware: 'firmware/nrc/src/main.cpp',
   telemetry: {
-    protocol_prefixes: ['MXR4:', 'MXR3:', 'MXR2:', 'NRC2:', 'NRC:'],
+    protocol_prefixes: ['MXR3:', 'MXR2:', 'NRC2:', 'NRC:'],
     interface: 'SX1262 LoRa and USB Serial @ 115200 baud',
     live_enabled_default: true,
-    note: 'MXR4 is preferred for live rideshare telemetry because it includes IMU (accel_z, gyro_x) and LM75 temperature. MXR3/MXR2 and NRC/NRC2 remain accepted for compatibility.'
+    note: 'MXR3 is preferred for live rideshare telemetry because it includes LM75 temperature. MXR2 and NRC/NRC2 remain accepted for compatibility.'
   },
   power: {
     input: 'Battery JST -> Li-ion 2S 3A BMS -> switch terminal block -> LM2596',
