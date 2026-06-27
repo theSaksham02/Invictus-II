@@ -124,7 +124,8 @@ Adafruit_BMP280 bmp(&sensorI2C);
 TinyGPSPlus gps;
 HardwareSerial SerialGPS(1);     // UART1 for GPS
 
-// SD Card — custom SPI bus (uses global SPI object on FSPI host)
+// SD Card — custom SPI bus explicitly on FSPI (SPI2)
+SPIClass sdSPI(FSPI);
 File logFile;
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -431,22 +432,27 @@ void setup() {
     pinMode(SD_MISO, INPUT_PULLUP); // Add pullup in case it's floating
     delay(10);
 
-    // Initialize the global SPI peripheral with custom pins.
-    // CRITICAL FIX: Do NOT pass SD_CS here. The SPI hardware must not claim the CS pin,
-    // otherwise the SD library cannot control it via standard digitalWrite.
-    SPI.begin(SD_SCK, SD_MISO, SD_MOSI);
+    // CRITICAL FIX: Explicitly use FSPI host and DO NOT pass CS pin
+    sdSPI.begin(SD_SCK, SD_MISO, SD_MOSI);
 
-    // ── Call SD.begin using the configured global SPI instance ───────
+    // ── Call SD.begin using the dedicated sdSPI instance ─────────────
     bool sd_init = false;
     for (int attempt = 0; attempt < 3 && !sd_init; attempt++) {
-        // Use default frequency (4MHz). The ESP32 SD library handles the 400kHz 
-        // initialization phase automatically. Do not force 400kHz here.
-        if (SD.begin(SD_CS, SPI)) {
+        // SD Spec: 80 idle clocks with CS HIGH before CMD0 to enter SPI mode
+        digitalWrite(SD_CS, HIGH);
+        sdSPI.beginTransaction(SPISettings(400000, MSBFIRST, SPI_MODE0));
+        for (int i = 0; i < 10; i++) sdSPI.transfer(0xFF);
+        sdSPI.endTransaction();
+
+        // Init at 400 kHz on the DEDICATED bus
+        if (SD.begin(SD_CS, sdSPI, 400000)) {
             sd_init = true;
             Serial.printf("[MXR] SD init OK (attempt %d)\n", attempt + 1);
         } else {
             Serial.printf("[MXR] SD init failed (attempt %d)\n", attempt + 1);
-            delay(250);
+            // Toggle CS to reset card state machine
+            digitalWrite(SD_CS, LOW);  delay(50);
+            digitalWrite(SD_CS, HIGH); delay(50);
         }
     }
 
