@@ -2,16 +2,17 @@
  * INVICTUS II — Mach-X Rideshare Payload Firmware
  * ──────────────────────────────────────────
  * Hardware : Heltec WiFi LoRa 32 V3 (ESP32-S3 + SX1262 LoRa + SSD1306 OLED)
- * Sensors  : BMP280 (I2C), NEO-6M GPS (UART), LM75 (I2C), SD Card (SPI)
+ * Sensors  : BMP280 (I2C), MPU6500 (I2C), NEO-6M GPS (UART), LM75 (I2C), SD Card (SPI)
  * Camera   : ESP32-CAM (standalone on 5V_BUS, records to its own SD card)
  * Radio    : SX1262 LoRa @ 868 MHz (built into Heltec board, live telemetry)
  * Display  : SSD1306 0.96" OLED (built into Heltec board)
  *
- * Live telemetry contract (MXR3 — v3 with CRC16):
- *   MXR3:<pkt_id>,<ts_ms>,<alt_m>,<temp_c>,<lm75_temp_c>,<press_hpa>,<lat>,<lon>,<rssi>,<flags>,<CRC16_HEX>\n
+ * Live telemetry contract (MXR4 — v4 with IMU + CRC16):
+ *   MXR4:<pkt_id>,<ts_ms>,<alt_m>,<temp_c>,<lm75_temp_c>,<press_hpa>,<lat>,<lon>,<accel_z>,<gyro_x>,<rssi>,<flags>,<CRC16_HEX>\n
  *
  * Pin mapping — per physical circuit (verified 2026-05-30):
  *   BMP280  → I2C:  SDA=GPIO1,  SCL=GPIO2   (addr 0x76, SDO→GND)
+ *   MPU6500 → I2C:  SDA=GPIO1,  SCL=GPIO2   (addr 0x68 or 0x69, shared bus)
  *   LM75    → I2C:  SDA=GPIO1,  SCL=GPIO2   (addr 0x48, shared bus)
  *   NEO-6M  → UART: RX=GPIO6  (ESP TX→GPS RX), TX=GPIO7  (GPS TX→ESP RX)
  *   SD Card → SPI:  CS=GPIO38, SCK=GPIO39, MOSI=GPIO41, MISO=GPIO42
@@ -42,6 +43,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 #define HAS_SD_CARD     1   // Set to 1 if SD card module is physically connected
 #define HAS_LM75        1   // Set to 1 if LM75 temperature sensor is physically connected
+#define HAS_MPU6500     1   // Set to 1 if MPU6500 IMU is physically connected (I2C)
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  PIN DEFINITIONS — Heltec WiFi LoRa 32 V3 (verified against circuit)
@@ -94,6 +96,7 @@
 #define FLAG_APOGEE         0x02
 #define FLAG_GPS_FIX        0x04
 #define FLAG_BARO_OK        0x08
+#define FLAG_IMU_OK         0x10
 #define FLAG_SD_OK          0x20
 #define FLAG_STALE_SENSOR   0x40
 
@@ -146,6 +149,11 @@ uint32_t last_gps_ms = 0;
 bool baro_ok = false;
 bool sd_ok = false;
 bool lora_ok = false;
+bool imu_ok = false;
+
+// MPU6500 IMU state
+float accel_z = 0.0f;   // Z-axis acceleration (m/s²)
+float gyro_x  = 0.0f;   // X-axis angular velocity (deg/s)
 
 int16_t last_rssi = 0;   // Updated after each LoRa TX
 char log_filename[24] = "/mxr_flight_001.csv";
@@ -167,19 +175,8 @@ uint16_t crc16Ccitt(const uint8_t* data, size_t len) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-//  LM75 TEMPERATURE FALLBACK & I2C SCANNING
+//  I2C BUS SCANNING
 // ═══════════════════════════════════════════════════════════════════════════
-uint8_t lm75_actual_addr = 0x48;
-
-float readLM75() {
-    sensorI2C.beginTransmission(lm75_actual_addr);
-    if (sensorI2C.endTransmission() != 0) return NAN;
-    sensorI2C.requestFrom((uint8_t)lm75_actual_addr, (uint8_t)2);
-    if (sensorI2C.available() < 2) return NAN;
-    int16_t raw = (sensorI2C.read() << 8) | sensorI2C.read();
-    return (float)(raw >> 5) * 0.125f;
-}
-
 void scanI2CBus(TwoWire &i2c) {
     Serial.println("[MXR] Scanning I2C bus...");
     int nDevices = 0;
@@ -196,6 +193,98 @@ void scanI2CBus(TwoWire &i2c) {
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+//  LM75 TEMPERATURE FALLBACK
+// ═══════════════════════════════════════════════════════════════════════════
+uint8_t lm75_actual_addr = 0x48;
+
+float readLM75() {
+    sensorI2C.beginTransmission(lm75_actual_addr);
+    if (sensorI2C.endTransmission() != 0) return NAN;
+    sensorI2C.requestFrom((uint8_t)lm75_actual_addr, (uint8_t)2);
+    if (sensorI2C.available() < 2) return NAN;
+    int16_t raw = (sensorI2C.read() << 8) | sensorI2C.read();
+    return (float)(raw >> 5) * 0.125f;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  MPU6500 IMU — I2C REGISTER-LEVEL DRIVER
+// ═══════════════════════════════════════════════════════════════════════════
+uint8_t mpu_actual_addr = 0x68;
+
+void writeMPU6500Reg(uint8_t reg, uint8_t data) {
+    sensorI2C.beginTransmission(mpu_actual_addr);
+    sensorI2C.write(reg);
+    sensorI2C.write(data);
+    sensorI2C.endTransmission();
+}
+
+uint8_t readMPU6500Reg(uint8_t reg) {
+    sensorI2C.beginTransmission(mpu_actual_addr);
+    sensorI2C.write(reg);
+    sensorI2C.endTransmission(false);
+    sensorI2C.requestFrom((uint8_t)mpu_actual_addr, (uint8_t)1);
+    return sensorI2C.available() ? sensorI2C.read() : 0xFF;
+}
+
+bool initMPU6500() {
+    // Auto-detect address: try 0x68 first, then 0x69
+    for (uint8_t addr : {(uint8_t)0x68, (uint8_t)0x69}) {
+        mpu_actual_addr = addr;
+        uint8_t who = readMPU6500Reg(0x75);  // WHO_AM_I register
+        // MPU6500 returns 0x70, MPU6050 returns 0x68, MPU9250 returns 0x71
+        if (who == 0x70 || who == 0x68 || who == 0x71 || who == 0x73) {
+            Serial.printf("[MXR] MPU found at 0x%02X (WHO_AM_I=0x%02X)\n", addr, who);
+            // Wake up (clear SLEEP bit in PWR_MGMT_1)
+            writeMPU6500Reg(0x6B, 0x00);
+            delay(10);
+            // Set accel range ±2g (default, most sensitive)
+            writeMPU6500Reg(0x1C, 0x00);
+            // Set gyro range ±250 deg/s (default, most sensitive)
+            writeMPU6500Reg(0x1B, 0x00);
+            return true;
+        }
+    }
+    Serial.println("[MXR] MPU6500 NOT FOUND at 0x68 or 0x69");
+    return false;
+}
+
+void readMPU6500Data() {
+    if (!imu_ok) return;
+
+    sensorI2C.beginTransmission(mpu_actual_addr);
+    sensorI2C.write(0x3B);  // ACCEL_XOUT_H
+    if (sensorI2C.endTransmission(false) != 0) {
+        imu_ok = false;
+        return;
+    }
+    sensorI2C.requestFrom((uint8_t)mpu_actual_addr, (uint8_t)14);
+    if (sensorI2C.available() < 14) {
+        imu_ok = false;
+        return;
+    }
+
+    uint8_t buf[14];
+    for (int i = 0; i < 14; i++) buf[i] = sensorI2C.read();
+
+    // Sanity check: all zeros or all FFs = dead bus
+    bool allZero = true, allFF = true;
+    for (int i = 0; i < 14; i++) {
+        if (buf[i] != 0x00) allZero = false;
+        if (buf[i] != 0xFF) allFF = false;
+    }
+    if (allZero || allFF) {
+        imu_ok = false;
+        return;
+    }
+
+    int16_t az_raw = (buf[4] << 8) | buf[5];   // ACCEL_ZOUT_H/L
+    int16_t gx_raw = (buf[8] << 8) | buf[9];   // GYRO_XOUT_H/L
+
+    accel_z = az_raw * (2.0f * 9.80665f / 32768.0f);  // m/s² at ±2g
+    gyro_x  = gx_raw * (250.0f / 32768.0f);            // deg/s at ±250 dps
+}
+
 bool openFreshLogFile() {
     for (uint16_t index = 1; index <= 999; index++) {
         snprintf(log_filename, sizeof(log_filename), "/mxr_flight_%03u.csv", (unsigned)index);
@@ -206,7 +295,7 @@ bool openFreshLogFile() {
 
         logFile.println(
             "pkt_id,timestamp_ms,altitude_m,altitude_ft,temp_c,lm75_temp_c,pressure_hpa,"
-            "lat,lon,gps_fix,flags,bmp_ok,sd_ok,max_altitude_m,max_altitude_ft,"
+            "lat,lon,accel_z_ms2,gyro_x_dps,gps_fix,flags,bmp_ok,sd_ok,imu_ok,max_altitude_m,max_altitude_ft,"
             "apogee_detected,apogee_altitude_m,apogee_altitude_ft"
         );
         logFile.flush();
@@ -352,11 +441,26 @@ void setup() {
         displayBootStep("BMP280 FAILED");
     }
 
+    // ── Full I2C bus scan (shows all devices for diagnostics) ─────────
+    scanI2CBus(sensorI2C);
+
+#if HAS_MPU6500
+    // ── MPU6500 IMU (I2C, auto-detect 0x68/0x69) ────────────────────
+    displayBootStep("INIT MPU6500");
+    imu_ok = initMPU6500();
+    if (imu_ok) {
+        Serial.println("[MXR] MPU6500 IMU OK");
+    } else {
+        Serial.println("[MXR] MPU6500 IMU FAILED");
+    }
+#else
+    Serial.println("[MXR] MPU6500 IMU disabled in config");
+#endif
+
 #if HAS_LM75
     // ── LM75 probe & auto-address resolution ─────────────────────────
     displayBootStep("CHECK LM75");
     bool lm75_found = false;
-    // LM75 uses address range 0x48 to 0x4F. Let's auto-detect it.
     for (uint8_t addr = 0x48; addr <= 0x4F; addr++) {
         sensorI2C.beginTransmission(addr);
         if (sensorI2C.endTransmission() == 0) {
@@ -365,38 +469,41 @@ void setup() {
             break;
         }
     }
-
     if (lm75_found) {
         float lm75_test = readLM75();
         Serial.printf("[MXR] LM75 OK at address 0x%02X (%.1f°C)\n", lm75_actual_addr, lm75_test);
     } else {
-        Serial.println("[MXR] LM75 FAILED to respond (checked 0x48-0x4F)");
-        scanI2CBus(sensorI2C);
+        Serial.println("[MXR] LM75 FAILED (checked 0x48-0x4F)");
     }
 #else
     Serial.println("[MXR] LM75 temperature sensor disabled in config");
 #endif
 
 #if HAS_SD_CARD
-    // ── SD Card on custom SPI bus ────────────────────────────────────
+    // ── SD Card on custom SPI bus (with retry at progressive clock speeds) ──
     Serial.println("[MXR] Initializing SD card...");
     displayBootStep("INIT SD");
-    
-    // Explicitly set CS pin as output and pull high to avoid bus float before init
+
     pinMode(SD_CS, OUTPUT);
     digitalWrite(SD_CS, HIGH);
-    
-    // Initialize SPI bus without claiming CS pin directly, let SD library control it
     sdSPI.begin(SD_SCK, SD_MISO, SD_MOSI, -1);
-    
-    // Lower frequency to 4MHz for stability over jumper wires / matrix routing
-    if (SD.begin(SD_CS, sdSPI, 4000000)) {
-        if (openFreshLogFile()) {
-            sd_ok = true;
-            Serial.printf("[MXR] SD card OK, logging to %s\n", log_filename);
+
+    // Try multiple SPI frequencies — some SD cards / wiring only work at low speeds
+    const uint32_t sdFreqs[] = {4000000, 2000000, 1000000, 500000};
+    for (uint32_t freq : sdFreqs) {
+        Serial.printf("[MXR] SD trying %lu Hz...\n", (unsigned long)freq);
+        if (SD.begin(SD_CS, sdSPI, freq)) {
+            if (openFreshLogFile()) {
+                sd_ok = true;
+                Serial.printf("[MXR] SD card OK at %lu Hz, logging to %s\n", (unsigned long)freq, log_filename);
+            }
+            break;
         }
-    } else {
-        Serial.println("[MXR] SD card FAILED");
+        SD.end();
+        delay(100);
+    }
+    if (!sd_ok) {
+        Serial.println("[MXR] SD card FAILED at all frequencies");
     }
 #else
     Serial.println("[MXR] SD card disabled in config");
@@ -408,12 +515,14 @@ void setup() {
     display.setFont(u8g2_font_6x10_tf);
     display.drawStr(0, 10, "MACH-X RIDESHARE");
     char line[32];
-    snprintf(line, sizeof(line), "LIVE:%s BMP:%s",
-        ENABLE_RIDESHARE_LIVE ? (lora_ok ? "OK" : "XX") : "OFF",
-        baro_ok ? "OK" : "XX");
+    snprintf(line, sizeof(line), "L:%s B:%s I:%s",
+        ENABLE_RIDESHARE_LIVE ? (lora_ok ? "OK" : "XX") : "--",
+        baro_ok ? "OK" : "XX",
+        imu_ok ? "OK" : "XX");
     display.drawStr(0, 24, line);
-    snprintf(line, sizeof(line), "SD:%s GPS:WAIT",
-        sd_ok ? "OK" : "XX");
+    snprintf(line, sizeof(line), "SD:%s LM:%s GPS:WAIT",
+        sd_ok ? "OK" : "XX",
+        lm75_actual_addr != 0x48 || (lm75_actual_addr == 0x48) ? "??" : "XX");
     display.drawStr(0, 38, line);
     display.drawStr(0, 52, "READY");
     display.sendBuffer();
@@ -475,6 +584,12 @@ void loop() {
             }
         }
 
+#if HAS_MPU6500
+        // ── Read MPU6500 IMU ─────────────────────────────────────────
+        readMPU6500Data();
+        if (imu_ok) flags |= FLAG_IMU_OK;
+#endif
+
 #if HAS_LM75
         // If BMP280 temp failed, try LM75 as fallback
         lm75_temp = readLM75();
@@ -494,7 +609,7 @@ void loop() {
             gps_fix = true;
         }
 
-        // ── Launch detection (altitude-only, no IMU) ─────────────────
+        // ── Launch detection (altitude-based) ────────────────────────
         if (!launched) {
             float gain = alt - baseline_altitude;
             launch_consecutive = (gain > LAUNCH_ALT_DELTA_M) ? launch_consecutive + 1 : 0;
@@ -516,16 +631,18 @@ void loop() {
         if (sd_ok && logFile) flags |= FLAG_SD_OK;
 
 #if ENABLE_RIDESHARE_LIVE
-        // ── Build MXR3 packet string (live telemetry) ────────────────
-        char body[160];
-        char buffer[192];
+        // ── Build MXR4 packet string (live telemetry with IMU) ───────
+        char body[200];
+        char buffer[240];
         const float liveLm75 = isfinite(lm75_temp) ? lm75_temp : -999.0f;
-        snprintf(body, sizeof(body), "%u,%lu,%.2f,%.2f,%.2f,%.2f,%.6f,%.6f,%d,%u",
+        const float liveAz = imu_ok ? accel_z : -999.0f;
+        const float liveGx = imu_ok ? gyro_x  : -999.0f;
+        snprintf(body, sizeof(body), "%u,%lu,%.2f,%.2f,%.2f,%.2f,%.6f,%.6f,%.2f,%.2f,%d,%u",
                  (unsigned)pkt_id, (unsigned long)now, alt, temp, liveLm75, press,
-                 lat, lon, (int)last_rssi, (unsigned)flags);
+                 lat, lon, liveAz, liveGx, (int)last_rssi, (unsigned)flags);
         uint16_t crc = crc16Ccitt(
             reinterpret_cast<const uint8_t*>(body), strlen(body));
-        snprintf(buffer, sizeof(buffer), "MXR3:%s,%04X", body, crc);
+        snprintf(buffer, sizeof(buffer), "MXR4:%s,%04X", body, crc);
 
         // ── Transmit via LoRa ────────────────────────────────────────
         if (lora_ok) {
@@ -549,11 +666,12 @@ void loop() {
 
             char apogeeFieldFt[16] = "";
             if (isfinite(apogee_altitude_m)) snprintf(apogeeFieldFt, sizeof(apogeeFieldFt), "%.2f", apogee_altitude_m * 3.28084f);
-            logFile.printf("%u,%lu,%.2f,%.2f,%.2f,%s,%.2f,%.6f,%.6f,%u,%u,%u,%u,%.2f,%.2f,%u,%s,%s\n",
+            logFile.printf("%u,%lu,%.2f,%.2f,%.2f,%s,%.2f,%.6f,%.6f,%.2f,%.2f,%u,%u,%u,%u,%u,%.2f,%.2f,%u,%s,%s\n",
                 (unsigned)pkt_id, (unsigned long)now, alt, alt * 3.28084f, temp, lm75Field, press,
-                lat, lon, gps_fix ? 1u : 0u, (unsigned)flags,
+                lat, lon, accel_z, gyro_x, gps_fix ? 1u : 0u, (unsigned)flags,
                 bmp_ok_this_sample ? 1u : 0u,
                 (sd_ok && logFile) ? 1u : 0u,
+                imu_ok ? 1u : 0u,
                 max_altitude, max_altitude * 3.28084f, apogee_detected ? 1u : 0u, apogeeField, apogeeFieldFt);
             if (pkt_id % LOG_FLUSH_EVERY == 0) logFile.flush();
         }

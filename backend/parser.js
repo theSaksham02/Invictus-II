@@ -227,15 +227,17 @@ function normalizeOptionalTemperature(value) {
 
 // Rideshare v2: "MXR2:<pkt_id>,<timestamp_ms>,<altitude_m>,<temp_c>,<pressure_hpa>,<lat>,<lon>,<rssi_dbm>,<flags>,<crc16_ccitt_hex>\n".
 // Rideshare v3: "MXR3:<pkt_id>,<timestamp_ms>,<altitude_m>,<temp_c>,<lm75_temp_c>,<pressure_hpa>,<lat>,<lon>,<rssi_dbm>,<flags>,<crc16_ccitt_hex>\n".
+// Rideshare v4: "MXR4:<pkt_id>,<timestamp_ms>,<altitude_m>,<temp_c>,<lm75_temp_c>,<pressure_hpa>,<lat>,<lon>,<accel_z>,<gyro_x>,<rssi_dbm>,<flags>,<crc16_ccitt_hex>\n".
 // Legacy NRC lines are still accepted: "NRC:<same without flags/crc>" and "NRC2:<same with flags/crc>".
 function parseRideshare(line) {
   if (typeof line !== 'string') return null;
   const trimmed = line.trim();
+  const isMxrV4 = trimmed.startsWith('MXR4:');
   const isMxrV3 = trimmed.startsWith('MXR3:');
   const isMxrV2 = trimmed.startsWith('MXR2:');
   const isLegacyNrcV2 = trimmed.startsWith('NRC2:');
   const isLegacyNrc = trimmed.startsWith('NRC:');
-  const hasCrc = isMxrV3 || isMxrV2 || isLegacyNrcV2;
+  const hasCrc = isMxrV4 || isMxrV3 || isMxrV2 || isLegacyNrcV2;
   if (!hasCrc && !isLegacyNrc) return null;
 
   const body = trimmed.substring(hasCrc ? 5 : 4);
@@ -251,7 +253,8 @@ function parseRideshare(line) {
     const actualCrc = crc16Ccitt(Buffer.from(bodyWithoutCrc, 'utf8'));
     if (expectedCrc !== actualCrc) return null;
     nums = parseTelemetryNumberList(bodyWithoutCrc);
-    if (!nums || nums.length !== (isMxrV3 ? 10 : 9)) return null;
+    const expectedLen = isMxrV4 ? 12 : isMxrV3 ? 10 : 9;
+    if (!nums || nums.length !== expectedLen) return null;
   } else {
     nums = parseTelemetryNumberList(body);
     if (!nums || nums.length !== 8) return null;
@@ -260,22 +263,36 @@ function parseRideshare(line) {
   try {
     if (nums.some((value) => Number.isNaN(value))) return null;
 
+    const hasLm75 = isMxrV4 || isMxrV3;
+    const hasImu  = isMxrV4;
+
+    // Field index offsets depend on version
+    let idx = 4;
+    const lm75TempRaw = hasLm75 ? nums[idx++] : null;
+    const pressure    = nums[idx++];
+    const lat         = nums[idx++];
+    const lon         = nums[idx++];
+    const accelZ      = hasImu ? normalizeOptionalTemperature(nums[idx++]) : null;
+    const gyroX       = hasImu ? normalizeOptionalTemperature(nums[idx++]) : null;
+    const rssi        = Math.trunc(nums[idx++]);
+    const flags       = hasCrc ? Math.trunc(nums[idx++]) : 0;
+
     const parsed = {
       source: RIDESHARE_SOURCE,
-      protocol_version: isMxrV3 ? 3 : hasCrc ? 2 : 1,
-      protocol_prefix: isMxrV3 ? 'MXR3' : isMxrV2 ? 'MXR2' : isLegacyNrcV2 ? 'NRC2' : 'NRC',
+      protocol_version: isMxrV4 ? 4 : isMxrV3 ? 3 : hasCrc ? 2 : 1,
+      protocol_prefix: isMxrV4 ? 'MXR4' : isMxrV3 ? 'MXR3' : isMxrV2 ? 'MXR2' : isLegacyNrcV2 ? 'NRC2' : 'NRC',
       pkt_id: Math.trunc(nums[0]),
       timestamp_ms: Math.trunc(nums[1]),
       altitude_m: nums[2],
       temp_c: nums[3],
-      temp_c_1: isMxrV3 ? normalizeOptionalTemperature(nums[4]) : null,
-      pressure_hpa: isMxrV3 ? nums[5] : nums[4],
-      accel_z: null,
-      gyro_x: null,
-      lat: isMxrV3 ? nums[6] : nums[5],
-      lon: isMxrV3 ? nums[7] : nums[6],
-      rssi_dbm: Math.trunc(isMxrV3 ? nums[8] : nums[7]),
-      flags: hasCrc ? Math.trunc(isMxrV3 ? nums[9] : nums[8]) : 0,
+      temp_c_1: hasLm75 ? normalizeOptionalTemperature(lm75TempRaw) : null,
+      pressure_hpa: pressure,
+      accel_z: accelZ,
+      gyro_x: gyroX,
+      lat: lat,
+      lon: lon,
+      rssi_dbm: rssi,
+      flags: flags,
       raw: trimmed,
       received_at: Date.now()
     };

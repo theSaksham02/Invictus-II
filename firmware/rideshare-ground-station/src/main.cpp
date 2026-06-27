@@ -79,11 +79,12 @@ String joinCsvFields(String* fields, int count) {
 
 bool validateAndRestamp(String packet, int packetRssi, String& outLine) {
   packet.trim();
+  const bool isMxr4 = packet.startsWith("MXR4:");
   const bool isMxr3 = packet.startsWith("MXR3:");
   const bool isMxr2 = packet.startsWith("MXR2:");
-  if (!isMxr3 && !isMxr2) return false;
+  if (!isMxr4 && !isMxr3 && !isMxr2) return false;
 
-  const String prefix = isMxr3 ? "MXR3:" : "MXR2:";
+  const String prefix = isMxr4 ? "MXR4:" : isMxr3 ? "MXR3:" : "MXR2:";
   const String bodyWithCrc = packet.substring(5);
   const int lastComma = bodyWithCrc.lastIndexOf(',');
   if (lastComma < 0) return false;
@@ -96,11 +97,13 @@ bool validateAndRestamp(String packet, int packetRssi, String& outLine) {
   const uint16_t actual = crc16Ccitt(reinterpret_cast<const uint8_t*>(body.c_str()), body.length());
   if (expected != actual) return false;
 
-  String fields[10];
-  const int fieldCount = splitCsvFields(body, fields, 10);
-  if ((isMxr3 && fieldCount != 10) || (isMxr2 && fieldCount != 9)) return false;
+  const int maxFields = isMxr4 ? 12 : isMxr3 ? 10 : 9;
+  String fields[12];
+  const int fieldCount = splitCsvFields(body, fields, 12);
+  if (fieldCount != maxFields) return false;
 
-  const int rssiIndex = isMxr3 ? 8 : 7;
+  // RSSI field index: MXR4 has accel_z(8),gyro_x(9),rssi(10) ; MXR3 rssi(8) ; MXR2 rssi(7)
+  const int rssiIndex = isMxr4 ? 10 : isMxr3 ? 8 : 7;
   fields[rssiIndex] = String(packetRssi);
 
   const String restampedBody = joinCsvFields(fields, fieldCount);
