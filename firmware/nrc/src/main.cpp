@@ -129,32 +129,26 @@ SPIClass sdSPI(HSPI);
 File logFile;
 
 bool initSDCard() {
-  // 1. Hold LoRa CS high so it stays quiet
+  // 1. Hold LoRa CS high so it stays quiet on the other bus
   pinMode(LORA_NSS, OUTPUT);
   digitalWrite(LORA_NSS, HIGH);
 
-  // 2. Hold SD CS high
+  // 2. Explicitly override JTAG pin states before assigning to SPI
   pinMode(SD_CS, OUTPUT);
   digitalWrite(SD_CS, HIGH);
-
-  // 3. Pull‑up on MISO (prevents floating 0xFF)
+  pinMode(SD_SCK, OUTPUT);
+  pinMode(SD_MOSI, OUTPUT);
   pinMode(SD_MISO, INPUT_PULLUP);
 
-  // 4. Start the dedicated SPI bus. 
+  // 3. Start the dedicated SPI bus. 
   // Safety: Omitted SD_CS here to prevent hardware matrix lock-out on S3!
   sdSPI.begin(SD_SCK, SD_MISO, SD_MOSI);
-
-  // 5. Send >74 clock pulses while CS is HIGH (wakes the card into SPI mode)
-  digitalWrite(SD_CS, HIGH);
-  for (int i = 0; i < 10; i++) {
-    sdSPI.transfer(0xFF);
-  }
-
   delay(10);
 
-  // 6. Try mounting at 400 kHz, retry up to 3 times
+  // 4. Try mounting at 400 kHz, retry up to 3 times
+  // 400kHz is critical for breadboards/jumper wires due to capacitance
   for (int attempt = 1; attempt <= 3; attempt++) {
-    if (SD.begin(SD_CS, sdSPI, 400000)) {   // <--- note the low speed
+    if (SD.begin(SD_CS, sdSPI, 400000)) {
       Serial.println("[MXR] SD card OK");
       return true;
     }
