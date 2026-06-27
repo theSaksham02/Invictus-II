@@ -124,8 +124,7 @@ Adafruit_BMP280 bmp(&sensorI2C);
 TinyGPSPlus gps;
 HardwareSerial SerialGPS(1);     // UART1 for GPS
 
-// SD Card — custom SPI bus
-SPIClass sdSPI(FSPI); // Swapped to FSPI (SPI2) for ESP32-S3 SD stability
+// SD Card — custom SPI bus (uses global SPI object on FSPI host)
 File logFile;
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -460,8 +459,8 @@ void setup() {
     int sd_mosi = SD_MOSI;
 
     // ── Step 1: Raw CMD0 diagnostic probe (bypasses SD library) ─────
-    sdSPI.begin(SD_SCK, sd_miso, sd_mosi);
-    uint8_t r1 = probeRawCmd0(sdSPI, SD_CS);
+    SPI.begin(SD_SCK, sd_miso, sd_mosi);
+    uint8_t r1 = probeRawCmd0(SPI, SD_CS);
     Serial.printf("[MXR] SD probe (MOSI=%d, MISO=%d): R1=0x%02X\n", sd_mosi, sd_miso, r1);
 
     if (r1 == 0x01) {
@@ -478,27 +477,27 @@ void setup() {
 
     // ── Step 2: Full SD.begin() with idle clocks and retry ──────────
     // Reset SPI bus cleanly for SD library
-    sdSPI.end();
+    SPI.end();
     delay(100);
-    sdSPI.begin(SD_SCK, sd_miso, sd_mosi);
+    SPI.begin(SD_SCK, sd_miso, sd_mosi);
 
     bool sd_init = false;
     for (int attempt = 0; attempt < 3 && !sd_init; attempt++) {
         // SD Spec: 80 idle clocks with CS HIGH before CMD0
         digitalWrite(SD_CS, HIGH);
-        sdSPI.beginTransaction(SPISettings(400000, MSBFIRST, SPI_MODE0));
-        for (int i = 0; i < 10; i++) sdSPI.transfer(0xFF);
-        sdSPI.endTransaction();
+        SPI.beginTransaction(SPISettings(400000, MSBFIRST, SPI_MODE0));
+        for (int i = 0; i < 10; i++) SPI.transfer(0xFF);
+        SPI.endTransaction();
 
-        if (SD.begin(SD_CS, sdSPI, 400000)) {
+        if (SD.begin(SD_CS, SPI, 400000)) {
             sd_init = true;
             Serial.printf("[MXR] SD init OK (attempt %d)\n", attempt + 1);
         } else {
             Serial.printf("[MXR] SD init failed (attempt %d)\n", attempt + 1);
             SD.end();
-            sdSPI.end();
+            SPI.end();
             delay(500);
-            sdSPI.begin(SD_SCK, sd_miso, sd_mosi);
+            SPI.begin(SD_SCK, sd_miso, sd_mosi);
         }
     }
 
@@ -510,7 +509,7 @@ void setup() {
         Serial.println("[MXR] Entering 10-second hardware pin-toggle test...");
         Serial.println("[MXR] Use your multimeter to verify if CS, SCK, and MOSI alternate between 3.3V and 0V:");
         
-        sdSPI.end(); // Release SPI control to allow manual digital write
+        SPI.end(); // Release SPI control to allow manual digital write
         pinMode(SD_CS, OUTPUT);
         pinMode(SD_SCK, OUTPUT);
         pinMode(SD_MOSI, OUTPUT);
