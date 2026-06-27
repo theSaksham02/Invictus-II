@@ -452,52 +452,38 @@ void setup() {
     displayBootStep("INIT SD");
 
     pinMode(SD_CS, OUTPUT);
-    digitalWrite(SD_CS, HIGH);
+    digitalWrite(SD_CS, HIGH); // Ensure CS starts HIGH (deselect)
     delay(10);
 
-    int sd_miso = SD_MISO;
-    int sd_mosi = SD_MOSI;
+    // Initialize the global SPI peripheral with all 4 custom pins
+    SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
 
-    // ── Step 1: Raw CMD0 diagnostic probe (bypasses SD library) ─────
-    SPI.begin(SD_SCK, sd_miso, sd_mosi);
+    // ── Step 1: Raw CMD0 diagnostic probe ────────────────────────────
     uint8_t r1 = probeRawCmd0(SPI, SD_CS);
-    Serial.printf("[MXR] SD probe (MOSI=%d, MISO=%d): R1=0x%02X\n", sd_mosi, sd_miso, r1);
+    Serial.printf("[MXR] SD probe: R1=0x%02X\n", r1);
 
     if (r1 == 0x01) {
         Serial.println("[MXR] SD card responded to CMD0! SPI link confirmed.");
-    } else if (r1 == 0xFF) {
-        Serial.println("[MXR] No response. Hardware checklist:");
-        Serial.println("[MXR]   1. Is GND shared between SD module and Heltec?");
-        Serial.println("[MXR]   2. Is 3V3 reaching SD module VCC?");
-        Serial.println("[MXR]   3. Is SCK wire connected to GPIO 39?");
-        Serial.println("[MXR]   4. Is the microSD card inserted and FAT32?");
     } else {
-        Serial.printf("[MXR] Unexpected CMD0 response 0x%02X\n", r1);
+        Serial.println("[MXR] No response from SD card over SPI.");
     }
 
-    // ── Step 2: Full SD.begin() with idle clocks and retry ──────────
-    // Reset SPI bus cleanly for SD library
-    SPI.end();
-    delay(100);
-    SPI.begin(SD_SCK, sd_miso, sd_mosi);
-
+    // ── Step 2: Full SD.begin() ──────────────────────────────────────
     bool sd_init = false;
     for (int attempt = 0; attempt < 3 && !sd_init; attempt++) {
-        // SD Spec: 80 idle clocks with CS HIGH before CMD0
+        // SD Spec: 80 idle clocks with CS HIGH before CMD0 to enter SPI mode
         digitalWrite(SD_CS, HIGH);
         SPI.beginTransaction(SPISettings(400000, MSBFIRST, SPI_MODE0));
         for (int i = 0; i < 10; i++) SPI.transfer(0xFF);
         SPI.endTransaction();
 
+        // Call SD.begin using the configured global SPI instance
         if (SD.begin(SD_CS, SPI, 400000)) {
             sd_init = true;
             Serial.printf("[MXR] SD init OK (attempt %d)\n", attempt + 1);
         } else {
             Serial.printf("[MXR] SD init failed (attempt %d)\n", attempt + 1);
-            SD.end();
-            SPI.end();
-            delay(500);
-            SPI.begin(SD_SCK, sd_miso, sd_mosi);
+            delay(200);
         }
     }
 
@@ -506,28 +492,7 @@ void setup() {
         Serial.printf("[MXR] SD card OK, logging to %s\n", log_filename);
     } else {
         Serial.println("[MXR] SD card FAILED");
-        Serial.println("[MXR] Entering 10-second hardware pin-toggle test...");
-        Serial.println("[MXR] Use your multimeter to verify if CS, SCK, and MOSI alternate between 3.3V and 0V:");
-        
-        SPI.end(); // Release SPI control to allow manual digital write
-        pinMode(SD_CS, OUTPUT);
-        pinMode(SD_SCK, OUTPUT);
-        pinMode(SD_MOSI, OUTPUT);
-        
-        for (int i = 0; i < 5; i++) {
-            Serial.printf("[MXR]   Cycle %d: Setting pins HIGH (3.3V)... Check CS, SCK, MOSI pads on SD module\n", i + 1);
-            digitalWrite(SD_CS, HIGH);
-            digitalWrite(SD_SCK, HIGH);
-            digitalWrite(SD_MOSI, HIGH);
-            delay(1000);
-            
-            Serial.printf("[MXR]   Cycle %d: Setting pins LOW (0V)... Check CS, SCK, MOSI pads on SD module\n", i + 1);
-            digitalWrite(SD_CS, LOW);
-            digitalWrite(SD_SCK, LOW);
-            digitalWrite(SD_MOSI, LOW);
-            delay(1000);
-        }
-        Serial.println("[MXR] Pin-toggle test complete.");
+        digitalWrite(SD_CS, HIGH); // Hold CS HIGH to avoid selecting the card
     }
 #else
     Serial.println("[MXR] SD card disabled in config");
