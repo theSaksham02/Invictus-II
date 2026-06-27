@@ -28,6 +28,7 @@
 #include <SD.h>
 #include <U8g2lib.h>
 #include <esp_task_wdt.h>
+#include "driver/gpio.h"
 
 #ifndef ENABLE_RIDESHARE_LIVE
   #ifdef ENABLE_NRC_LIVE
@@ -339,6 +340,12 @@ uint8_t probeRawCmd0(SPIClass &spi, uint8_t cs) {
 //  SETUP
 // ═══════════════════════════════════════════════════════════════════════════
 void setup() {
+    // ── Release JTAG pins to GPIO/SPI matrix ─────────────────────────
+    gpio_reset_pin((gpio_num_t)SD_CS);
+    gpio_reset_pin((gpio_num_t)SD_SCK);
+    gpio_reset_pin((gpio_num_t)SD_MOSI);
+    gpio_reset_pin((gpio_num_t)SD_MISO);
+
     Serial.begin(115200);
     delay(500);
     Serial.println("[MXR] Booting...");
@@ -449,7 +456,7 @@ void setup() {
     digitalWrite(SD_CS, HIGH);
     delay(10);
 
-    int sd_miso = SD_MISO;  // Track active pin mapping (may swap)
+    int sd_miso = SD_MISO;
     int sd_mosi = SD_MOSI;
 
     // ── Step 1: Raw CMD0 diagnostic probe (bypasses SD library) ─────
@@ -457,32 +464,14 @@ void setup() {
     uint8_t r1 = probeRawCmd0(sdSPI, SD_CS);
     Serial.printf("[MXR] SD probe (MOSI=%d, MISO=%d): R1=0x%02X\n", sd_mosi, sd_miso, r1);
 
-    if (r1 == 0xFF) {
-        // No response — try swapping MOSI/MISO (common module mislabel)
-        Serial.println("[MXR] No response. Trying MOSI/MISO swap...");
-        sdSPI.end();
-        sd_miso = SD_MOSI;  // swap
-        sd_mosi = SD_MISO;  // swap
-        sdSPI.begin(SD_SCK, sd_miso, sd_mosi);
-        r1 = probeRawCmd0(sdSPI, SD_CS);
-        Serial.printf("[MXR] SD probe SWAPPED (MOSI=%d, MISO=%d): R1=0x%02X\n", sd_mosi, sd_miso, r1);
-
-        if (r1 != 0xFF) {
-            Serial.println("[MXR] *** MOSI/MISO SWAPPED on PCB! Auto-corrected. ***");
-        } else {
-            Serial.println("[MXR] No response either way. Hardware checklist:");
-            Serial.println("[MXR]   1. Is GND shared between SD module and Heltec?");
-            Serial.println("[MXR]   2. Is 3V3 reaching SD module VCC?");
-            Serial.println("[MXR]   3. Is SCK wire connected to GPIO 39?");
-            Serial.println("[MXR]   4. Is the microSD card inserted and FAT32?");
-            // Restore original mapping for SD.begin() attempt
-            sd_miso = SD_MISO;
-            sd_mosi = SD_MOSI;
-            sdSPI.end();
-            sdSPI.begin(SD_SCK, sd_miso, sd_mosi);
-        }
-    } else if (r1 == 0x01) {
+    if (r1 == 0x01) {
         Serial.println("[MXR] SD card responded to CMD0! SPI link confirmed.");
+    } else if (r1 == 0xFF) {
+        Serial.println("[MXR] No response. Hardware checklist:");
+        Serial.println("[MXR]   1. Is GND shared between SD module and Heltec?");
+        Serial.println("[MXR]   2. Is 3V3 reaching SD module VCC?");
+        Serial.println("[MXR]   3. Is SCK wire connected to GPIO 39?");
+        Serial.println("[MXR]   4. Is the microSD card inserted and FAT32?");
     } else {
         Serial.printf("[MXR] Unexpected CMD0 response 0x%02X\n", r1);
     }
@@ -574,11 +563,10 @@ void setup() {
 void loop() {
     esp_task_wdt_reset();
 
-    // ── Continuously feed GPS parser & echo raw characters for debugging ──
+    // ── Continuously feed GPS parser ──
     while (SerialGPS.available() > 0) {
         char c = SerialGPS.read();
         gps.encode(c);
-        Serial.print(c); // Echo raw byte to monitor
     }
 
     static uint32_t last_tx = 0;
