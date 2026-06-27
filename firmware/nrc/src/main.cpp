@@ -305,36 +305,6 @@ void startGPS() {
     SerialGPS.begin(9600, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN); // safe fallback
 }
 
-// Raw CMD0 probe — bypasses SD library to test bare SPI communication
-uint8_t probeRawCmd0(SPIClass &spi, uint8_t cs) {
-    // SD Spec: 74+ idle clocks with CS HIGH before first command
-    digitalWrite(cs, HIGH);
-    spi.beginTransaction(SPISettings(400000, MSBFIRST, SPI_MODE0));
-    for (int i = 0; i < 10; i++) spi.transfer(0xFF);  // 80 clocks
-    spi.endTransaction();
-    delay(2);
-
-    // Send CMD0 (GO_IDLE_STATE): 0x40 0x00 0x00 0x00 0x00 0x95
-    spi.beginTransaction(SPISettings(400000, MSBFIRST, SPI_MODE0));
-    digitalWrite(cs, LOW);
-    delayMicroseconds(50);
-    spi.transfer(0x40);
-    spi.transfer(0x00);
-    spi.transfer(0x00);
-    spi.transfer(0x00);
-    spi.transfer(0x00);
-    spi.transfer(0x95);  // Valid CRC for CMD0
-
-    // Poll for R1 response (up to 16 bytes)
-    uint8_t r1 = 0xFF;
-    for (int i = 0; i < 16 && r1 == 0xFF; i++) {
-        r1 = spi.transfer(0xFF);
-    }
-    digitalWrite(cs, HIGH);
-    spi.endTransaction();
-    return r1;
-}
-
 // ═══════════════════════════════════════════════════════════════════════════
 //  SETUP
 // ═══════════════════════════════════════════════════════════════════════════
@@ -353,6 +323,11 @@ void setup() {
     pinMode(VEXT_PIN, OUTPUT);
     digitalWrite(VEXT_PIN, LOW);   // LOW = Vext ON for Heltec V3
     delay(50);
+
+    Serial.println("\n[MXR] *** HARDWARE WARNING ***");
+    Serial.println("[MXR] Ensure SD Card VCC is connected to the MAIN 3V3 pin, NOT the Vext pin!");
+    Serial.println("[MXR] Vext cannot supply enough current for an SD Card (draws up to 200mA).");
+    Serial.println("[MXR] If connected to Vext, the voltage will collapse to 0V during init!\n");
 
     // ── OLED display init ────────────────────────────────────────────
     display.begin();
@@ -453,37 +428,25 @@ void setup() {
 
     pinMode(SD_CS, OUTPUT);
     digitalWrite(SD_CS, HIGH); // Ensure CS starts HIGH (deselect)
+    pinMode(SD_MISO, INPUT_PULLUP); // Add pullup in case it's floating
     delay(10);
 
-    // Initialize the global SPI peripheral with all 4 custom pins
-    SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
+    // Initialize the global SPI peripheral with custom pins.
+    // CRITICAL FIX: Do NOT pass SD_CS here. The SPI hardware must not claim the CS pin,
+    // otherwise the SD library cannot control it via standard digitalWrite.
+    SPI.begin(SD_SCK, SD_MISO, SD_MOSI);
 
-    // ── Step 1: Raw CMD0 diagnostic probe ────────────────────────────
-    uint8_t r1 = probeRawCmd0(SPI, SD_CS);
-    Serial.printf("[MXR] SD probe: R1=0x%02X\n", r1);
-
-    if (r1 == 0x01) {
-        Serial.println("[MXR] SD card responded to CMD0! SPI link confirmed.");
-    } else {
-        Serial.println("[MXR] No response from SD card over SPI.");
-    }
-
-    // ── Step 2: Full SD.begin() ──────────────────────────────────────
+    // ── Call SD.begin using the configured global SPI instance ───────
     bool sd_init = false;
     for (int attempt = 0; attempt < 3 && !sd_init; attempt++) {
-        // SD Spec: 80 idle clocks with CS HIGH before CMD0 to enter SPI mode
-        digitalWrite(SD_CS, HIGH);
-        SPI.beginTransaction(SPISettings(400000, MSBFIRST, SPI_MODE0));
-        for (int i = 0; i < 10; i++) SPI.transfer(0xFF);
-        SPI.endTransaction();
-
-        // Call SD.begin using the configured global SPI instance
-        if (SD.begin(SD_CS, SPI, 400000)) {
+        // Use default frequency (4MHz). The ESP32 SD library handles the 400kHz 
+        // initialization phase automatically. Do not force 400kHz here.
+        if (SD.begin(SD_CS, SPI)) {
             sd_init = true;
             Serial.printf("[MXR] SD init OK (attempt %d)\n", attempt + 1);
         } else {
             Serial.printf("[MXR] SD init failed (attempt %d)\n", attempt + 1);
-            delay(200);
+            delay(250);
         }
     }
 
@@ -590,6 +553,17 @@ void loop() {
             last_gps_ms = now;
             flags |= FLAG_GPS_FIX;
             gps_fix = true;
+        } else {
+            // Print educational message if indoors
+            static uint32_t last_gps_warn = 0;
+            if (now - last_gps_warn > 5000) {
+                last_gps_warn = now;
+                Serial.println("\n[MXR] *** GPS WARNING ***");
+                Serial.println("[MXR] GPS uses satellites in SPACE, NOT WiFi/Cellular networks!");
+                Serial.println("[MXR] The 'network' does not matter. The roof BLOCKS the space signal.");
+                Serial.println("[MXR] You MUST go outside under the open sky to get exact Lat/Lon.");
+                Serial.printf("[MXR] Satellites in view: %d\n\n", gps.satellites.value());
+            }
         }
 
         // ── Launch detection (altitude-based) ────────────────────────
