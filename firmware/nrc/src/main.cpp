@@ -145,8 +145,8 @@ bool initSDCard() {
   pinMode(SD_MOSI, OUTPUT);
   pinMode(SD_MISO, INPUT_PULLUP);
 
-  // 4. Start the default SPI bus with custom pins
-  SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
+  // 4. Start the default SPI bus with custom pins (Omit SD_CS to prevent hardware lock)
+  SPI.begin(SD_SCK, SD_MISO, SD_MOSI);
   delay(10);
 
   // 4. Try mounting at 400 kHz, retry up to 3 times
