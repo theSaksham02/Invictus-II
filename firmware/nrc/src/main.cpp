@@ -551,6 +551,14 @@ void loop() {
         Serial.println(buffer);
 #endif
 
+        // ── GPS character diagnostic print (every 10s) ────────────────
+        static uint32_t last_gps_diag = 0;
+        if (millis() - last_gps_diag > 10000) {
+            last_gps_diag = millis();
+            Serial.printf("[MXR] GPS Diagnostic: Chars Processed = %lu, Sentences with Fix = %lu, Failed Checksums = %lu\n",
+                (unsigned long)gps.charsProcessed(), (unsigned long)gps.sentencesWithFix(), (unsigned long)gps.failedChecksum());
+        }
+
 #if HAS_SD_CARD
         // ── Log to SD card ───────────────────────────────────────────
         if (sd_ok && logFile) {
