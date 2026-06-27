@@ -167,17 +167,33 @@ uint16_t crc16Ccitt(const uint8_t* data, size_t len) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-//  LM75 TEMPERATURE FALLBACK
+//  LM75 TEMPERATURE FALLBACK & I2C SCANNING
 // ═══════════════════════════════════════════════════════════════════════════
-#define LM75_ADDR 0x48
+uint8_t lm75_actual_addr = 0x48;
 
 float readLM75() {
-    sensorI2C.beginTransmission(LM75_ADDR);
+    sensorI2C.beginTransmission(lm75_actual_addr);
     if (sensorI2C.endTransmission() != 0) return NAN;
-    sensorI2C.requestFrom((uint8_t)LM75_ADDR, (uint8_t)2);
+    sensorI2C.requestFrom((uint8_t)lm75_actual_addr, (uint8_t)2);
     if (sensorI2C.available() < 2) return NAN;
     int16_t raw = (sensorI2C.read() << 8) | sensorI2C.read();
     return (float)(raw >> 5) * 0.125f;
+}
+
+void scanI2CBus(TwoWire &i2c) {
+    Serial.println("[MXR] Scanning I2C bus...");
+    int nDevices = 0;
+    for (byte address = 1; address < 127; address++) {
+        i2c.beginTransmission(address);
+        byte error = i2c.endTransmission();
+        if (error == 0) {
+            Serial.printf("[MXR] I2C device found at address 0x%02X\n", address);
+            nDevices++;
+        }
+    }
+    if (nDevices == 0) {
+        Serial.println("[MXR] No I2C devices found");
+    }
 }
 
 bool openFreshLogFile() {
@@ -337,11 +353,26 @@ void setup() {
     }
 
 #if HAS_LM75
-    // ── LM75 probe ──────────────────────────────────────────────────
+    // ── LM75 probe & auto-address resolution ─────────────────────────
     displayBootStep("CHECK LM75");
-    float lm75_test = readLM75();
-    Serial.printf("[MXR] LM75 %s (%.1f°C)\n",
-        isfinite(lm75_test) ? "OK" : "FAILED", lm75_test);
+    bool lm75_found = false;
+    // LM75 uses address range 0x48 to 0x4F. Let's auto-detect it.
+    for (uint8_t addr = 0x48; addr <= 0x4F; addr++) {
+        sensorI2C.beginTransmission(addr);
+        if (sensorI2C.endTransmission() == 0) {
+            lm75_actual_addr = addr;
+            lm75_found = true;
+            break;
+        }
+    }
+
+    if (lm75_found) {
+        float lm75_test = readLM75();
+        Serial.printf("[MXR] LM75 OK at address 0x%02X (%.1f°C)\n", lm75_actual_addr, lm75_test);
+    } else {
+        Serial.println("[MXR] LM75 FAILED to respond (checked 0x48-0x4F)");
+        scanI2CBus(sensorI2C);
+    }
 #else
     Serial.println("[MXR] LM75 temperature sensor disabled in config");
 #endif
@@ -350,8 +381,16 @@ void setup() {
     // ── SD Card on custom SPI bus ────────────────────────────────────
     Serial.println("[MXR] Initializing SD card...");
     displayBootStep("INIT SD");
-    sdSPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
-    if (SD.begin(SD_CS, sdSPI)) {
+    
+    // Explicitly set CS pin as output and pull high to avoid bus float before init
+    pinMode(SD_CS, OUTPUT);
+    digitalWrite(SD_CS, HIGH);
+    
+    // Initialize SPI bus without claiming CS pin directly, let SD library control it
+    sdSPI.begin(SD_SCK, SD_MISO, SD_MOSI, -1);
+    
+    // Lower frequency to 4MHz for stability over jumper wires / matrix routing
+    if (SD.begin(SD_CS, sdSPI, 4000000)) {
         if (openFreshLogFile()) {
             sd_ok = true;
             Serial.printf("[MXR] SD card OK, logging to %s\n", log_filename);
