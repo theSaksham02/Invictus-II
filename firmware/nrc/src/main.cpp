@@ -416,24 +416,22 @@ void setup() {
     displayBootStep("INIT SD");
 
     pinMode(SD_CS, OUTPUT);
-    digitalWrite(SD_CS, HIGH); // Hold CS high to avoid floating states
+    digitalWrite(SD_CS, HIGH); // Deselect card — SD.begin() will manage CS from here
     delay(10);
 
-    sdSPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
+    sdSPI.begin(SD_SCK, SD_MISO, SD_MOSI);  // *** NO CS PIN *** — SD.begin() manages CS via GPIO
 
     bool sd_init = false;
     for (int attempt = 0; attempt < 3 && !sd_init; attempt++) {
-        digitalWrite(SD_CS, LOW);
-        delay(50);
-        if (SD.begin(SD_CS, sdSPI, 400000)) { // 400kHz for initialization
+        if (SD.begin(SD_CS, sdSPI, 400000)) { // 400kHz for reliable initialization
             sd_init = true;
-            digitalWrite(SD_CS, HIGH);
             Serial.printf("[MXR] SD init OK (attempt %d)\n", attempt + 1);
         } else {
-            digitalWrite(SD_CS, HIGH);
             Serial.printf("[MXR] SD init failed (attempt %d)\n", attempt + 1);
             SD.end();
-            delay(200);
+            sdSPI.end();           // Full SPI bus reset
+            delay(500);            // Let card power-cycle internally
+            sdSPI.begin(SD_SCK, SD_MISO, SD_MOSI);  // Reinitialize SPI bus cleanly
         }
     }
 
