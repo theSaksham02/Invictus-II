@@ -332,6 +332,8 @@ void setup() {
     Serial.println("[MXR] Initializing GPS UART1...");
     displayBootStep("INIT GPS");
     SerialGPS.begin(9600, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
+    delay(100);
+    Serial.printf("[MXR] GPS UART1 pins: RX=%d, TX=%d\n", GPS_RX_PIN, GPS_TX_PIN);
     Serial.println("[MXR] GPS UART1 started");
 
     // ── I2C bus for BMP280 + LM75 ────────────────────────────────────
@@ -393,11 +395,26 @@ void setup() {
     delay(10);
 
     sdSPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
-    if (SD.begin(SD_CS, sdSPI, 1000000)) { // Initialize at 1MHz for bench wire stability
-        if (openFreshLogFile()) {
-            sd_ok = true;
-            Serial.printf("[MXR] SD card OK, logging to %s\n", log_filename);
+
+    bool sd_init = false;
+    for (int attempt = 0; attempt < 3 && !sd_init; attempt++) {
+        digitalWrite(SD_CS, LOW);
+        delay(50);
+        if (SD.begin(SD_CS, sdSPI, 400000)) { // 400kHz for initialization
+            sd_init = true;
+            digitalWrite(SD_CS, HIGH);
+            Serial.printf("[MXR] SD init OK (attempt %d)\n", attempt + 1);
+        } else {
+            digitalWrite(SD_CS, HIGH);
+            Serial.printf("[MXR] SD init failed (attempt %d)\n", attempt + 1);
+            SD.end();
+            delay(200);
         }
+    }
+
+    if (sd_init && openFreshLogFile()) {
+        sd_ok = true;
+        Serial.printf("[MXR] SD card OK, logging to %s\n", log_filename);
     } else {
         Serial.println("[MXR] SD card FAILED");
     }
@@ -434,9 +451,11 @@ void setup() {
 void loop() {
     esp_task_wdt_reset();
 
-    // ── Continuously feed GPS parser ─────────────────────────────────
+    // ── Continuously feed GPS parser & echo raw characters for debugging ──
     while (SerialGPS.available() > 0) {
-        gps.encode(SerialGPS.read());
+        char c = SerialGPS.read();
+        gps.encode(c);
+        Serial.print(c); // Echo raw byte to monitor
     }
 
     static uint32_t last_tx = 0;
