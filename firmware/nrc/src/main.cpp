@@ -41,7 +41,7 @@
 //  HARDWARE CONFIGURATION OPTIONS
 // ═══════════════════════════════════════════════════════════════════════════
 #define HAS_SD_CARD     1   // Set to 1 if SD card module is physically connected
-#define HAS_LM75        1   // Set to 1 if LM75 temperature sensor is physically connected
+#define HAS_LM75        0   // Set to 0 (disabled) to match the final 6-component PCB configuration
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  PIN DEFINITIONS — Heltec WiFi LoRa 32 V3 (verified against circuit)
