@@ -140,9 +140,9 @@ bool initSDCard() {
   pinMode(SD_MOSI, OUTPUT);
   pinMode(SD_MISO, INPUT_PULLUP);
 
-  // 3. Start the dedicated SPI bus. 
-  // Safety: Omitted SD_CS here to prevent hardware matrix lock-out on S3!
-  sdSPI.begin(SD_SCK, SD_MISO, SD_MOSI);
+  // 3. Start the dedicated SPI bus.
+  // Passing SD_CS is critical here because newer ESP32 cores (3.0+) use hardware-managed CS.
+  sdSPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
   delay(10);
 
   // 4. Try mounting at 400 kHz, retry up to 3 times
