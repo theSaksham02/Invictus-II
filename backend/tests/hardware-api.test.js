@@ -238,7 +238,7 @@ test('Mach-X Rideshare firmware uses MXR3 live telemetry prefix', () => {
   assert.match(firmware, /"MXR3:%s,%04X"/);
   assert.doesNotMatch(firmware, /"NRC2:%s,%04X"/);
   assert.match(platformio, /-DENABLE_RIDESHARE_LIVE=1/);
-  assert.match(platformio, /-DARDUINO_USB_CDC_ON_BOOT=1/);
+  assert.match(platformio, /-DARDUINO_USB_CDC_ON_BOOT=0/);
 });
 
 test('Mach-X Rideshare ground receiver matches flight LoRa settings and forwards MXR telemetry', () => {
@@ -248,13 +248,13 @@ test('Mach-X Rideshare ground receiver matches flight LoRa settings and forwards
   assert.match(firmware, /#define LORA_FREQ\s+868\.0/);
   assert.match(firmware, /#define LORA_BW\s+125\.0/);
   assert.match(firmware, /#define LORA_SF\s+9/);
-  assert.match(firmware, /#define LORA_CR\s+7/);
+  assert.match(firmware, /#define LORA_CR\s+5/);
   assert.match(firmware, /#define LORA_SW\s+0x12/);
   assert.match(firmware, /#define LORA_PREAMBLE\s+8/);
   assert.match(firmware, /packet\.startsWith\("MXR3:"\)/);
   assert.match(firmware, /packet\.startsWith\("MXR2:"\)/);
   assert.match(firmware, /Serial\.println\(outLine\)/);
-  assert.match(platformio, /-DARDUINO_USB_CDC_ON_BOOT=1/);
+  assert.match(platformio, /-DARDUINO_USB_CDC_ON_BOOT=0/);
 });
 
 test('Mach-X Rideshare sensor health uses payload circuit pin mappings', () => {
