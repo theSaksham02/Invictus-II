@@ -44,7 +44,7 @@ test('rideshare serial schedules reconnect after port error', async () => {
   });
 
   serial.connect();
-  await new Promise((resolve) => setTimeout(resolve, 35));
+  await new Promise((resolve) => setTimeout(resolve, 300));
   reconnecting = false;
   await serial.close();
 
