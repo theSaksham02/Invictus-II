@@ -111,8 +111,9 @@
 //  GLOBAL OBJECTS
 // ═══════════════════════════════════════════════════════════════════════════
 
-// LoRa radio — SX1262 via RadioLib (using default SPI/FSPI as requested)
-SX1262 radio = new Module(LORA_NSS, LORA_DIO1, LORA_RST, LORA_BUSY, SPI);
+// LoRa radio — SX1262 via RadioLib (using HSPI to keep FSPI free for SD)
+SPIClass loraSPI(HSPI);
+SX1262 radio = new Module(LORA_NSS, LORA_DIO1, LORA_RST, LORA_BUSY, loraSPI);
 
 // OLED display — U8g2, HW I2C on internal OLED bus
 U8G2_SSD1306_128X64_NONAME_F_HW_I2C display(U8G2_R0, OLED_RST, OLED_SCL, OLED_SDA);
@@ -123,9 +124,7 @@ Adafruit_BMP280 bmp(&sensorI2C);
 TinyGPSPlus gps;
 HardwareSerial SerialGPS(1);     // UART1 for GPS
 
-// ================== SD CARD (HSPI — SEPARATE FROM LoRa) ==================
-// Use HSPI (SPI3_HOST) so LoRa can stay on FSPI (default SPI)
-SPIClass sdSPI(HSPI);
+// ================== SD CARD (FSPI — default SPI object) ==================
 File logFile;
 
 bool initSDCard() {
@@ -146,15 +145,14 @@ bool initSDCard() {
   pinMode(SD_MOSI, OUTPUT);
   pinMode(SD_MISO, INPUT_PULLUP);
 
-  // 3. Start the dedicated SPI bus.
-  // Passing SD_CS is critical here because newer ESP32 cores (3.0+) use hardware-managed CS.
-  sdSPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
+  // 4. Start the default SPI bus with custom pins
+  SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
   delay(10);
 
   // 4. Try mounting at 400 kHz, retry up to 3 times
   // 400kHz is critical for breadboards/jumper wires due to capacitance
   for (int attempt = 1; attempt <= 3; attempt++) {
-    if (SD.begin(SD_CS, sdSPI, 400000)) {
+    if (SD.begin(SD_CS, SPI, 400000)) {
       Serial.println("[MXR] SD card OK");
       return true;
     }
@@ -380,7 +378,7 @@ void setup() {
     // ── LoRa SX1262 init (live telemetry) ───────────────────────────
     Serial.println("[MXR] Initializing LoRa SX1262...");
     displayBootStep("INIT LORA");
-    SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_NSS);
+    loraSPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_NSS);
     // Initialize LoRa radio with default parameters, then configure individually
     int state = radio.begin();
     if (state == RADIOLIB_ERR_NONE) {
