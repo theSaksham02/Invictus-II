@@ -61,10 +61,10 @@
 #define I2C_SCL         2
 
 // GPS on UART (ESP32-S3 UART1)
-// NEO-6M TX → GPIO7 (ESP reads FROM GPS on this pin)
-// NEO-6M RX → GPIO6 (ESP writes TO GPS on this pin)
-#define GPS_RX_PIN      7   // ESP32 receives GPS data on this GPIO
-#define GPS_TX_PIN      6   // ESP32 transmits to GPS on this GPIO
+// NEO-6M TX -> GPIO6 (ESP reads FROM GPS on this pin)
+// NEO-6M RX -> GPIO7 (ESP writes TO GPS on this pin)
+#define GPS_RX_PIN      6   // ESP32 receives GPS data on this GPIO
+#define GPS_TX_PIN      7   // ESP32 transmits to GPS on this GPIO
 
 // SD Card on SPI
 #define SD_CS           38
