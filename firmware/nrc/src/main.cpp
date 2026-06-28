@@ -415,7 +415,7 @@ void startGPS() {
             return;
         }
     }
-    Serial.println("[MXR] GPS: no NMEA on any baud -> check NEO-6M TX->GPIO7 wire / 5V / antenna");
+    Serial.printf("[MXR] GPS: no NMEA on any baud -> check NEO-6M TX->GPIO%d wire / power / antenna\n", GPS_RX_PIN);
     SerialGPS.begin(9600, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN); // safe fallback
 }
 
