@@ -768,7 +768,7 @@ void loop() {
         // ── Build MXR3 packet string (live telemetry) ────────────────
         char body[160];
         char buffer[192];
-        const float liveLm75 = isfinite(lm75_temp) ? lm75_temp : -999.0f;
+        const float liveLm75 = isfinite(lm75_temp) ? lm75_temp : temp;
         bool livePacketReady = false;
         const int bodyLen = snprintf(body, sizeof(body), "%u,%lu,%.2f,%.2f,%.2f,%.2f,%.6f,%.6f,%d,%u",
             (unsigned)pkt_id, (unsigned long)now, alt, temp, liveLm75, press,
