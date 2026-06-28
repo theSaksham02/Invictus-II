@@ -57,7 +57,7 @@ WiFi LoRa 32(V3) [abbrev. LoRa] CONNECTIONS
 SDCardModule1 CONNECTIONS
 
 1 SDCardModule1 to GROUND
-2 SDCardModule1 to 5V_BUS3
+2 SDCardModule1 to 5V_BUS
 
 
 Neo-6m1 CONNECTIONS

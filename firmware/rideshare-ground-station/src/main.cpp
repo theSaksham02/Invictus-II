@@ -34,6 +34,7 @@ SX1262 radio = new Module(LORA_NSS, LORA_DIO1, LORA_RST, LORA_BUSY, loraSPI);
 
 static constexpr size_t MAX_PACKET_LEN = 191;
 static constexpr size_t MAX_BODY_LEN = 159;
+uint32_t rxRestartFailures = 0;
 
 uint16_t crc16Ccitt(const uint8_t* data, size_t len) {
   uint16_t crc = 0xFFFF;
@@ -61,7 +62,8 @@ bool isHex4(const char* value) {
 int splitCsvFields(char* body, char** fields, int maxFields) {
   int count = 0;
   char* cursor = body;
-  while (cursor && count < maxFields) {
+  while (cursor) {
+    if (count >= maxFields || *cursor == '\0') return -1;
     fields[count++] = cursor;
     char* comma = strchr(cursor, ',');
     if (!comma) return count;
@@ -79,6 +81,48 @@ bool buildCsvBody(char** fields, int count, char* out, size_t outLen) {
     const int written = snprintf(out + used, outLen - used, "%s%s", i > 0 ? "," : "", fields[i]);
     if (written < 0 || (size_t)written >= outLen - used) return false;
     used += (size_t)written;
+  }
+  return true;
+}
+
+bool isStrictNumericField(const char* value) {
+  if (!value || *value == '\0') return false;
+  const char* cursor = value;
+  if (*cursor == '+' || *cursor == '-') cursor++;
+
+  bool sawDigit = false;
+  bool sawDot = false;
+  while (*cursor) {
+    if (isdigit((unsigned char)*cursor)) {
+      sawDigit = true;
+      cursor++;
+      continue;
+    }
+    if (*cursor == '.' && !sawDot) {
+      sawDot = true;
+      cursor++;
+      continue;
+    }
+    break;
+  }
+
+  if ((*cursor == 'e' || *cursor == 'E') && sawDigit) {
+    cursor++;
+    if (*cursor == '+' || *cursor == '-') cursor++;
+    bool sawExponentDigit = false;
+    while (isdigit((unsigned char)*cursor)) {
+      sawExponentDigit = true;
+      cursor++;
+    }
+    if (!sawExponentDigit) return false;
+  }
+
+  return sawDigit && *cursor == '\0';
+}
+
+bool fieldsAreStrictNumeric(char** fields, int count) {
+  for (int i = 0; i < count; i++) {
+    if (!isStrictNumericField(fields[i])) return false;
   }
   return true;
 }
@@ -118,8 +162,9 @@ bool validateAndRestamp(char* packet, int packetRssi, char* outLine, size_t outL
 
   char* fields[10];
   const int fieldCount = splitCsvFields(bodyCopy, fields, 10);
+  if (fieldCount <= 0) return false;
   if ((isMxr3 && fieldCount != 10) || (isMxr2 && fieldCount != 9)) return false;
-  if (strchr(fields[fieldCount - 1], ',') != nullptr) return false;
+  if (!fieldsAreStrictNumeric(fields, fieldCount)) return false;
 
   const int rssiIndex = isMxr3 ? 8 : 7;
   char rssiField[8];
@@ -135,6 +180,22 @@ bool validateAndRestamp(char* packet, int packetRssi, char* outLine, size_t outL
 
   const int written = snprintf(outLine, outLineLen, "%s%s,%04X", prefix, restampedBody, restampedCrc);
   return written > 0 && (size_t)written < outLineLen;
+}
+
+void restartReceiveMode() {
+  int state = radio.startReceive();
+  if (state == RADIOLIB_ERR_NONE) return;
+
+  rxRestartFailures++;
+  Serial.printf("[MXR-GS] receive restart failed: %d failures=%lu\n",
+    state,
+    static_cast<unsigned long>(rxRestartFailures));
+
+  delay(20);
+  const int retryState = radio.startReceive();
+  if (retryState != RADIOLIB_ERR_NONE) {
+    Serial.printf("[MXR-GS] receive restart retry failed: %d\n", retryState);
+  }
 }
 
 void setup() {
@@ -187,7 +248,6 @@ void loop() {
     } else {
       Serial.printf("[MXR-GS] receive error: %d\n", state);
     }
-    // Restart continuous receive mode
-    radio.startReceive();
+    restartReceiveMode();
   }
 }

@@ -152,6 +152,55 @@ test('POST /api/upload-sd skips RIDESHARE rows with contradictory SD health colu
   });
 });
 
+test('POST /api/upload-sd accepts RIDESHARE uint32 packet ids from long bench runs', async () => {
+  await withMockedServer(async (baseUrl, captured) => {
+    const csv = [
+      'pkt_id,timestamp_ms,altitude_m,temp_c,lm75_temp_c,pressure_hpa,lat,lon,gps_fix,flags,bmp_ok,sd_ok',
+      '70000,70000000,42.50,22.00,21.80,1008.20,25.204800,55.270800,1,44,1,1'
+    ].join('\n');
+
+    const fd = new FormData();
+    fd.append('source', 'RIDESHARE');
+    fd.append('file', new Blob([csv], { type: 'text/csv' }), 'long-bench.csv');
+
+    const res = await fetch(`${baseUrl}/api/upload-sd`, {
+      method: 'POST',
+      body: fd
+    });
+    const body = await res.json();
+
+    assert.equal(res.status, 201);
+    assert.equal(body.inserted, 1);
+    assert.equal(body.skipped, 0);
+    assert.equal(captured.packets[0].pkt_id, 70000);
+  });
+});
+
+test('POST /api/upload-sd rejects CANSAT packet ids outside uint16 frame range', async () => {
+  await withMockedServer(async (baseUrl, captured) => {
+    const csv = [
+      'pkt_id,timestamp_ms,mission_mode,altitude_m,temp_c,pressure_hpa,temp_c_1,temp_c_2,temp_c_3,temp_c_4,accel_z,gyro_x,lat,lon,rssi_dbm,flags',
+      '1,1000,DEPLOYED_SCIENCE,40.00,22.10,1008.30,21.7,21.8,22.0,22.1,1.0,0.0,25.204800,55.270800,-81,60',
+      '70000,1000,DEPLOYED_SCIENCE,42.50,22.00,1008.20,21.8,21.9,22.1,22.2,1.0,0.0,25.204800,55.270800,-80,60'
+    ].join('\n');
+
+    const fd = new FormData();
+    fd.append('source', 'CANSAT');
+    fd.append('file', new Blob([csv], { type: 'text/csv' }), 'bad-cansat-id.csv');
+
+    const res = await fetch(`${baseUrl}/api/upload-sd`, {
+      method: 'POST',
+      body: fd
+    });
+    const body = await res.json();
+
+    assert.equal(res.status, 201);
+    assert.equal(body.inserted, 1);
+    assert.equal(body.skipped, 1);
+    assert.deepEqual(captured.packets.map((packet) => packet.pkt_id), [1]);
+  });
+});
+
 test('POST /api/upload-sd aliases legacy NRC source to RIDESHARE', async () => {
   await withMockedServer(async (baseUrl, captured) => {
     const csv = [
@@ -217,6 +266,33 @@ test('POST /api/upload-sd skips out-of-range telemetry rows instead of importing
       '2,2000,999999.00,22.00,1008.20,1.20,0.20,0,0,-69,41',
       '3,3000,10.00,22.00,9999.20,1.20,0.20,0,0,-69,41',
       '4,4000,11.00,22.00,1008.20,99.20,0.20,0,0,-69,41'
+    ].join('\n');
+
+    const fd = new FormData();
+    fd.append('source', 'CANSAT');
+    fd.append('file', new Blob([csv], { type: 'text/csv' }), 'cansat.csv');
+
+    const res = await fetch(`${baseUrl}/api/upload-sd`, {
+      method: 'POST',
+      body: fd
+    });
+    const body = await res.json();
+
+    assert.equal(res.status, 201);
+    assert.equal(body.inserted, 1);
+    assert.equal(body.skipped, 3);
+    assert.deepEqual(captured.packets.map((packet) => packet.pkt_id), [1]);
+  });
+});
+
+test('POST /api/upload-sd skips rows with partial numeric cells instead of truncating them', async () => {
+  await withMockedServer(async (baseUrl, captured) => {
+    const csv = [
+      'pkt_id,timestamp_ms,altitude_m,temp_c,pressure_hpa,accel_z,gyro_x,lat,lon,rssi_dbm,flags',
+      '1,1000,0.00,22.10,1013.20,1.00,0.10,0,0,-70,40',
+      '2,2000ms,12.00,22.00,1008.20,1.20,0.20,0,0,-69,41',
+      '3,3000,13.00m,22.00,1008.20,1.20,0.20,0,0,-69,41',
+      '4,4000,14.00,22.00,1008.20,1.20,0.20,0,0,-69,41x'
     ].join('\n');
 
     const fd = new FormData();

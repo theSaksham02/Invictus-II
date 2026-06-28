@@ -21,6 +21,7 @@ const {
   TELEMETRY_LIMITS,
   decodeFlags,
   deriveSensorHealth,
+  packetIdLimitForSource,
   packetWarnings
 } = require('./cansat-hardware');
 const { RIDESHARE_SOURCE, normalizeSource } = require('./source-aliases');
@@ -198,18 +199,41 @@ function getCsvValue(row, lookup, names) {
   return undefined;
 }
 
+const STRICT_FLOAT_PATTERN = /^[+-]?(?:(?:\d+(?:\.\d*)?)|(?:\.\d+))(?:[eE][+-]?\d+)?$/;
+const STRICT_INT_PATTERN = /^[+-]?\d+$/;
+
+function parseStrictCsvFloat(value) {
+  const normalized = String(value ?? '').trim();
+  if (!STRICT_FLOAT_PATTERN.test(normalized)) return NaN;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : NaN;
+}
+
+function parseStrictCsvInt(value) {
+  const normalized = String(value ?? '').trim();
+  if (!STRICT_INT_PATTERN.test(normalized)) return NaN;
+  const parsed = Number(normalized);
+  return Number.isSafeInteger(parsed) ? parsed : NaN;
+}
+
+function parseRequiredCsvFloat(row, lookup, names) {
+  return parseStrictCsvFloat(getCsvValue(row, lookup, names));
+}
+
+function parseRequiredCsvInt(row, lookup, names) {
+  return parseStrictCsvInt(getCsvValue(row, lookup, names));
+}
+
 function parseOptionalCsvFloat(row, lookup, names) {
   const rawValue = getCsvValue(row, lookup, names);
   if (rawValue === undefined || rawValue === null || String(rawValue).trim() === '') return null;
-  const parsed = Number.parseFloat(rawValue);
-  return Number.isFinite(parsed) ? parsed : NaN;
+  return parseStrictCsvFloat(rawValue);
 }
 
 function parseOptionalCsvInt(row, lookup, names) {
   const rawValue = getCsvValue(row, lookup, names);
   if (rawValue === undefined || rawValue === null || String(rawValue).trim() === '') return null;
-  const parsed = Number.parseInt(rawValue, 10);
-  return Number.isInteger(parsed) ? parsed : NaN;
+  return parseStrictCsvInt(rawValue);
 }
 
 function parseOptionalTemperatureCsvFloat(row, lookup, names) {
@@ -221,6 +245,11 @@ function parseOptionalTemperatureCsvFloat(row, lookup, names) {
 function inTelemetryRange(value, field) {
   const limit = TELEMETRY_LIMITS[field];
   if (!limit) return true;
+  return Number.isFinite(value) && value >= limit.min && value <= limit.max;
+}
+
+function packetIdInTelemetryRange(value, source) {
+  const limit = packetIdLimitForSource(source);
   return Number.isFinite(value) && value >= limit.min && value <= limit.max;
 }
 
@@ -249,31 +278,31 @@ function parseSdPacketRow(row, lookup, raw, receivedAt, source) {
   const rssiRaw = getCsvValue(row, lookup, ['rssi_dbm', 'rssi']);
   const rssiDbm = rssiRaw === undefined || String(rssiRaw).trim() === ''
     ? 0
-    : Number.parseInt(rssiRaw, 10);
+    : parseStrictCsvInt(rssiRaw);
   const protocolRaw = getCsvValue(row, lookup, ['protocol_version', 'version']);
   const protocolVersion = protocolRaw === undefined || String(protocolRaw).trim() === ''
     ? null
-    : Number.parseInt(protocolRaw, 10);
+    : parseStrictCsvInt(protocolRaw);
   const missionMode = parseMissionModeCsv(row, lookup);
   const packet = {
     source,
     protocol_version: Number.isInteger(protocolVersion) ? protocolVersion : (source === 'CANSAT' && missionMode.id !== null ? 3 : null),
     mission_mode_id: missionMode.id,
     mission_mode: missionMode.name,
-    pkt_id: Number.parseInt(getCsvValue(row, lookup, ['pkt_id', 'packet_id', 'id']), 10),
-    timestamp_ms: Number.parseInt(getCsvValue(row, lookup, ['timestamp_ms', 'time_ms', 'timestamp']), 10),
-    altitude_m: Number.parseFloat(getCsvValue(row, lookup, ['altitude_m', 'alt_m', 'altitude'])),
-    temp_c: Number.parseFloat(getCsvValue(row, lookup, ['temp_c', 'temperature_c', 'temperature'])),
+    pkt_id: parseRequiredCsvInt(row, lookup, ['pkt_id', 'packet_id', 'id']),
+    timestamp_ms: parseRequiredCsvInt(row, lookup, ['timestamp_ms', 'time_ms', 'timestamp']),
+    altitude_m: parseRequiredCsvFloat(row, lookup, ['altitude_m', 'alt_m', 'altitude']),
+    temp_c: parseRequiredCsvFloat(row, lookup, ['temp_c', 'temperature_c', 'temperature']),
     temp_c_1: parseOptionalTemperatureCsvFloat(row, lookup, ['temp_c_1', 'temperature_c_1', 'lm75_temp_c']),
     temp_c_2: parseOptionalTemperatureCsvFloat(row, lookup, ['temp_c_2', 'temperature_c_2']),
     temp_c_3: parseOptionalTemperatureCsvFloat(row, lookup, ['temp_c_3', 'temperature_c_3']),
     temp_c_4: parseOptionalTemperatureCsvFloat(row, lookup, ['temp_c_4', 'temperature_c_4']),
-    pressure_hpa: Number.parseFloat(getCsvValue(row, lookup, ['pressure_hpa', 'pressure'])),
+    pressure_hpa: parseRequiredCsvFloat(row, lookup, ['pressure_hpa', 'pressure']),
     accel_z: accelZ,
     gyro_x: gyroX,
-    lat: Number.parseFloat(getCsvValue(row, lookup, ['lat', 'latitude'])),
-    lon: Number.parseFloat(getCsvValue(row, lookup, ['lon', 'lng', 'longitude'])),
-    flags: Number.parseInt(getCsvValue(row, lookup, ['flags', 'flag']), 10),
+    lat: parseRequiredCsvFloat(row, lookup, ['lat', 'latitude']),
+    lon: parseRequiredCsvFloat(row, lookup, ['lon', 'lng', 'longitude']),
+    flags: parseRequiredCsvInt(row, lookup, ['flags', 'flag']),
     rssi_dbm: rssiDbm,
     raw,
     received_at: receivedAt
@@ -294,7 +323,7 @@ function parseSdPacketRow(row, lookup, raw, receivedAt, source) {
 
   return (
     Number.isInteger(packet.pkt_id) &&
-    inTelemetryRange(packet.pkt_id, 'pkt_id') &&
+    packetIdInTelemetryRange(packet.pkt_id, source) &&
     Number.isInteger(packet.timestamp_ms) &&
     inTelemetryRange(packet.timestamp_ms, 'timestamp_ms') &&
     inTelemetryRange(packet.altitude_m, 'altitude_m') &&

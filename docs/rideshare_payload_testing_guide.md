@@ -2,6 +2,8 @@
 
 This guide covers the Mach-X Rideshare payload. The flight Heltec sends live `MXR3:` telemetry over SX1262 LoRa to a second Heltec ground receiver, which forwards validated `MXR3:`/`MXR2:` lines over USB serial to the backend. The payload still records the full flight to SD with a latched OLED apogee as the recovery backup.
 
+For a zero-prior-knowledge, command-by-command setup checklist, use [rideshare_zero_knowledge_setup.md](./rideshare_zero_knowledge_setup.md).
+
 ## Team Roles
 
 | Role | Responsibility |
@@ -20,7 +22,7 @@ The Mach-X Rideshare and CanSat links are separate and must both be connected wh
 | `CANSAT` | STM32 + RFM69HCW binary frames | CanSat RFM69 ground receiver | `SERIAL_PORT_CANSAT` |
 | `RIDESHARE` | Heltec WiFi LoRa 32 V3 + SX1262 ASCII `MXR3` | second Heltec WiFi LoRa 32 V3 running `firmware/rideshare-ground-station` | `SERIAL_PORT_RIDESHARE` |
 
-The ESP32-CAM is not part of the live telemetry path. It records video locally to the camera SD card and is recovered after flight.
+The ESP32-CAM is not part of the live telemetry path. It is powered continuously from `5V_BUS`, records video locally to the camera SD card, and is recovered after flight.
 
 ## Hardware Checklist
 
@@ -34,10 +36,11 @@ The ESP32-CAM is not part of the live telemetry path. It records video locally t
 | Pin 27 | GPIO39 | SD Card SCK | SPI clock |
 | Pin 29 | GPIO41 | SD Card MOSI | SPI data out |
 | Pin 30 | GPIO42 | SD Card MISO | SPI data in |
-| Pin 2 | 5V | 5V_BUS | Main power rail |
+| Pin 2 | 5V | 5V_BUS + SD card VCC | Main power rail and SD module power |
+| Pin 35 | 3V3 | BMP280 VCC + LM75 VCC | 3.3 V sensor rail |
 | Pin 1 | GND | GROUND | Common ground |
 
-Before powering the Heltec from the flight battery, verify the LM2596 buck converter output is exactly 5V with a multimeter. Insert a FAT32-formatted SD card before every powered test.
+Before powering the Heltec from the flight battery, verify the LM2596 buck converter output is exactly 5V with a multimeter. Also verify the SD card module VCC pin and ESP32-CAM 5V pin are both on `5V_BUS`; the SD SPI signal pins remain ESP32 3.3 V GPIO. Insert a FAT32-formatted SD card before every powered test.
 
 ## Firmware Flash
 
@@ -128,7 +131,9 @@ After the test:
 
 ## Live Ground Station
 
-Start the backend before powered radio tests or launch with both active receivers connected:
+Start the backend before powered radio tests or launch with both active receivers connected. BMP280, LM75, GPS, SD health, flags, altitude, pressure, temperature, and RSSI are transmitted live over `MXR3`; camera video is not transmitted live and is recovered from the ESP32-CAM SD card.
+
+The payload logs to SD and prints USB telemetry every second by default. RF airtime is a separate constraint: before flight, verify the allowed 868 MHz frequency, power, airborne-use, and duty-cycle rules for the launch location. If a duty-cycle limit applies, set `LORA_DUTY_LIMIT_PPM` in `firmware/nrc/platformio.ini` before flashing; for example, `10000` enforces an approximate 1% RF airtime budget from measured `radio.transmit()` duration.
 
 ```bash
 node backend/server.js

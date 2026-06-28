@@ -41,6 +41,10 @@ test('Mach-X Rideshare enters ASCENDING from altitude gain and repeated upward t
   processPacket(packet('RIDESHARE', 1, 1000, 0), emit);
   processPacket(packet('RIDESHARE', 2, 2000, 6), emit);
   processPacket(packet('RIDESHARE', 3, 3000, 12), emit);
+  assert.equal(states.RIDESHARE.phase, 'GROUNDED');
+  processPacket(packet('RIDESHARE', 4, 4000, 18), emit);
+  assert.equal(states.RIDESHARE.phase, 'GROUNDED');
+  processPacket(packet('RIDESHARE', 5, 5000, 24), emit);
 
   assert.equal(states.RIDESHARE.phase, 'ASCENDING');
   assert.equal(events.length, 1);
@@ -111,10 +115,38 @@ test('legacy NRC source still aliases into rideshare phase behavior', () => {
   processPacket(packet('NRC', 1, 1000, 0), emit);
   processPacket(packet('NRC', 2, 2000, 6), emit);
   processPacket(packet('NRC', 3, 3000, 12), emit);
+  processPacket(packet('NRC', 4, 4000, 18), emit);
+  processPacket(packet('NRC', 5, 5000, 24), emit);
 
   assert.equal(states.NRC.phase, 'ASCENDING');
   assert.equal(events.length, 1);
   assert.equal(events[0].payload.source, 'NRC');
+});
+
+test('Mach-X Rideshare apogee logic ignores single-sample dip', () => {
+  resetState('RIDESHARE');
+  const events = [];
+  const emit = (event, payload) => events.push({ event, payload });
+
+  [
+    [1, 1000, 0],
+    [2, 2000, 6],
+    [3, 3000, 12],
+    [4, 4000, 18],
+    [5, 5000, 30],
+    [6, 6000, 50]
+  ].forEach(([pktId, timestampMs, altitudeM]) => {
+    processPacket(packet('RIDESHARE', pktId, timestampMs, altitudeM), emit);
+  });
+
+  assert.equal(states.RIDESHARE.phase, 'ASCENDING');
+
+  processPacket(packet('RIDESHARE', 7, 7000, 44), emit);
+  assert.equal(states.RIDESHARE.phase, 'ASCENDING');
+
+  processPacket(packet('RIDESHARE', 8, 8000, 52), emit);
+  assert.equal(states.RIDESHARE.phase, 'ASCENDING');
+  assert.equal(states.RIDESHARE.descent_confirm_count, 0);
 });
 
 test('MACHX progresses through PAD, LAUNCHED, ASCENT, APOGEE, DESCENT, MAIN, and LANDED', () => {

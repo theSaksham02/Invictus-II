@@ -191,6 +191,25 @@ test('serial disables MACHX live ingest when it collides with CANSAT port', asyn
   });
 });
 
+test('serial gives Mach-X Rideshare live ingest priority when MACHX uses the same port', async () => {
+  await withMockedSerialModule({
+    ENABLE_RIDESHARE_LIVE: 'true',
+    ENABLE_MACHX_LIVE: 'true',
+    SERIAL_PORT_CANSAT: '/dev/cansat',
+    SERIAL_PORT_RIDESHARE: '/dev/shared-rideshare',
+    SERIAL_PORT_MACHX: '/dev/shared-rideshare'
+  }, async (serial, openedPaths) => {
+    serial.initSerial(() => {});
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.deepEqual(openedPaths.sort(), ['/dev/cansat', '/dev/shared-rideshare']);
+    const signal = serial.getSignalState();
+    assert.equal(signal.RIDESHARE.connected, true);
+    assert.equal(signal.MACHX.live_enabled, true);
+    assert.equal(signal.MACHX.connected, false);
+    assert.equal(signal.MACHX.diagnostics.last_error, 'MACHX disabled because RIDESHARE and MACHX are configured with the same serial port');
+  });
+});
+
 test('serial shutdown clears all source connection flags', async () => {
   await withMockedSerialModule({
     ENABLE_RIDESHARE_LIVE: 'true',
@@ -236,6 +255,56 @@ test('serial tracks rideshare packet-loss diagnostics without affecting CanSat c
     assert.equal(signal.RIDESHARE.diagnostics.last_protocol_prefix, 'MXR3');
     assert.equal(signal.RIDESHARE.diagnostics.last_rssi_dbm, -80);
     assert.equal(Number.isFinite(signal.RIDESHARE.diagnostics.last_packet_age_ms), true);
+  });
+});
+
+test('serial treats rideshare uint32 packet-id rollover as in-order telemetry', async () => {
+  await withMockedSerialModule({
+    ENABLE_RIDESHARE_LIVE: 'true',
+    ENABLE_MACHX_LIVE: 'false',
+    SERIAL_PORT_CANSAT: '/dev/cansat',
+    SERIAL_PORT_RIDESHARE: '/dev/rideshare'
+  }, async (serial, openedPaths, parsers) => {
+    serial.initSerial(() => {});
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.deepEqual(openedPaths.sort(), ['/dev/cansat', '/dev/rideshare']);
+
+    parsers['/dev/rideshare'].emit('data', makeMxr3Line(0xfffffffe, 1000, 10));
+    parsers['/dev/rideshare'].emit('data', makeMxr3Line(0xffffffff, 2000, 11));
+    parsers['/dev/rideshare'].emit('data', makeMxr3Line(0, 3000, 12));
+    parsers['/dev/rideshare'].emit('data', makeMxr3Line(1, 4000, 13));
+
+    const signal = serial.getSignalState();
+    assert.equal(signal.RIDESHARE.diagnostics.packets, 4);
+    assert.equal(signal.RIDESHARE.diagnostics.missed_packets, 0);
+    assert.equal(signal.RIDESHARE.diagnostics.duplicate_packets, 0);
+    assert.equal(signal.RIDESHARE.diagnostics.out_of_order_packets, 0);
+    assert.equal(signal.RIDESHARE.diagnostics.last_pkt_id, 1);
+    assert.equal(signal.RIDESHARE.diagnostics.last_timestamp_ms, 4000);
+  });
+});
+
+test('serial does not mistake rideshare timestamp rollback for packet-id rollover', async () => {
+  await withMockedSerialModule({
+    ENABLE_RIDESHARE_LIVE: 'true',
+    ENABLE_MACHX_LIVE: 'false',
+    SERIAL_PORT_CANSAT: '/dev/cansat',
+    SERIAL_PORT_RIDESHARE: '/dev/rideshare'
+  }, async (serial, openedPaths, parsers) => {
+    serial.initSerial(() => {});
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.deepEqual(openedPaths.sort(), ['/dev/cansat', '/dev/rideshare']);
+
+    parsers['/dev/rideshare'].emit('data', makeMxr3Line(0xffffffff, 5000, 10));
+    parsers['/dev/rideshare'].emit('data', makeMxr3Line(0, 1000, 11));
+
+    const signal = serial.getSignalState();
+    assert.equal(signal.RIDESHARE.diagnostics.packets, 2);
+    assert.equal(signal.RIDESHARE.diagnostics.missed_packets, 0);
+    assert.equal(signal.RIDESHARE.diagnostics.duplicate_packets, 0);
+    assert.equal(signal.RIDESHARE.diagnostics.out_of_order_packets, 1);
+    assert.equal(signal.RIDESHARE.diagnostics.last_pkt_id, 0xffffffff);
+    assert.equal(signal.RIDESHARE.diagnostics.last_timestamp_ms, 5000);
   });
 });
 

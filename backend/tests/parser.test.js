@@ -13,6 +13,7 @@ const {
 
 const FIXTURE_DIR = path.join(__dirname, 'fixtures', 'hardware');
 const SKIP_REASON = 'No real PCB hardware parser fixtures captured yet. Run tests/capture-hardware-fixtures.js with connected PCBs.';
+const REQUIRE_HARDWARE_FIXTURES = process.env.REQUIRE_HARDWARE_FIXTURES === 'true';
 
 function buildCansatV2(overrides = {}) {
   const values = {
@@ -106,16 +107,28 @@ function readFixtureLines(extension) {
     });
 }
 
-test('parseRideshare accepts captured legacy NRC PCB telemetry lines', (t) => {
-  const lines = readFixtureLines('.nrc');
+function readFixtureLinesForExtensions(extensions) {
+  return extensions.flatMap((extension) => readFixtureLines(extension));
+}
+
+function requireOrSkipFixture(t, lines, sourceLabel) {
   if (lines.length === 0) {
+    if (REQUIRE_HARDWARE_FIXTURES) {
+      assert.fail(`${sourceLabel} hardware fixture is required. ${SKIP_REASON}`);
+    }
     t.skip(SKIP_REASON);
-    return;
+    return false;
   }
+  return true;
+}
+
+test('parseRideshare accepts captured Mach-X Rideshare PCB telemetry lines', (t) => {
+  const lines = readFixtureLinesForExtensions(['.mxr', '.nrc']);
+  if (!requireOrSkipFixture(t, lines, 'Mach-X Rideshare')) return;
 
   for (const line of lines) {
     const parsed = parseRideshare(line);
-    assert.ok(parsed, `failed to parse NRC fixture: ${line}`);
+    assert.ok(parsed, `failed to parse rideshare fixture: ${line}`);
     assert.equal(parsed.source, 'RIDESHARE');
     assert.equal(parsed.accel_z, null);
     assert.equal(parsed.gyro_x, null);
@@ -148,6 +161,15 @@ test('parseRideshare validates MXR3 with LM75 temperature', () => {
   assert.equal(parsed.temp_c_1, 19.75);
   assert.equal(parsed.pressure_hpa, 1010);
   assert.equal(parsed.rssi_dbm, -80);
+});
+
+test('parseRideshare accepts firmware uint32 packet ids', () => {
+  const body = '70000,70000000,12.50,20.00,19.75,1010.00,25.000000,55.000000,-80,40';
+  const crcHex = crc16Ccitt(Buffer.from(body, 'utf8')).toString(16).padStart(4, '0').toUpperCase();
+  const parsed = parseRideshare(`MXR3:${body},${crcHex}`);
+
+  assert.ok(parsed, 'parseRideshare should accept ESP32 uint32 pkt_id values beyond uint16');
+  assert.equal(parsed.pkt_id, 70000);
 });
 
 test('parseRideshare maps missing MXR3 LM75 sentinel to null', () => {
@@ -184,10 +206,7 @@ test('parseRideshare keeps NRC2 legacy prefix compatible', () => {
 
 test('parseCansat accepts captured CanSat PCB frames', (t) => {
   const hexFrames = readFixtureLines('.cansat.hex');
-  if (hexFrames.length === 0) {
-    t.skip(SKIP_REASON);
-    return;
-  }
+  if (!requireOrSkipFixture(t, hexFrames, 'CanSat')) return;
 
   for (const hex of hexFrames) {
     const parsed = parseCansat(Buffer.from(hex, 'hex'));
@@ -317,8 +336,24 @@ test('parseRideshare rejects malformed CRC and physically impossible values', ()
   assert.equal(parseRideshare(`MXR3:${missingMxr3FieldBody},${missingMxr3FieldCrc}`), null);
 });
 
+test('parseRideshare rejects partial and fractional integer fields even with valid CRC', () => {
+  const fractionalIdBody = '1.5,1000,12.50,20.00,19.75,1010.00,25.000000,55.000000,-80,40';
+  const fractionalIdCrc = crc16Ccitt(Buffer.from(fractionalIdBody, 'utf8')).toString(16).padStart(4, '0').toUpperCase();
+  assert.equal(parseRideshare(`MXR3:${fractionalIdBody},${fractionalIdCrc}`), null);
+
+  const trailingTextBody = '1,1000ms,12.50,20.00,19.75,1010.00,25.000000,55.000000,-80,40';
+  const trailingTextCrc = crc16Ccitt(Buffer.from(trailingTextBody, 'utf8')).toString(16).padStart(4, '0').toUpperCase();
+  assert.equal(parseRideshare(`MXR3:${trailingTextBody},${trailingTextCrc}`), null);
+});
+
 test('parseMachX rejects non-finite and out-of-range values even with valid CRC', () => {
   const body = '1,2000,15.50,1013.25,25.00,26.00,26.10,25.90,26.20,Infinity,0.01,45.000000,-120.000000,-85,1';
+  const crcHex = crc16Ccitt(Buffer.from(body, 'utf8')).toString(16).padStart(4, '0').toUpperCase();
+  assert.equal(parseMachX(`MACHX2:${body},${crcHex}`), null);
+});
+
+test('parseMachX rejects fractional integer fields even with valid CRC', () => {
+  const body = '1,2000,15.50,1013.25,25.00,26.00,26.10,25.90,26.20,9.81,0.01,45.000000,-120.000000,-85.5,1';
   const crcHex = crc16Ccitt(Buffer.from(body, 'utf8')).toString(16).padStart(4, '0').toUpperCase();
   assert.equal(parseMachX(`MACHX2:${body},${crcHex}`), null);
 });

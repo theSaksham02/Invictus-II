@@ -2,8 +2,6 @@
 #include "Arduino.h"
 #include "FS.h"
 #include "SD_MMC.h"
-#include "soc/soc.h"
-#include "soc/rtc_cntl_reg.h"
 
 // ==========================================
 // CAMERA PIN MAPPINGS (AI-Thinker Board)
@@ -37,13 +35,37 @@
 // ==========================================
 String recDirectory = "";
 uint32_t frameCount = 0;
+bool recordingFaultLatched = false;
+uint32_t recordingFaultCount = 0;
+uint32_t lastFaultBlinkMs = 0;
+const char* recordingFaultReason = "NONE";
+
+void latchRecordingFault(const char* reason) {
+  recordingFaultLatched = true;
+  recordingFaultReason = reason;
+  recordingFaultCount++;
+  Serial.printf("[ESP32-CAM] RECORDING FAULT: %s count=%lu\n",
+    recordingFaultReason,
+    (unsigned long)recordingFaultCount);
+}
+
+void serviceFaultLed() {
+  if (!recordingFaultLatched) return;
+  if (millis() - lastFaultBlinkMs < 2000) return;
+
+  lastFaultBlinkMs = millis();
+  for (uint8_t i = 0; i < 3; i++) {
+    digitalWrite(RED_LED_PIN, LOW);
+    delay(80);
+    digitalWrite(RED_LED_PIN, HIGH);
+    delay(80);
+  }
+}
 
 void setup() {
-  // Disable brownout detector to prevent sudden resets during SD Card writes or camera init
-  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
-
   Serial.begin(115200);
   Serial.println("\n[ESP32-CAM] Autonomous Camera Starting...");
+  Serial.println("[ESP32-CAM] Brownout detector remains enabled; fix 5V rail sag instead of masking it.");
 
   // Initialize LEDs
   pinMode(RED_LED_PIN, OUTPUT);
@@ -119,15 +141,28 @@ void setup() {
   Serial.println("[ESP32-CAM] MicroSD Card initialized");
 
   // Create a new recording directory to separate different launches/power cycles
-  int recNum = 1;
-  while (true) {
+  bool recordingDirReady = false;
+  for (int recNum = 1; recNum <= 999; recNum++) {
     String candidateDir = "/rec_" + String(recNum);
     if (!SD_MMC.exists(candidateDir)) {
-      recDirectory = candidateDir;
-      SD_MMC.mkdir(recDirectory);
+      if (SD_MMC.mkdir(candidateDir)) {
+        recDirectory = candidateDir;
+        recordingDirReady = true;
+      } else {
+        latchRecordingFault("DIR_CREATE");
+      }
       break;
     }
-    recNum++;
+  }
+
+  if (!recordingDirReady) {
+    if (!recordingFaultLatched) latchRecordingFault("DIR_LIMIT");
+    while (true) {
+      digitalWrite(RED_LED_PIN, LOW);
+      delay(700);
+      digitalWrite(RED_LED_PIN, HIGH);
+      delay(700);
+    }
   }
   Serial.printf("[ESP32-CAM] Recording folder created: %s\n", recDirectory.c_str());
   
@@ -138,16 +173,26 @@ void setup() {
 }
 
 void loop() {
+  serviceFaultLed();
+
   // Capture a frame from the camera buffer
   camera_fb_t * fb = esp_camera_fb_get();
   if (!fb) {
     Serial.println("[ESP32-CAM] Camera capture failed");
+    latchRecordingFault("CAPTURE");
     return;
   }
 
   // Construct frame path: e.g., "/rec_003/frame_00142.jpg"
   char framePath[64];
-  sprintf(framePath, "%s/frame_%05d.jpg", recDirectory.c_str(), frameCount);
+  const int pathLen = snprintf(framePath, sizeof(framePath), "%s/frame_%05lu.jpg",
+    recDirectory.c_str(),
+    (unsigned long)frameCount);
+  if (pathLen <= 0 || pathLen >= (int)sizeof(framePath)) {
+    latchRecordingFault("PATH_FORMAT");
+    esp_camera_fb_return(fb);
+    return;
+  }
 
   // Turn on status LED briefly to indicate active write
   digitalWrite(RED_LED_PIN, LOW); 
@@ -156,6 +201,7 @@ void loop() {
   File file = SD_MMC.open(framePath, FILE_WRITE);
   if (!file) {
     Serial.printf("[ESP32-CAM] Failed to open file for write: %s\n", framePath);
+    latchRecordingFault("OPEN_WRITE");
   } else {
     size_t written = file.write(fb->buf, fb->len);
     file.close(); // Close immediately to prevent corruption on power loss!
@@ -165,6 +211,9 @@ void loop() {
       frameCount++;
     } else {
       Serial.printf("[ESP32-CAM] File write incomplete: only %d of %d written\n", written, fb->len);
+      SD_MMC.remove(framePath);
+      frameCount++;
+      latchRecordingFault("SHORT_WRITE");
     }
   }
 

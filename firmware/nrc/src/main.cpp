@@ -13,7 +13,7 @@
  * Pin mapping — per physical circuit (verified 2026-05-30):
  *   BMP280  → I2C:  SDA=GPIO1,  SCL=GPIO2   (addr 0x76, SDO→GND)
  *   LM75    → I2C:  SDA=GPIO1,  SCL=GPIO2   (addr 0x48, shared bus)
- *   NEO-6M  → UART: RX=GPIO6  (ESP TX→GPS RX), TX=GPIO7  (GPS TX→ESP RX)
+ *   NEO-6M  → UART: RX=GPIO7  (GPS TX→ESP RX), TX=GPIO6  (ESP TX→GPS RX)
  *   SD Card → SPI:  CS=GPIO38, SCK=GPIO39, MOSI=GPIO41, MISO=GPIO42
  *   LoRa    → (internal) NSS=8, DIO1=14, RST=12, BUSY=13, SCK=9, MISO=11, MOSI=10
  *   OLED    → (internal) SDA=17, SCL=18, RST=21
@@ -38,6 +38,14 @@
   #endif
 #endif
 
+#ifndef LORA_DUTY_LIMIT_PPM
+  #define LORA_DUTY_LIMIT_PPM 0
+#endif
+
+#ifndef LORA_TELEMETRY_INTERVAL_MS
+  #define LORA_TELEMETRY_INTERVAL_MS 1000UL
+#endif
+
 // ═══════════════════════════════════════════════════════════════════════════
 //  HARDWARE CONFIGURATION OPTIONS
 // ═══════════════════════════════════════════════════════════════════════════
@@ -53,10 +61,10 @@
 #define I2C_SCL         2
 
 // GPS on UART (ESP32-S3 UART1)
-// NEO-6M TX → GPIO6 (ESP reads FROM GPS on this pin)
-// NEO-6M RX → GPIO7 (ESP writes TO GPS on this pin)
-#define GPS_RX_PIN      6   // ESP32 receives GPS data on this GPIO
-#define GPS_TX_PIN      7   // ESP32 transmits to GPS on this GPIO
+// NEO-6M TX → GPIO7 (ESP reads FROM GPS on this pin)
+// NEO-6M RX → GPIO6 (ESP writes TO GPS on this pin)
+#define GPS_RX_PIN      7   // ESP32 receives GPS data on this GPIO
+#define GPS_TX_PIN      6   // ESP32 transmits to GPS on this GPIO
 
 // SD Card on SPI
 #define SD_CS           38
@@ -79,7 +87,7 @@
 #define OLED_RST        21
 #define VEXT_PIN        36   // Controls 3.3V power to OLED + external sensors
 
-// LoRa frequency — UK Ofcom IR2030 compliant
+// LoRa frequency. Verify frequency, duty cycle, and airborne use rules for the launch jurisdiction.
 #define LORA_FREQ       868.0  // MHz
 #define LORA_BW         125.0  // kHz
 #define LORA_SF         9      // Spreading factor (range vs speed tradeoff)
@@ -102,6 +110,7 @@
 #define LAUNCH_ALT_DELTA_M    10.0f    // Must gain 10m above baseline
 #define LAUNCH_CONFIRM_COUNT   3       // For 3 consecutive readings
 #define APOGEE_DROP_M          5.0f    // 5m drop from max = apogee
+#define APOGEE_CONFIRM_COUNT   3       // Require sustained descent before latching apogee
 #define SENSOR_STALE_MS     3000       // 3s without baro reading = stale
 #define BASELINE_SAMPLES      20       // Average first 20 readings for baseline
 #define WDT_TIMEOUT_S          5       // Watchdog timeout in seconds
@@ -220,6 +229,7 @@ float baseline_altitude = 0.0f;
 bool baseline_locked = false;
 float max_altitude = 0.0f;
 uint8_t launch_consecutive = 0;
+uint8_t apogee_descent_consecutive = 0;
 bool launched = false;
 bool apogee_detected = false;
 float apogee_altitude_m = NAN;
@@ -229,11 +239,21 @@ uint32_t last_gps_ms = 0;
 bool baro_ok = false;
 bool lora_ok = false;
 bool has_valid_baro_sample = false;
+bool has_valid_gps_fix = false;
 float last_valid_altitude_m = 0.0f;
 float last_valid_pressure_hpa = 1013.25f;
 float last_valid_temp_c = 0.0f;
+double last_valid_lat = 0.0;
+double last_valid_lon = 0.0;
 
 int16_t last_rssi = 0;   // Updated after each LoRa TX
+uint32_t lora_tx_successes = 0;
+uint32_t lora_tx_failures = 0;
+uint32_t lora_duty_skips = 0;
+uint32_t telemetry_format_failures = 0;
+uint32_t next_lora_tx_ms = 0;
+int last_lora_error = RADIOLIB_ERR_NONE;
+bool lora_tx_fault_latched = false;
 char log_filename[24] = "/mxr_flight_001.csv";
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -294,7 +314,10 @@ bool openFreshLogFile() {
         if (SD.exists(log_filename)) continue;
 
         logFile = SD.open(log_filename, FILE_WRITE);
-        if (!logFile) return false;
+        if (!logFile) {
+            latchSdFault("LOG_OPEN");
+            return false;
+        }
 
         const char* header =
             "pkt_id,timestamp_ms,altitude_m,altitude_ft,temp_c,lm75_temp_c,pressure_hpa,"
@@ -304,6 +327,7 @@ bool openFreshLogFile() {
         if (!checkedSdFlush("HEADER_FLUSH")) return false;
         return true;
     }
+    latchSdFault("LOG_LIMIT");
     return false;
 }
 
@@ -324,10 +348,11 @@ void displayStatus(float alt, float maxAlt, float apogeeAlt, uint8_t flags, uint
 
         display.setFont(u8g2_font_6x10_tf);
         char statusLine[32];
-        snprintf(statusLine, sizeof(statusLine), "P:%lu %s%s",
+        snprintf(statusLine, sizeof(statusLine), "P:%lu %s%s%s",
             (unsigned long)pktCount,
             (flags & FLAG_BARO_OK) ? "BAR " : "--- ",
-            sd_fault_latched ? "SDF" : (flags & FLAG_SD_OK) ? "SD" : "--");
+            sd_fault_latched ? "SDF " : (flags & FLAG_SD_OK) ? "SD " : "-- ",
+            lora_tx_fault_latched ? "RFX" : (lora_ok ? "RF" : "--"));
         display.drawStr(0, 58, statusLine);
         display.sendBuffer();
         return;
@@ -348,10 +373,11 @@ void displayStatus(float alt, float maxAlt, float apogeeAlt, uint8_t flags, uint
 
     // Line 4: Status flags
     display.setFont(u8g2_font_6x10_tf);
-    snprintf(line, sizeof(line), "P:%lu %s%s%s", pktCount,
+    snprintf(line, sizeof(line), "P:%lu %s%s%s%s", pktCount,
         (flags & FLAG_GPS_FIX)  ? "GPS " : "--- ",
         (flags & FLAG_BARO_OK)  ? "BAR " : "--- ",
-        sd_fault_latched ? "SDF" : (flags & FLAG_SD_OK) ? "SD" : "--");
+        sd_fault_latched ? "SDF " : (flags & FLAG_SD_OK) ? "SD " : "-- ",
+        lora_tx_fault_latched ? "RFX" : (lora_ok ? "RF" : "--"));
     display.drawStr(0, 58, line);
 
     display.sendBuffer();
@@ -389,7 +415,7 @@ void startGPS() {
             return;
         }
     }
-    Serial.println("[MXR] GPS: no NMEA on any baud -> check TX->GPIO7 wire / 3V3 / antenna");
+    Serial.println("[MXR] GPS: no NMEA on any baud -> check NEO-6M TX->GPIO7 wire / 5V / antenna");
     SerialGPS.begin(9600, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN); // safe fallback
 }
 
@@ -413,9 +439,9 @@ void setup() {
     delay(50);
 
     Serial.println("\n[MXR] *** HARDWARE WARNING ***");
-    Serial.println("[MXR] Ensure SD Card VCC is connected to the MAIN 3V3 pin, NOT the Vext pin!");
-    Serial.println("[MXR] Vext cannot supply enough current for an SD Card (draws up to 200mA).");
-    Serial.println("[MXR] If connected to Vext, the voltage will collapse to 0V during init!\n");
+    Serial.println("[MXR] Ensure SD Card module VCC is connected to 5V_BUS, NOT the Vext pin.");
+    Serial.println("[MXR] SPI signal pins remain ESP32 3.3V logic on GPIO38/39/41/42.");
+    Serial.println("[MXR] Vext cannot supply enough current for an SD Card module during init.\n");
 
     // ── OLED display init ────────────────────────────────────────────
     display.begin();
@@ -449,6 +475,12 @@ void setup() {
     if (!lora_ok) {
         Serial.printf("[MXR] LoRa FAILED (err %d)\n", state);
         displayBootStep("LORA FAILED");
+    }
+    Serial.printf("[MXR] LoRa RF interval=%lums, duty_limit_ppm=%lu\n",
+        (unsigned long)LORA_TELEMETRY_INTERVAL_MS,
+        (unsigned long)LORA_DUTY_LIMIT_PPM);
+    if (LORA_DUTY_LIMIT_PPM == 0) {
+        Serial.println("[MXR] LoRa duty limiter OFF; verify legal airtime before flight.");
     }
 #else
     Serial.println("[MXR] Live LoRa telemetry disabled (ENABLE_RIDESHARE_LIVE=0)");
@@ -541,14 +573,22 @@ void setup() {
     snprintf(line, sizeof(line), "SD:%s GPS:WAIT",
         sdHealthy() ? "OK" : sd_fault_latched ? "FLT" : "XX");
     display.drawStr(0, 38, line);
-    display.drawStr(0, 52, "READY");
+    const bool required_ok =
+        baro_ok &&
+        sdHealthy() &&
+        (!ENABLE_RIDESHARE_LIVE || lora_ok);
+    display.drawStr(0, 52, required_ok ? "READY" : "NO GO");
     display.sendBuffer();
 
     // ── Watchdog: auto-reboot if loop() hangs > 5 seconds ────────────
     esp_task_wdt_init(WDT_TIMEOUT_S, true);
     esp_task_wdt_add(NULL);
 
-    Serial.println("[MXR] Setup complete — live telemetry and SD logging at 1 Hz");
+    if (required_ok) {
+        Serial.println("[MXR] Setup complete — live telemetry and SD logging at 1 Hz");
+    } else {
+        Serial.println("[MXR] Setup complete with critical faults — payload is NOT READY for flight");
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -564,7 +604,7 @@ void loop() {
     }
 
     static uint32_t last_tx = 0;
-    if (millis() - last_tx >= 1000) {
+    if (millis() - last_tx >= LORA_TELEMETRY_INTERVAL_MS) {
         last_tx = millis();
         pkt_id++;
         uint32_t now = millis();
@@ -634,11 +674,15 @@ void loop() {
 #endif
 
         // ── Read GPS ─────────────────────────────────────────────────
-        double lat = 0, lon = 0;
+        double lat = has_valid_gps_fix ? last_valid_lat : 0.0;
+        double lon = has_valid_gps_fix ? last_valid_lon : 0.0;
         bool gps_fix = false;
         if (gps.location.isValid() && gps.location.age() < 2000) {
             lat = gps.location.lat();
             lon = gps.location.lng();
+            last_valid_lat = lat;
+            last_valid_lon = lon;
+            has_valid_gps_fix = true;
             last_gps_ms = now;
             flags |= FLAG_GPS_FIX;
             gps_fix = true;
@@ -668,7 +712,12 @@ void loop() {
 
         // ── Apogee detection ─────────────────────────────────────────
         if (bmp_ok_this_sample && launched && !apogee_detected) {
-            if ((max_altitude - alt) > APOGEE_DROP_M) {
+            if ((max_altitude - alt) >= APOGEE_DROP_M) {
+                apogee_descent_consecutive++;
+            } else {
+                apogee_descent_consecutive = 0;
+            }
+            if (apogee_descent_consecutive >= APOGEE_CONFIRM_COUNT) {
                 apogee_detected = true;
                 apogee_altitude_m = max_altitude;
             }
@@ -720,23 +769,80 @@ void loop() {
         char body[160];
         char buffer[192];
         const float liveLm75 = isfinite(lm75_temp) ? lm75_temp : -999.0f;
-        snprintf(body, sizeof(body), "%u,%lu,%.2f,%.2f,%.2f,%.2f,%.6f,%.6f,%d,%u",
-                 (unsigned)pkt_id, (unsigned long)now, alt, temp, liveLm75, press,
-                 lat, lon, (int)last_rssi, (unsigned)flags);
-        uint16_t crc = crc16Ccitt(
-            reinterpret_cast<const uint8_t*>(body), strlen(body));
-        snprintf(buffer, sizeof(buffer), "MXR3:%s,%04X", body, crc);
+        bool livePacketReady = false;
+        const int bodyLen = snprintf(body, sizeof(body), "%u,%lu,%.2f,%.2f,%.2f,%.2f,%.6f,%.6f,%d,%u",
+            (unsigned)pkt_id, (unsigned long)now, alt, temp, liveLm75, press,
+            lat, lon, (int)last_rssi, (unsigned)flags);
+        if (bodyLen <= 0 || bodyLen >= (int)sizeof(body)) {
+            telemetry_format_failures++;
+            lora_tx_fault_latched = true;
+            Serial.printf("[MXR] TELEMETRY FORMAT FAILED body_len=%d failures=%lu\n",
+                bodyLen,
+                (unsigned long)telemetry_format_failures);
+        } else {
+            uint16_t crc = crc16Ccitt(
+                reinterpret_cast<const uint8_t*>(body), strlen(body));
+            const int packetLen = snprintf(buffer, sizeof(buffer), "MXR3:%s,%04X", body, crc);
+            if (packetLen <= 0 || packetLen >= (int)sizeof(buffer)) {
+                telemetry_format_failures++;
+                lora_tx_fault_latched = true;
+                Serial.printf("[MXR] TELEMETRY PACKET FORMAT FAILED packet_len=%d failures=%lu\n",
+                    packetLen,
+                    (unsigned long)telemetry_format_failures);
+            } else {
+                livePacketReady = true;
+            }
+        }
 
         // ── Transmit via LoRa ────────────────────────────────────────
-        if (lora_ok) {
-            int txState = radio.transmit(buffer);
-            if (txState == RADIOLIB_ERR_NONE) {
-                last_rssi = radio.getRSSI();
+        if (livePacketReady && lora_ok) {
+#if LORA_DUTY_LIMIT_PPM > 0
+            const bool dutyWindowOpen = (int32_t)(now - next_lora_tx_ms) >= 0;
+            if (!dutyWindowOpen) {
+                lora_duty_skips++;
+                static uint32_t last_duty_warn = 0;
+                if (now - last_duty_warn > 10000) {
+                    last_duty_warn = now;
+                    Serial.printf("[MXR] LoRa duty limiter holding RF TX; skips=%lu next_ms=%lu\n",
+                        (unsigned long)lora_duty_skips,
+                        (unsigned long)next_lora_tx_ms);
+                }
+            } else
+#endif
+            {
+                const uint32_t txStartMs = millis();
+                int txState = radio.transmit(buffer);
+                const uint32_t txEndMs = millis();
+#if LORA_DUTY_LIMIT_PPM > 0
+                const uint32_t rawTxDurationMs = txEndMs - txStartMs;
+                const uint32_t txDurationMs = rawTxDurationMs == 0 ? 1UL : rawTxDurationMs;
+                uint64_t minIntervalCalc = ((uint64_t)txDurationMs * 1000000ULL + LORA_DUTY_LIMIT_PPM - 1ULL) / LORA_DUTY_LIMIT_PPM;
+                if (minIntervalCalc > 0xffffffffULL) minIntervalCalc = 0xffffffffULL;
+                uint32_t minIntervalMs = (uint32_t)minIntervalCalc;
+                if (minIntervalMs < LORA_TELEMETRY_INTERVAL_MS) minIntervalMs = LORA_TELEMETRY_INTERVAL_MS;
+                next_lora_tx_ms = txStartMs + minIntervalMs;
+#endif
+                if (txState == RADIOLIB_ERR_NONE) {
+                    lora_tx_successes++;
+                    last_rssi = radio.getRSSI();
+                } else {
+                    lora_tx_failures++;
+                    last_lora_error = txState;
+                    lora_tx_fault_latched = true;
+                    static uint32_t last_lora_warn = 0;
+                    if (now - last_lora_warn > 5000) {
+                        last_lora_warn = now;
+                        Serial.printf("[MXR] LoRa TX FAILED err=%d failures=%lu successes=%lu\n",
+                            last_lora_error,
+                            (unsigned long)lora_tx_failures,
+                            (unsigned long)lora_tx_successes);
+                    }
+                }
             }
         }
 
         // ── USB Serial debug ─────────────────────────────────────────
-        Serial.println(buffer);
+        if (livePacketReady) Serial.println(buffer);
 #endif
 
         // ── Update OLED ──────────────────────────────────────────────

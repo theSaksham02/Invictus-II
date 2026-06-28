@@ -19,7 +19,7 @@ This guide covers the Mach-X Rideshare payload built from the Heltec/PCB stack. 
 | LM75 | Backup temperature | I2C |
 | NEO-6M | GPS coordinates | UART |
 | SD Card Module | Recovery flight log backup | SPI |
-| ESP32-CAM | Standalone camera with its own SD card; no live video transmission | Power only |
+| ESP32-CAM | Standalone camera with its own SD card; no live video transmission | Continuous 5V power only |
 
 ## Pin Mapping
 
@@ -33,6 +33,7 @@ This guide covers the Mach-X Rideshare payload built from the Heltec/PCB stack. 
 | SD SCK | GPIO39 | SD card SCK |
 | SD MOSI | GPIO41 | SD card MOSI |
 | SD MISO | GPIO42 | SD card MISO |
+| SD VCC | 3V3_BUS | SD card VCC |
 | OLED SDA | GPIO17 | Heltec internal OLED |
 | OLED SCL | GPIO18 | Heltec internal OLED |
 | OLED RST | GPIO21 | Heltec internal OLED |
@@ -58,8 +59,8 @@ At 1 Hz:
 3. Feeds TinyGPSPlus and records the latest valid GPS fix.
 4. Updates launch detection from altitude gain.
 5. Updates running maximum altitude.
-6. Latches `apogee_altitude_m` after a 5m drop from max altitude.
-7. Sends a CRC-protected `MXR3:` live telemetry line over LoRa/USB.
+6. Latches `apogee_altitude_m` after a sustained 5m drop from max altitude.
+7. Sends a CRC-protected `MXR3:` line over USB and, when the RF duty window is open, LoRa.
 8. Writes a complete CSV row to SD.
 9. Refreshes the OLED.
 
@@ -156,12 +157,15 @@ Expected boot output:
 
 ```text
 [MXR] LoRa SX1262 OK @ 868 MHz
+[MXR] LoRa RF interval=1000ms, duty_limit_ppm=0
 [MXR] GPS UART1 started
 [MXR] BMP280 OK
 [MXR] LM75 OK (...)
 [MXR] SD card OK, logging to /mxr_flight_001.csv
 [MXR] Setup complete - live telemetry and SD logging at 1 Hz
 ```
+
+`LORA_DUTY_LIMIT_PPM=0` is a bench/default setting, not a compliance claim. Before flight, set this build flag for the launch jurisdiction if an RF duty-cycle limit applies; for example, `10000` enforces an approximate 1% RF airtime budget from measured `radio.transmit()` duration.
 
 ## Live Dashboard and Recovery Fallback
 

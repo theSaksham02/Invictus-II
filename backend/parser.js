@@ -13,6 +13,7 @@ const {
   crc16Ccitt,
   decodeFlags,
   deriveSensorHealth,
+  packetIdLimitForSource,
   packetWarnings,
   xorChecksum
 } = require('./cansat-hardware');
@@ -36,6 +37,7 @@ function optionalInRange(value, min, max) {
 
 function isValidTelemetryShape(packet) {
   const limits = TELEMETRY_LIMITS;
+  const pktIdLimit = packetIdLimitForSource(packet.source);
   const hasMotion = isRideshareSource(packet.source)
     ? (packet.accel_z === null || isFiniteNumber(packet.accel_z)) &&
       (packet.gyro_x === null || isFiniteNumber(packet.gyro_x))
@@ -43,7 +45,7 @@ function isValidTelemetryShape(packet) {
       isFiniteNumber(packet.gyro_x);
   return (
     Number.isInteger(packet.pkt_id) &&
-    inRange(packet.pkt_id, limits.pkt_id.min, limits.pkt_id.max) &&
+    inRange(packet.pkt_id, pktIdLimit.min, pktIdLimit.max) &&
     Number.isInteger(packet.timestamp_ms) &&
     inRange(packet.timestamp_ms, limits.timestamp_ms.min, limits.timestamp_ms.max) &&
     isFiniteNumber(packet.altitude_m) &&
@@ -217,12 +219,18 @@ function parseCansat(buffer) {
 function parseTelemetryNumberList(body) {
   const fields = body.trim().split(',');
   if (fields.some((value) => value.trim() === '')) return null;
+  const numericPattern = /^[+-]?(?:(?:\d+(?:\.\d*)?)|(?:\.\d+))(?:[eE][+-]?\d+)?$/;
+  if (fields.some((value) => !numericPattern.test(value.trim()))) return null;
   return fields.map((value) => Number(value));
 }
 
 function normalizeOptionalTemperature(value) {
   if (!Number.isFinite(value) || value <= -900) return null;
   return value;
+}
+
+function hasIntegerFields(nums, indexes) {
+  return indexes.every((index) => Number.isInteger(nums[index]));
 }
 
 // Rideshare v2: "MXR2:<pkt_id>,<timestamp_ms>,<altitude_m>,<temp_c>,<pressure_hpa>,<lat>,<lon>,<rssi_dbm>,<flags>,<crc16_ccitt_hex>\n".
@@ -259,6 +267,12 @@ function parseRideshare(line) {
 
   try {
     if (nums.some((value) => Number.isNaN(value))) return null;
+    const integerFields = isMxrV3
+      ? [0, 1, 8, 9]
+      : hasCrc
+        ? [0, 1, 7, 8]
+        : [0, 1, 7];
+    if (!hasIntegerFields(nums, integerFields)) return null;
 
     const parsed = {
       source: RIDESHARE_SOURCE,
@@ -308,6 +322,7 @@ function parseMachX(line) {
 
   try {
     if (nums.some((value) => Number.isNaN(value))) return null;
+    if (!hasIntegerFields(nums, [0, 1, 13, 14])) return null;
 
     const parsed = {
       source: 'MACHX',

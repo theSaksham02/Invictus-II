@@ -8,6 +8,8 @@ const PACKET_V3_VERSION = 3;
 const CANSAT_SOURCE_ID = 1;
 const PACKET_PAYLOAD_LENGTH_BYTES = 36;
 const PACKET_V3_PAYLOAD_LENGTH_BYTES = 53;
+const CANSAT_PACKET_ID_MAX = 0xffff;
+const EXTENDED_PACKET_ID_MAX = 0xffffffff;
 
 const CANSAT_MISSION_MODES = Object.freeze({
   PRE_DEPLOY: 0,
@@ -250,7 +252,7 @@ const NRC_PAYLOAD_CIRCUIT = Object.freeze({
       three_v_three: 'LoRa pin 35 3V3 -> 3V3_BUS',
       unused_three_v_three: 'LoRa pin 34 3V3 -> EMPTY'
     },
-    note: 'PAYLOAD_CIRCUIT.md labels SD card VCC as 5V_BUS3; backend treats it as the same 5V_BUS rail.'
+    note: 'PAYLOAD_CIRCUIT.md powers SDCardModule1 VCC from 5V_BUS for the current rideshare build; SPI logic remains ESP32 3.3 V GPIO.'
   },
   buses: {
     i2c: {
@@ -288,14 +290,14 @@ const NRC_PAYLOAD_CIRCUIT = Object.freeze({
     lora_internal_spi: {
       device: 'SX1262 internal to Heltec V3',
       pins: { cs: 'GPIO8', dio1: 'GPIO14', rst: 'GPIO12', busy: 'GPIO13', sck: 'GPIO9', miso: 'GPIO11', mosi: 'GPIO10' },
-      radio: { frequency_mhz: 868.0, bandwidth_khz: 125.0, spreading_factor: 9, coding_rate: '4/7' }
+      radio: { frequency_mhz: 868.0, bandwidth_khz: 125.0, spreading_factor: 9, coding_rate: '4/5' }
     }
   },
   camera: {
     device: 'ESP32-CAM1',
     integration: 'local_sd_recording_only',
     backend_streaming: false,
-    reason: 'PAYLOAD_CIRCUIT.md powers ESP32-CAM1 but leaves IO4, IO2, IO14, IO15, IO13, IO12, IO16, IO0, U0R, and U0T unconnected, so camera video is recovered from the camera SD card only.',
+    reason: 'PAYLOAD_CIRCUIT.md powers ESP32-CAM1 continuously from 5V_BUS but leaves IO4, IO2, IO14, IO15, IO13, IO12, IO16, IO0, U0R, and U0T unconnected, so camera video is recovered from the camera SD card only.',
     power: { five_volt: 'ESP32-CAM1 pin 8 5V -> 5V_BUS', grounds: ['pin 7 GND', 'pin 12 GND', 'pin 16 GND'] }
   },
   unconnected_controller_pins: [
@@ -306,7 +308,7 @@ const NRC_PAYLOAD_CIRCUIT = Object.freeze({
 });
 
 const TELEMETRY_LIMITS = Object.freeze({
-  pkt_id: { min: 0, max: 65535 },
+  pkt_id: { min: 0, max: EXTENDED_PACKET_ID_MAX },
   timestamp_ms: { min: 0, max: 0xffffffff },
   altitude_m: { min: -500, max: 50000 },
   temp_c: { min: -1000, max: 125 },
@@ -322,6 +324,12 @@ const TELEMETRY_LIMITS = Object.freeze({
   rssi_dbm: { min: -127, max: 20 },
   flags: { min: 0, max: 255 }
 });
+
+function packetIdLimitForSource(source) {
+  return source === 'CANSAT'
+    ? { min: 0, max: CANSAT_PACKET_ID_MAX }
+    : TELEMETRY_LIMITS.pkt_id;
+}
 
 function xorChecksum(buffer, length = PACKET_LENGTH_BYTES - 1) {
   let checksum = 0;
@@ -552,7 +560,9 @@ module.exports = {
   RIDESHARE_PAYLOAD_CIRCUIT: NRC_PAYLOAD_CIRCUIT,
   CANSAT_MISSION_MODES,
   CANSAT_MISSION_MODE_NAMES,
+  CANSAT_PACKET_ID_MAX,
   CANSAT_SOURCE_ID,
+  EXTENDED_PACKET_ID_MAX,
   FLAG_BITS,
   LEGACY_PACKET_LENGTH_BYTES,
   PACKET_LENGTH_BYTES,
@@ -567,6 +577,7 @@ module.exports = {
   crc16Ccitt,
   decodeFlags,
   deriveSensorHealth,
+  packetIdLimitForSource,
   packetWarnings,
   xorChecksum
 };

@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const Module = require('node:module');
-const { deriveSensorHealth } = require('../cansat-hardware');
+const { deriveSensorHealth, packetIdLimitForSource } = require('../cansat-hardware');
 
 function makeDbMock() {
   return {
@@ -79,6 +79,7 @@ test('GET /api/rideshare/hardware exposes payload circuit pins from PAYLOAD_CIRC
     assert.deepEqual(body.circuit.buses.i2c.pins, { sda: 'GPIO1', scl: 'GPIO2' });
     assert.deepEqual(body.circuit.buses.gps_uart.pins, { rx: 'GPIO7', tx: 'GPIO6' });
     assert.deepEqual(body.circuit.buses.sd_spi.pins, { cs: 'GPIO38', sck: 'GPIO39', mosi: 'GPIO41', miso: 'GPIO42' });
+    assert.equal(body.circuit.buses.sd_spi.connections.power, 'SDCardModule1 VCC -> 5V_BUS, GND -> GROUND');
     assert.deepEqual(body.circuit.buses.lora_internal_spi.pins, {
       cs: 'GPIO8',
       dio1: 'GPIO14',
@@ -88,8 +89,10 @@ test('GET /api/rideshare/hardware exposes payload circuit pins from PAYLOAD_CIRC
       miso: 'GPIO11',
       mosi: 'GPIO10'
     });
+    assert.equal(body.circuit.buses.lora_internal_spi.radio.coding_rate, '4/5');
     assert.equal(body.circuit.camera.backend_streaming, false);
     assert.equal(body.circuit.camera.integration, 'local_sd_recording_only');
+    assert.match(body.circuit.camera.reason, /powers ESP32-CAM1 continuously from 5V_BUS/);
     assert.equal(body.circuit.telemetry.protocol_prefixes.includes('MXR3:'), true);
   });
 });
@@ -246,9 +249,25 @@ test('Mach-X Rideshare firmware uses MXR3 live telemetry prefix', () => {
   assert.match(firmware, /Live telemetry contract \(MXR3/);
   assert.match(firmware, /#define ENABLE_RIDESHARE_LIVE/);
   assert.match(firmware, /"MXR3:%s,%04X"/);
+  assert.match(firmware, /const int bodyLen\s*=\s*snprintf\(body/);
+  assert.match(firmware, /bodyLen\s*<=\s*0\s*\|\|\s*bodyLen\s*>=\s*\(int\)sizeof\(body\)/);
+  assert.match(firmware, /const int packetLen\s*=\s*snprintf\(buffer/);
+  assert.match(firmware, /packetLen\s*<=\s*0\s*\|\|\s*packetLen\s*>=\s*\(int\)sizeof\(buffer\)/);
+  assert.match(firmware, /if\s*\(livePacketReady\)\s*Serial\.println\(buffer\)/);
+  assert.doesNotMatch(firmware, /;\s*Serial\.println\(buffer\);/);
   assert.doesNotMatch(firmware, /"NRC2:%s,%04X"/);
   assert.match(platformio, /-DENABLE_RIDESHARE_LIVE=1/);
+  assert.match(platformio, /LORA_DUTY_LIMIT_PPM=<ppm>/);
   assert.match(platformio, /-DARDUINO_USB_CDC_ON_BOOT=0/);
+});
+
+test('Mach-X Rideshare firmware GPS pins match payload circuit', () => {
+  const firmware = fs.readFileSync(path.resolve(__dirname, '../../firmware/nrc/src/main.cpp'), 'utf8');
+
+  assert.match(firmware, /#define GPS_RX_PIN\s+7/);
+  assert.match(firmware, /#define GPS_TX_PIN\s+6/);
+  assert.match(firmware, /NEO-6M TX.+GPIO7/);
+  assert.match(firmware, /NEO-6M RX.+GPIO6/);
 });
 
 test('Mach-X Rideshare firmware latches SD faults and clears SD_OK after write failure', () => {
@@ -259,6 +278,8 @@ test('Mach-X Rideshare firmware latches SD faults and clears SD_OK after write f
   assert.match(firmware, /bool\s+checkedSdWrite/);
   assert.match(firmware, /logFile\.getWriteError\(\)/);
   assert.match(firmware, /flags\s*&=\s*~FLAG_SD_OK/);
+  assert.match(firmware, /latchSdFault\("LOG_OPEN"\)/);
+  assert.match(firmware, /latchSdFault\("LOG_LIMIT"\)/);
   assert.match(firmware, /checkedSdWrite\(header,\s*"HEADER_WRITE"\)/);
   assert.match(firmware, /checkedSdWrite\(row,\s*"ROW_WRITE"\)/);
 });
@@ -274,6 +295,39 @@ test('Mach-X Rideshare firmware freezes baseline and preserves stale barometer t
   assert.doesNotMatch(firmware, /baseline_count\s*<=\s*BASELINE_SAMPLES\)\s*baseline_altitude\s*=\s*alt/);
 });
 
+test('Mach-X Rideshare firmware debounces apogee and surfaces readiness/RF faults', () => {
+  const firmware = fs.readFileSync(path.resolve(__dirname, '../../firmware/nrc/src/main.cpp'), 'utf8');
+
+  assert.match(firmware, /#define APOGEE_CONFIRM_COUNT\s+3/);
+  assert.match(firmware, /uint8_t\s+apogee_descent_consecutive\s*=\s*0/);
+  assert.match(firmware, /apogee_descent_consecutive\+\+/);
+  assert.match(firmware, /apogee_descent_consecutive\s*>=\s*APOGEE_CONFIRM_COUNT/);
+  assert.doesNotMatch(firmware, /if\s*\(\s*\(max_altitude - alt\)\s*>\s*APOGEE_DROP_M\s*\)\s*\{\s*apogee_detected\s*=\s*true/s);
+  assert.match(firmware, /required_ok\s*=\s*[\s\S]*baro_ok[\s\S]*sdHealthy\(\)[\s\S]*lora_ok/);
+  assert.match(firmware, /required_ok\s*\?\s*"READY"\s*:\s*"NO GO"/);
+  assert.match(firmware, /lora_tx_fault_latched\s*=\s*true/);
+  assert.match(firmware, /LoRa TX FAILED/);
+  assert.match(firmware, /RFX/);
+});
+
+test('Mach-X Rideshare firmware makes LoRa airtime limiting explicit', () => {
+  const firmware = fs.readFileSync(path.resolve(__dirname, '../../firmware/nrc/src/main.cpp'), 'utf8');
+  const guide = fs.readFileSync(path.resolve(__dirname, '../../docs/rideshare_payload_testing_guide.md'), 'utf8');
+
+  assert.match(firmware, /#ifndef LORA_DUTY_LIMIT_PPM/);
+  assert.match(firmware, /#define LORA_DUTY_LIMIT_PPM 0/);
+  assert.match(firmware, /#ifndef LORA_TELEMETRY_INTERVAL_MS/);
+  assert.match(firmware, /#if LORA_DUTY_LIMIT_PPM > 0/);
+  assert.match(firmware, /next_lora_tx_ms/);
+  assert.match(firmware, /uint64_t\s+minIntervalCalc/);
+  assert.match(firmware, /1000000ULL/);
+  assert.match(firmware, /0xffffffffULL/);
+  assert.match(firmware, /LoRa duty limiter holding RF TX/);
+  assert.match(firmware, /verify legal airtime before flight/);
+  assert.doesNotMatch(firmware, /UK Ofcom IR2030 compliant/);
+  assert.match(guide, /LORA_DUTY_LIMIT_PPM/);
+});
+
 test('Mach-X Rideshare ground receiver matches flight LoRa settings and forwards MXR telemetry', () => {
   const firmware = fs.readFileSync(path.resolve(__dirname, '../../firmware/rideshare-ground-station/src/main.cpp'), 'utf8');
   const platformio = fs.readFileSync(path.resolve(__dirname, '../../firmware/rideshare-ground-station/platformio.ini'), 'utf8');
@@ -287,6 +341,17 @@ test('Mach-X Rideshare ground receiver matches flight LoRa settings and forwards
   assert.match(firmware, /strncmp\(packet,\s*"MXR3:"/);
   assert.match(firmware, /strncmp\(packet,\s*"MXR2:"/);
   assert.match(firmware, /Serial\.println\(outLine\)/);
+  assert.match(firmware, /if\s*\(count\s*>=\s*maxFields\s*\|\|\s*\*cursor\s*==\s*'\\0'\)\s*return\s+-1/);
+  assert.match(firmware, /if\s*\(fieldCount\s*<=\s*0\)\s*return\s+false/);
+  assert.match(firmware, /bool\s+isStrictNumericField/);
+  assert.match(firmware, /bool\s+fieldsAreStrictNumeric/);
+  assert.match(firmware, /if\s*\(!fieldsAreStrictNumeric\(fields,\s*fieldCount\)\)\s*return\s+false/);
+  assert.doesNotMatch(firmware, /Number\.parseFloat|parseFloat|atof\(/);
+  assert.doesNotMatch(firmware, /strchr\(fields\[fieldCount\s*-\s*1\],\s*','\)/);
+  assert.match(firmware, /void\s+restartReceiveMode\(\)/);
+  assert.match(firmware, /rxRestartFailures\+\+/);
+  assert.match(firmware, /receive restart failed/);
+  assert.doesNotMatch(firmware, /\/\/ Restart continuous receive mode\s*\n\s*radio\.startReceive\(\);/);
   assert.match(platformio, /-DARDUINO_USB_CDC_ON_BOOT=0/);
 });
 
@@ -336,4 +401,38 @@ test('Mach-X Rideshare sensor health uses payload circuit pin mappings', () => {
     miso: 'GPIO11',
     mosi: 'GPIO10'
   });
+});
+
+test('Mach-X dashboard only plots fresh GPS fixes', () => {
+  const dashboard = fs.readFileSync(path.resolve(__dirname, '../../dashboard/mach-x.html'), 'utf8');
+
+  assert.match(dashboard, /function\s+hasFreshGps\(pkt\)/);
+  assert.match(dashboard, /pkt\.flags\s*&\s*0x04/);
+  assert.match(dashboard, /if\s*\(!hasFreshGps\(pkt\)\)\s+return/);
+  assert.match(dashboard, /\.filter\(hasFreshGps\)\.map/);
+  assert.match(dashboard, /slice\.map\(\(p,\s*i\)\s*=>\s*Number\.isFinite\(p\.temp_c_1\)\s*\?\s*p\.temp_c_1\s*:\s*tempRaw\[i\]\)/);
+  assert.doesNotMatch(dashboard, /tempRaw\[tempRaw\.length-1\]/);
+  assert.doesNotMatch(dashboard, /if\s*\(!pkt\.lat\s*\|\|\s*!pkt\.lon\)\s+return/);
+});
+
+test('ESP32-CAM recording firmware latches local SD recording faults', () => {
+  const firmware = fs.readFileSync(path.resolve(__dirname, '../../firmware/nrc-camera/src/main.cpp'), 'utf8');
+
+  assert.match(firmware, /bool\s+recordingFaultLatched\s*=\s*false/);
+  assert.match(firmware, /void\s+latchRecordingFault/);
+  assert.match(firmware, /void\s+serviceFaultLed/);
+  assert.match(firmware, /recNum\s*<=\s*999/);
+  assert.match(firmware, /SD_MMC\.mkdir\(candidateDir\)/);
+  assert.match(firmware, /latchRecordingFault\("DIR_CREATE"\)/);
+  assert.match(firmware, /snprintf\(framePath/);
+  assert.match(firmware, /SD_MMC\.remove\(framePath\)/);
+  assert.match(firmware, /latchRecordingFault\("SHORT_WRITE"\)/);
+  assert.doesNotMatch(firmware, /WRITE_PERI_REG\(RTC_CNTL_BROWN_OUT_REG,\s*0\)/);
+  assert.match(firmware, /Brownout detector remains enabled/);
+});
+
+test('telemetry packet id limits stay source specific', () => {
+  assert.deepEqual(packetIdLimitForSource('CANSAT'), { min: 0, max: 0xffff });
+  assert.deepEqual(packetIdLimitForSource('RIDESHARE'), { min: 0, max: 0xffffffff });
+  assert.deepEqual(packetIdLimitForSource('MACHX'), { min: 0, max: 0xffffffff });
 });

@@ -158,7 +158,7 @@ The rideshare live path has two Heltec boards:
 1. Rideshare flight payload: Heltec WiFi LoRa 32 V3 with sensors and SD card.
 2. Rideshare ground receiver: second Heltec WiFi LoRa 32 V3 connected to the laptop over USB.
 
-The flight payload sends `MXR3:` telemetry over 868 MHz LoRa. The ground receiver validates the packet, stamps ground RSSI, recomputes CRC, and forwards the corrected `MXR3:` line over USB.
+The flight payload sends `MXR3:` telemetry over 868 MHz LoRa. The ground receiver validates the packet, stamps ground RSSI, recomputes CRC, and forwards the corrected `MXR3:` line over USB. The ESP32-CAM is independent, powered continuously from `5V_BUS`, and records to its own SD card; camera video is not part of the live telemetry link.
 
 ## A1. Rideshare Hardware Needed
 
@@ -181,6 +181,8 @@ Before powering:
 2. Insert the FAT32 microSD card into the flight payload.
 3. Measure the payload 5 V rail with the multimeter.
 4. Confirm the 5 V rail is close to 5.00 V before connecting the Heltec to external power.
+5. Measure the payload `5V_BUS` at the SD card module VCC pin; the SD SPI signal pins remain ESP32 3.3 V GPIO.
+6. Measure the ESP32-CAM 5V pin; it must be on `5V_BUS` for the full competition duration.
 
 ## A2. Find the USB Port for a Board
 
@@ -302,7 +304,7 @@ Expected boot output should include:
 [MXR] Setup complete
 ```
 
-The monitor should print one `MXR3:` line per second after startup. Example shape:
+The payload USB monitor should print one `MXR3:` line per second after startup. The RF ground receiver may print less often if `LORA_DUTY_LIMIT_PPM` is enabled for a flight airtime budget. Example shape:
 
 ```text
 MXR3:1,1000,0.12,24.50,24.25,1010.20,0.000000,0.000000,0,40,ABCD
@@ -313,7 +315,10 @@ If no `MXR3:` lines appear:
 1. Confirm the firmware upload succeeded.
 2. Confirm the serial monitor baud rate is `115200`.
 3. Confirm `ENABLE_RIDESHARE_LIVE=1` exists in `firmware/nrc/platformio.ini`.
-4. Press the Heltec reset button once.
+4. Confirm `LORA_DUTY_LIMIT_PPM` is set correctly for the launch jurisdiction; `0` means no RF duty limiter.
+5. Press the Heltec reset button once.
+
+If GPS stays at `0.000000,0.000000`, confirm NEO-6M TX is wired to Heltec GPIO7, NEO-6M RX is wired to Heltec GPIO6, and test outdoors under open sky.
 
 Close the monitor:
 
@@ -431,6 +436,13 @@ npm test
 
 The rideshare hardware fixture test must no longer be skipped if the capture file exists.
 
+Before final readiness, run the hardware-fixture gate. This command must pass without skipped hardware fixture tests:
+
+```bash
+cd /Users/manan_dua/Desktop/Invictus-II-1/backend
+npm run test:hardware-fixtures
+```
+
 ## A8. Rideshare Bench Flight Simulation
 
 Use this only after A1 through A7 pass.
@@ -486,8 +498,9 @@ Rideshare is ready to move to integrated hardware testing only if all are true:
 6. Packet count increments at approximately 1 Hz.
 7. Duplicate packets are skipped, not double-counted.
 8. Dashboard reload keeps persisted history.
-9. SD card creates a flight CSV on the payload.
-10. A short power interruption produces a reboot event but does not erase backend history.
+9. SD card creates a flight CSV on the payload while powered from `5V_BUS`.
+10. ESP32-CAM remains powered from `5V_BUS` and records locally to its own SD card.
+11. A short power interruption produces a reboot event but does not erase backend history.
 
 # Part B: CanSat Test
 

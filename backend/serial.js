@@ -5,6 +5,7 @@ const { insertPacket, insertEvent } = require('./db');
 const { processPacket } = require('./phase-tracker');
 const { createRideshareSerial } = require('./rideshare-serial');
 const { createMachxSerial } = require('./machx-serial');
+const { packetIdLimitForSource } = require('./cansat-hardware');
 const { LEGACY_RIDESHARE_SOURCE, RIDESHARE_SOURCE } = require('./source-aliases');
 
 const CANSAT_PORT = process.env.SERIAL_PORT_CANSAT || '/dev/ttyUSB1';
@@ -32,6 +33,7 @@ const RECONNECT_DELAY_MS = Math.max(
   Number.parseInt(process.env.SERIAL_RECONNECT_MS || '3000', 10) || 3000,
   250
 );
+const PACKET_ID_WRAP_WINDOW = 1024;
 const sourceState = {
   CANSAT: { lastSeenAt: null, lost: false, connected: false, port: CANSAT_PORT },
   RIDESHARE: { lastSeenAt: null, lost: false, connected: false, port: RIDESHARE_PORT, live_enabled: ENABLE_RIDESHARE_LIVE },
@@ -112,6 +114,20 @@ function triggerSignalLost(source, emitFn, now) {
   }
 }
 
+function packetIdWrapDelta(pktId, lastPktId, timestampMs, lastTimestampMs, source) {
+  if (!Number.isInteger(pktId) || !Number.isInteger(lastPktId)) return null;
+  if (!Number.isInteger(timestampMs) || !Number.isInteger(lastTimestampMs)) return null;
+  if (pktId >= lastPktId || timestampMs <= lastTimestampMs) return null;
+
+  const limit = packetIdLimitForSource(source);
+  const maxPacketId = Number.isInteger(limit?.max) ? limit.max : null;
+  if (maxPacketId === null || maxPacketId <= 0) return null;
+  if (lastPktId < maxPacketId - PACKET_ID_WRAP_WINDOW) return null;
+  if (pktId > PACKET_ID_WRAP_WINDOW) return null;
+
+  return maxPacketId - lastPktId + pktId + 1;
+}
+
 function updatePacketDiagnostics(pkt, now) {
   const diag = diagnostics[pkt.source];
   if (!diag) return { duplicate: false };
@@ -126,11 +142,16 @@ function updatePacketDiagnostics(pkt, now) {
     if (pktId === lastPktId && timestampMs === lastTimestampMs) {
       diag.duplicate_packets++;
       sequenceAnomaly = true;
-    } else if (pktId > lastPktId + 1) {
-      diag.missed_packets += pktId - lastPktId - 1;
-    } else if (pktId < lastPktId || (pktId === lastPktId && timestampMs !== lastTimestampMs)) {
-      diag.out_of_order_packets++;
-      sequenceAnomaly = true;
+    } else {
+      const wrapDelta = packetIdWrapDelta(pktId, lastPktId, timestampMs, lastTimestampMs, pkt.source);
+      if (wrapDelta !== null) {
+        if (wrapDelta > 1) diag.missed_packets += wrapDelta - 1;
+      } else if (pktId > lastPktId + 1) {
+        diag.missed_packets += pktId - lastPktId - 1;
+      } else if (pktId < lastPktId || (pktId === lastPktId && timestampMs !== lastTimestampMs)) {
+        diag.out_of_order_packets++;
+        sequenceAnomaly = true;
+      }
     }
   }
 
@@ -276,7 +297,9 @@ function initSerial(emitFn) {
     diagnostics[RIDESHARE_SOURCE].last_error = 'Mach-X Rideshare live telemetry disabled';
   }
 
-  if (ENABLE_MACHX_LIVE) {
+  const machxPortConflict = MACHX_PORT === CANSAT_PORT ||
+    (ENABLE_RIDESHARE_LIVE && MACHX_PORT === RIDESHARE_PORT);
+  if (ENABLE_MACHX_LIVE && !machxPortConflict) {
     machxSerial = createMachxSerial({
       PortClass,
       portPath: MACHX_PORT,
@@ -295,7 +318,12 @@ function initSerial(emitFn) {
     sourceState.MACHX.connected = false;
     sourceState.MACHX.lost = false;
     diagnostics.MACHX.open = false;
-    diagnostics.MACHX.last_error = 'MACHX live telemetry disabled';
+    diagnostics.MACHX.last_error = ENABLE_MACHX_LIVE && machxPortConflict
+      ? MACHX_PORT === CANSAT_PORT
+        ? 'MACHX disabled because CANSAT and MACHX are configured with the same serial port'
+        : 'MACHX disabled because RIDESHARE and MACHX are configured with the same serial port'
+      : 'MACHX live telemetry disabled';
+    if (ENABLE_MACHX_LIVE && machxPortConflict) console.warn(`[SERIAL] ${diagnostics.MACHX.last_error}`);
   }
 
   connectCansat();

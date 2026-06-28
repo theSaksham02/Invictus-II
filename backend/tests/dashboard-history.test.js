@@ -69,12 +69,12 @@ window.THREE = {
 
 const emptyAsset = '';
 
-function packet(source, pktId, altitudeM) {
+function packet(source, pktId, altitudeM, timestampMs = pktId * 1000) {
   return {
     source,
     protocol_version: 2,
     pkt_id: pktId,
-    timestamp_ms: pktId * 1000,
+    timestamp_ms: timestampMs,
     altitude_m: altitudeM,
     temp_c: 21,
     temp_c_1: 20,
@@ -134,13 +134,18 @@ async function withDashboardServer(fn) {
   }
 }
 
-test('dashboard renders persisted live-source history and ignores wrong-source packets', async (t) => {
+test('dashboard renders persisted live-source history through packet-id rollover and ignores wrong-source packets', async (t) => {
   const historyPayload = {
     source: 'MACHX',
-    packets: [packet('MACHX', 1, 0), packet('MACHX', 2, 80), packet('MACHX', 3, 120.5)],
+    packets: [
+      packet('MACHX', 0xfffffffe, 0, 1000),
+      packet('MACHX', 0xffffffff, 80, 2000),
+      packet('MACHX', 0, 120.5, 3000),
+      packet('MACHX', 1, 130.5, 4000)
+    ],
     events: [
       { source: 'MACHX', event_type: 'LAUNCHED', altitude_m: 16, timestamp_ms: 2000, received_at: 1700000000100 },
-      { source: 'MACHX', event_type: 'ASCENT', altitude_m: 80, timestamp_ms: 3000, received_at: 1700000000200 }
+      { source: 'MACHX', event_type: 'ASCENT', altitude_m: 80, timestamp_ms: 4000, received_at: 1700000000200 }
     ]
   };
 
@@ -186,18 +191,19 @@ test('dashboard renders persisted live-source history and ignores wrong-source p
       });
 
       await page.goto(url, { waitUntil: 'networkidle0' });
-      await page.waitForFunction(() => document.getElementById('val-alt')?.textContent.includes('120.5'));
+      await page.waitForFunction(() => document.getElementById('val-alt')?.textContent.includes('130.5'));
 
       assert.equal(await page.$eval('#phase-badge', (el) => el.textContent), 'ASCENT');
-      assert.equal(await page.$eval('#val-alt', (el) => el.textContent), '+0120.5');
-      assert.equal(await page.$eval('#val-apogee', (el) => el.textContent), '+0120.5');
+      assert.equal(await page.$eval('#val-alt', (el) => el.textContent), '+0130.5');
+      assert.equal(await page.$eval('#val-apogee', (el) => el.textContent), '+0130.5');
+      assert.equal(await page.$eval('#stat-pkts', (el) => el.textContent), '0004');
       assert.match(await page.$eval('#events-list', (el) => el.textContent), /ASCENT/);
       assert.notEqual(await page.$eval('#phase-badge', (el) => el.textContent), 'NO SIGNAL');
 
       await page.evaluate(() => {
-        window.__socketHandlers.packet({ data: { ...window.__TEST_HISTORY_PAYLOAD.packets[2], source: 'CANSAT', altitude_m: 999 } });
+        window.__socketHandlers.packet({ data: { ...window.__TEST_HISTORY_PAYLOAD.packets[3], source: 'CANSAT', altitude_m: 999 } });
       });
-      assert.equal(await page.$eval('#val-alt', (el) => el.textContent), '+0120.5');
+      assert.equal(await page.$eval('#val-alt', (el) => el.textContent), '+0130.5');
       assert.deepEqual(consoleErrors, []);
     });
   } finally {

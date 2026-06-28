@@ -20,11 +20,15 @@ const PHASE_MAIN = 'MAIN';
 const EVENT_MCU_REBOOT = 'MCU_REBOOT';
 
 const LEGACY_LAUNCH_ALTITUDE_DELTA_M = 5.0;
+const RIDESHARE_LAUNCH_ALTITUDE_DELTA_M = 10.0;
+const RIDESHARE_LAUNCH_CONFIRM_SAMPLES = 3;
 const MACHX_LAUNCH_ALTITUDE_DELTA_M = 15.0;
 
 const ASCENT_STEP_THRESHOLD_M = 1.0;
 
 const LEGACY_APOGEE_DROP_M = 5.0;
+const RIDESHARE_APOGEE_DROP_M = 5.0;
+const RIDESHARE_APOGEE_CONFIRM_SAMPLES = 3;
 const MACHX_APOGEE_DROP_M = 20.0;
 const MACHX_APOGEE_CONFIRM_SAMPLES = 3;
 const MACHX_APOGEE_MIN_ALTITUDE_M = 300.0;
@@ -35,10 +39,13 @@ const MAIN_DEPLOY_ALTITUDE_M = 500.0;
 const LANDED_VARIANCE_M = 1.0;
 const LANDED_WINDOW_SIZE = 10;
 const TIMESTAMP_REORDER_GRACE_MS = 1000;
+const FLAG_LAUNCHED = 0x01;
+const FLAG_APOGEE = 0x02;
 
 function makeState(source) {
   const isLegacy = isRideshareSource(source) || source === 'CANSAT';
   return {
+    source,
     isLegacy,
     phase: isLegacy ? PHASE_GROUNDED : PHASE_PAD,
     baseline_alt: null,
@@ -48,6 +55,7 @@ function makeState(source) {
     last_packet_time: 0,
     last_received_at: 0,
     last_pkt_id: null,
+    launch_confirm_count: 0,
     descent_confirm_count: 0,
     ignored_out_of_order: 0,
     alt_history: []
@@ -113,6 +121,7 @@ function processPacket(pkt, emitFn) {
     } else {
       s.last_packet_time = 0;
       s.last_pkt_id = null;
+      s.launch_confirm_count = 0;
       s.descent_confirm_count = 0;
     }
   }
@@ -136,10 +145,32 @@ function processPacket(pkt, emitFn) {
     (recent[recent.length - 2] - recent[recent.length - 1]) >= DESCENT_STEP_THRESHOLD_M;
 
   if (s.isLegacy) {
-    if (s.phase === PHASE_GROUNDED) {
+    const isRideshare = isRideshareSource(pkt.source);
+    if (isRideshare && s.phase === PHASE_GROUNDED) {
+      const altitudeLaunchCandidate = altitudeGain > RIDESHARE_LAUNCH_ALTITUDE_DELTA_M;
+      const flagConfirmed = (pkt.flags & FLAG_LAUNCHED) !== 0 && altitudeLaunchCandidate;
+      s.launch_confirm_count = altitudeLaunchCandidate ? s.launch_confirm_count + 1 : 0;
+      if (s.launch_confirm_count >= RIDESHARE_LAUNCH_CONFIRM_SAMPLES && (risingByThreshold || flagConfirmed)) {
+        newPhase = PHASE_ASCENDING;
+        s.launch_time = packetTs;
+        s.launch_confirm_count = 0;
+      }
+    }
+    else if (s.phase === PHASE_GROUNDED) {
       if (altitudeGain >= LEGACY_LAUNCH_ALTITUDE_DELTA_M && risingByThreshold) {
         newPhase = PHASE_ASCENDING;
         s.launch_time = packetTs;
+      }
+    }
+    else if (isRideshare && s.phase === PHASE_ASCENDING) {
+      const drop = s.max_alt - pkt.altitude_m;
+      const flagConfirmed = (pkt.flags & FLAG_APOGEE) !== 0 && drop >= RIDESHARE_APOGEE_DROP_M;
+      const apogeeCandidate = drop >= RIDESHARE_APOGEE_DROP_M && (fallingByThreshold || flagConfirmed);
+      s.descent_confirm_count = apogeeCandidate ? s.descent_confirm_count + 1 : 0;
+      if (s.descent_confirm_count >= RIDESHARE_APOGEE_CONFIRM_SAMPLES) {
+        newPhase = PHASE_APOGEE;
+        s.apogee_time = packetTs;
+        s.descent_confirm_count = 0;
       }
     }
     else if (s.phase === PHASE_ASCENDING) {

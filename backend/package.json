@@ -10,7 +10,8 @@
     "start": "node server.js",
     "dev": "nodemon server.js",
     "check": "node --check *.js",
-    "test": "node --test tests/*.test.js"
+    "test": "node --test tests/*.test.js",
+    "test:hardware-fixtures": "REQUIRE_HARDWARE_FIXTURES=true node --test tests/parser.test.js"
   },
   "dependencies": {
     "@serialport/parser-byte-length": "^12.0.0",
