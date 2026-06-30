@@ -10,7 +10,7 @@
 
 HardwareSerial GPS(1);
 
-static const int kRxPins[] = {6, 7};
+static const int kRxPins[] = {7, 6};
 static const uint32_t kBauds[] = {9600, 38400, 57600, 115200, 4800};
 
 void probeGps(int rxPin, uint32_t baud) {

@@ -191,6 +191,15 @@ test('GET /api/cansat/hardware exposes flight CanSat circuit truth', async () =>
     assert.deepEqual(body.circuit.ground_station_receiver.accepted_frame_bytes, [43, 60]);
     assert.equal(body.circuit.ground_station_receiver.radio, 'RFM69HCW 433 MHz');
     assert.equal(body.circuit.ground_station_receiver.frequency_mhz, 433.0);
+    assert.equal(body.circuit.ground_station_receiver.docs_source, 'backend/CANSAT_GROUNDSTATION.md');
+    assert.deepEqual(body.circuit.ground_station_receiver.pins, {
+      rfm69_mosi: 'GPIO23',
+      rfm69_miso: 'GPIO19',
+      rfm69_sck: 'GPIO18',
+      rfm69_cs: 'GPIO5',
+      rfm69_irq: 'GPIO2',
+      rfm69_rst: 'GPIO14'
+    });
     assert.deepEqual(body.circuit.buses.sd_spi.pins, { cs: 'PA4', clk: 'PA5', miso: 'PA6', mosi: 'PA7' });
     assert.deepEqual(body.circuit.buses.avionics_spi.pins, { sck: 'PB13', miso: 'PB14', mosi: 'PB15' });
     assert.equal(body.circuit.buses.avionics_spi.devices[0].name, 'RFM69HCW1');
@@ -210,12 +219,21 @@ test('GET /api/cansat/hardware exposes flight CanSat circuit truth', async () =>
 test('CanSat firmware uses RFM69 433 MHz and flight indicator pins', () => {
   const firmware = fs.readFileSync(path.resolve(__dirname, '../../firmware/cansat/src/main.cpp'), 'utf8');
   const telemetry = fs.readFileSync(path.resolve(__dirname, '../../firmware/cansat/include/telemetry.h'), 'utf8');
+  assert.match(firmware, /backend\/CANSAT_CIRCUIT\.md/);
   assert.match(firmware, /#include <RH_RF69\.h>/);
   assert.match(firmware, /#define RFM69_CS\s+PA15/);
   assert.match(firmware, /#define RFM69_INT\s+PB5/);
   assert.match(firmware, /#define RFM69_FREQ\s+433\.0/);
   assert.match(firmware, /#define LED_PIN\s+PA0/);
   assert.match(firmware, /#define BUZZER_PIN\s+PA1/);
+  assert.match(firmware, /#define I2C_SCL\s+PB6/);
+  assert.match(firmware, /#define I2C_SDA\s+PB7/);
+  assert.match(firmware, /#define GPS_RX_PIN\s+PB11/);
+  assert.match(firmware, /#define GPS_TX_PIN\s+PB10/);
+  assert.match(firmware, /#define BMP388_ADDR\s+0x76/);
+  assert.match(firmware, /bmp\.begin_I2C\(BMP388_ADDR\)/);
+  assert.match(firmware, /Wire\.setSCL\(I2C_SCL\)/);
+  assert.match(firmware, /Wire\.setSDA\(I2C_SDA\)/);
   assert.match(firmware, /#define RECOVERY_ALTITUDE_AGL_M\s+20\.0f/);
   assert.match(firmware, /FLAG_GPS_RECOVERY\s+0x80/);
   assert.match(firmware, /missionMode\s*==\s*CANSAT_MODE_GPS_RECOVERY/);
@@ -229,9 +247,40 @@ test('CanSat firmware uses RFM69 433 MHz and flight indicator pins', () => {
   assert.doesNotMatch(firmware, /RH_RF95|RFM95_FREQ|868\.0/);
 });
 
+test('CanSat firmware mirrors rideshare telemetry hardening without changing PCB wiring', () => {
+  const firmware = fs.readFileSync(path.resolve(__dirname, '../../firmware/cansat/src/main.cpp'), 'utf8');
+
+  assert.match(firmware, /#define CANSAT_TELEMETRY_INTERVAL_MS 1000UL/);
+  assert.match(firmware, /bool\s+sd_fault_latched\s*=\s*false/);
+  assert.match(firmware, /void\s+latchSdFault/);
+  assert.match(firmware, /bool\s+checkedSdWrite/);
+  assert.match(firmware, /logFile\.getWriteError\(\)/);
+  assert.match(firmware, /checkedSdWrite\("pkt_id,timestamp_ms/);
+  assert.match(firmware, /checkedSdWrite\(csvLine,\s*"ROW_WRITE"\)/);
+  assert.match(firmware, /checkedSdFlush\("ROW_FLUSH"\)/);
+  assert.match(firmware, /bool\s+baselineLocked\s*=\s*false/);
+  assert.match(firmware, /candidateGain\s*>\s*LAUNCH_ALTITUDE_AGL_M/);
+  assert.match(firmware, /baselineLocked\s*=\s*true/);
+  assert.match(firmware, /bool\s+rfTxPending\s*=\s*false/);
+  assert.match(firmware, /rf69\.send\(\(uint8_t\*\)&packet,\s*sizeof\(packet\)\)/);
+  assert.match(firmware, /rf69\.waitPacketSent\(10\)/);
+  assert.match(firmware, /latchRadioTxFault\("QUEUE"\)/);
+  assert.match(firmware, /latchRadioTxFault\("TIMEOUT"\)/);
+  assert.match(firmware, /Serial\.write\(\(uint8_t\*\)&packet,\s*sizeof\(packet\)\)/);
+});
+
 test('CanSat ground receiver accepts v2 and v3 frames indefinitely', () => {
   const firmware = fs.readFileSync(path.resolve(__dirname, '../../firmware/ground-station/src/main.cpp'), 'utf8');
 
+  assert.match(firmware, /backend\/CANSAT_GROUNDSTATION\.md/);
+  assert.match(firmware, /#define RFM69_CS\s+5/);
+  assert.match(firmware, /#define RFM69_IRQ\s+2/);
+  assert.match(firmware, /#define RFM69_RST\s+14/);
+  assert.match(firmware, /#define RFM69_SCK\s+18/);
+  assert.match(firmware, /#define RFM69_MISO\s+19/);
+  assert.match(firmware, /#define RFM69_MOSI\s+23/);
+  assert.match(firmware, /SPI\.begin\(RFM69_SCK,\s*RFM69_MISO,\s*RFM69_MOSI,\s*RFM69_CS\)/);
+  assert.doesNotMatch(firmware, /#define RFM69_IRQ\s+4/);
   assert.match(firmware, /TELEMETRY_FRAME_BYTES_V2\s+43/);
   assert.match(firmware, /TELEMETRY_FRAME_BYTES_V3\s+60/);
   assert.match(firmware, /TELEMETRY_RSSI_OFFSET_V2\s+39/);

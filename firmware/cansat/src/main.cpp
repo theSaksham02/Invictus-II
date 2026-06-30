@@ -2,6 +2,7 @@
  * INVICTUS II - MACH-X / SUGAR CanSat Firmware
  * Target: STM32 Bluepill
  * Radio: RFM69HCW @ 433.0 MHz
+ * Wiring source: backend/CANSAT_CIRCUIT.md
  * Sensors: 
  *   - 1x BMP388 (I2C)
  *   - 4x LM75 Temperature Sensors (I2C: 0x48, 0x49, 0x4A, 0x4C)
@@ -20,15 +21,24 @@
 #include <IWatchdog.h>
 #include "telemetry.h"
 
-// ─── Pin Definitions ─────────────────────────────────────────────────────────
+// ─── Pin Definitions — STM32 Bluepill, from backend/CANSAT_CIRCUIT.md ───────
 #define RFM69_CS    PA15
 #define RFM69_INT   PB5
 #define MPU6500_CS  PB12
 #define SD_CS       PA4
 #define LED_PIN     PA0
 #define BUZZER_PIN  PA1
+#define I2C_SCL     PB6
+#define I2C_SDA     PB7
+#define GPS_RX_PIN  PB11
+#define GPS_TX_PIN  PB10
 
 #define RFM69_FREQ  433.0
+#define BMP388_ADDR 0x76
+
+#ifndef CANSAT_TELEMETRY_INTERVAL_MS
+#define CANSAT_TELEMETRY_INTERVAL_MS 1000UL
+#endif
 
 // ─── Sensor Addresses ────────────────────────────────────────────────────────
 const uint8_t LM75_ADDR_1 = 0x48; // PCB 1
@@ -55,10 +65,13 @@ const uint8_t LM75_ADDRS[4] = { LM75_ADDR_1, LM75_ADDR_2, LM75_ADDR_3, LM75_ADDR
 RH_RF69 rf69(RFM69_CS, RFM69_INT);
 Adafruit_BMP3XX bmp;
 TinyGPSPlus gps;
-HardwareSerial SerialGPS(PB11, PB10);
+HardwareSerial SerialGPS(GPS_RX_PIN, GPS_TX_PIN);
 SPIClass sdSPI(PA7, PA6, PA5);
 SdFat sd;
 FsFile logFile;
+bool sd_ok = false;
+bool sd_fault_latched = false;
+const char* sd_fault_reason = "NONE";
 
 uint16_t pkt_id = 0;
 const uint32_t SENSOR_TIMEOUT_MS = 3000;
@@ -70,16 +83,22 @@ enum TdmState {
 };
 TdmState tdmState = TDM_STATE_GPS_LISTEN;
 uint32_t tdmStateStartMs = 0;
-const uint32_t GPS_LISTEN_TIMEOUT_MS = 2000;
+const uint32_t GPS_LISTEN_TIMEOUT_MS = CANSAT_TELEMETRY_INTERVAL_MS;
+bool rfTxPending = false;
 
 float baselinePressure = 1013.25f;
+float baselinePressureSum = 0.0f;
 uint8_t baselineSamples = 0;
 float baselineAltitude = 0.0f;
+bool baselineLocked = false;
 float maxAltitude = 0.0f;
 uint8_t flags = 0;
 bool radio_ok = false;
 uint8_t missionMode = CANSAT_MODE_PRE_DEPLOY;
 uint8_t apogeeConfirmCount = 0;
+uint32_t radioTxSuccesses = 0;
+uint32_t radioTxFailures = 0;
+bool radioTxFaultLatched = false;
 
 // Watchdog timestamps
 uint32_t lastBmpUpdateMs = 0;
@@ -113,6 +132,56 @@ void pulseIndicator(uint8_t count, uint16_t onMs = 40, uint16_t offMs = 80) {
         digitalWrite(LED_PIN, LOW);
         delay(offMs);
     }
+}
+
+bool sdCanWrite() {
+    return !sd_fault_latched && logFile;
+}
+
+bool sdHealthy() {
+    return sd_ok && sdCanWrite();
+}
+
+void latchSdFault(const char* reason) {
+    if (sd_fault_latched) return;
+    sd_fault_latched = true;
+    sd_fault_reason = reason;
+    sd_ok = false;
+    flags &= ~FLAG_SD_OK;
+    Serial.print("SD:FAULT ");
+    Serial.println(reason);
+    if (logFile) {
+        logFile.flush();
+        logFile.close();
+    }
+}
+
+bool checkedSdWrite(const char* text, const char* reason) {
+    if (!sdCanWrite()) return false;
+    const size_t expected = strlen(text);
+    const size_t written = logFile.print(text);
+    if (written != expected || logFile.getWriteError()) {
+        latchSdFault(reason);
+        return false;
+    }
+    return true;
+}
+
+bool checkedSdFlush(const char* reason) {
+    if (!sdCanWrite()) return false;
+    logFile.flush();
+    if (logFile.getWriteError()) {
+        latchSdFault(reason);
+        return false;
+    }
+    return true;
+}
+
+void latchRadioTxFault(const char* reason) {
+    radioTxFailures++;
+    radioTxFaultLatched = true;
+    Serial.print("RFM69:TX_FAULT ");
+    Serial.println(reason);
 }
 
 float readLM75(uint8_t address) {
@@ -183,31 +252,33 @@ void readMPU6500() {
 
 void recoverI2CBus() {
     Serial.println("I2C: Running bus recovery...");
-    pinMode(PB6, OUTPUT);
-    pinMode(PB7, INPUT_PULLUP);
+    pinMode(I2C_SCL, OUTPUT);
+    pinMode(I2C_SDA, INPUT_PULLUP);
     delayMicroseconds(10);
 
     // Clock out up to 16 cycles if SDA is stuck LOW
     for (int i = 0; i < 16; i++) {
-        if (digitalRead(PB7) == HIGH) {
+        if (digitalRead(I2C_SDA) == HIGH) {
             break;
         }
-        digitalWrite(PB6, LOW);
+        digitalWrite(I2C_SCL, LOW);
         delayMicroseconds(10);
-        digitalWrite(PB6, HIGH);
+        digitalWrite(I2C_SCL, HIGH);
         delayMicroseconds(10);
     }
 
     // Generate STOP condition
-    pinMode(PB7, OUTPUT);
-    digitalWrite(PB7, LOW);
+    pinMode(I2C_SDA, OUTPUT);
+    digitalWrite(I2C_SDA, LOW);
     delayMicroseconds(10);
-    digitalWrite(PB6, HIGH);
+    digitalWrite(I2C_SCL, HIGH);
     delayMicroseconds(10);
-    digitalWrite(PB7, HIGH);
+    digitalWrite(I2C_SDA, HIGH);
     delayMicroseconds(10);
 
     // Re-initialize Wire
+    Wire.setSCL(I2C_SCL);
+    Wire.setSDA(I2C_SDA);
     Wire.begin();
     #if defined(WIRE_HAS_TIMEOUT)
     Wire.setWireTimeout(3000, true);
@@ -217,6 +288,7 @@ void recoverI2CBus() {
 void updateMissionMode(float altitudeM) {
     if (!(flags & FLAG_LAUNCHED) && altitudeM > LAUNCH_ALTITUDE_AGL_M) {
         flags |= FLAG_LAUNCHED;
+        baselineLocked = true;
     }
 
     if (altitudeM > maxAltitude) {
@@ -274,6 +346,8 @@ void setup() {
     digitalWrite(BUZZER_PIN, LOW);
     
     // Perform I2C bus recovery and initialize Wire
+    Wire.setSCL(I2C_SCL);
+    Wire.setSDA(I2C_SDA);
     recoverI2CBus();
     
     // IWatchdog timeout is in microseconds (3,000,000 us = 3 seconds)
@@ -326,7 +400,7 @@ void setup() {
     }
 
     // Init BMP388
-    if (bmp.begin_I2C()) {
+    if (bmp.begin_I2C(BMP388_ADDR)) {
         bmp.setTemperatureOversampling(BMP3_OVERSAMPLING_8X);
         bmp.setPressureOversampling(BMP3_OVERSAMPLING_4X);
         bmp.setIIRFilterCoeff(BMP3_IIR_FILTER_COEFF_3);
@@ -339,9 +413,16 @@ void setup() {
     if (sd.begin(SdSpiConfig(SD_CS, DEDICATED_SPI, SD_SCK_MHZ(4), &sdSPI))) {
         logFile = sd.open("machx_flight.csv", O_WRONLY | O_CREAT | O_APPEND);
         if (logFile) {
-            logFile.println("pkt_id,timestamp_ms,mission_mode,altitude_m,temp_c,pressure_hpa,temp_c_1,temp_c_2,temp_c_3,temp_c_4,accel_z,gyro_x,lat,lon,rssi_dbm,flags");
-            flags |= FLAG_SD_OK;
+            if (checkedSdWrite("pkt_id,timestamp_ms,mission_mode,altitude_m,temp_c,pressure_hpa,temp_c_1,temp_c_2,temp_c_3,temp_c_4,accel_z,gyro_x,lat,lon,rssi_dbm,flags\n", "HEADER_WRITE") &&
+                checkedSdFlush("HEADER_FLUSH")) {
+                sd_ok = true;
+                flags |= FLAG_SD_OK;
+            }
+        } else {
+            latchSdFault("LOG_OPEN");
         }
+    } else {
+        latchSdFault("SD_INIT");
     }
 
     // Put radio to sleep at boot to minimize current draw between packets.
@@ -378,12 +459,21 @@ void loop() {
                         temp_bmp = bmp.temperature;
                         press_hpa = bmp.pressure / 100.0f;
 
-                        if (baselineSamples < 20) {
-                            baselinePressure = ((baselinePressure * baselineSamples) + press_hpa) / (baselineSamples + 1);
-                            baselineSamples++;
-                            baselineAltitude = 0.0f;
+                        float candidateAltitude = bmp.readAltitude(baselinePressure);
+                        if (!baselineLocked && !(flags & FLAG_LAUNCHED)) {
+                            const float candidateGain = candidateAltitude - baselineAltitude;
+                            if (baselineSamples >= 20 || candidateGain > LAUNCH_ALTITUDE_AGL_M) {
+                                baselineLocked = true;
+                            } else {
+                                baselinePressureSum += press_hpa;
+                                baselineSamples++;
+                                baselinePressure = baselinePressureSum / baselineSamples;
+                                candidateAltitude = bmp.readAltitude(baselinePressure);
+                                baselineAltitude = 0.0f;
+                                if (baselineSamples >= 20) baselineLocked = true;
+                            }
                         }
-                        alt_m = bmp.readAltitude(baselinePressure);
+                        alt_m = candidateAltitude;
                         bmpReadSuccess = true;
                         lastBmpUpdateMs = now;
                     }
@@ -445,6 +535,12 @@ void loop() {
                     gps_lon = 0.0f;
                 }
 
+                if (sdHealthy()) {
+                    flags |= FLAG_SD_OK;
+                } else {
+                    flags &= ~FLAG_SD_OK;
+                }
+
                 uint8_t txFlags = buildTransmitFlags(gpsFixValid);
 
                 TelemetryPacket packet = {};
@@ -470,16 +566,21 @@ void loop() {
                 packet.flags = txFlags;
                 packet.crc16 = crc16Ccitt((uint8_t*)&packet, sizeof(packet) - sizeof(packet.crc16));
 
+                rfTxPending = false;
                 if (radio_ok) {
                     rf69.setModeIdle(); // Wake from sleep before loading FIFO
-                    rf69.send((uint8_t*)&packet, sizeof(packet));
+                    if (rf69.send((uint8_t*)&packet, sizeof(packet))) {
+                        rfTxPending = true;
+                    } else {
+                        latchRadioTxFault("QUEUE");
+                    }
                 }
 
                 // USB bench output uses the same v3 frame that the backend parser accepts.
                 Serial.write((uint8_t*)&packet, sizeof(packet));
                 
                 // Log science data only. GPS recovery avoids SD writes and non-GPS sampling.
-                if ((txFlags & FLAG_SD_OK) && missionMode != CANSAT_MODE_GPS_RECOVERY) {
+                if (sdHealthy() && missionMode != CANSAT_MODE_GPS_RECOVERY) {
                     char csvLine[208];
                     int csvWritten = snprintf(csvLine, sizeof(csvLine),
                         "%u,%lu,%u,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.6f,%.6f,%d,%u\n",
@@ -489,18 +590,13 @@ void loop() {
                     );
 
                     if (csvWritten > 0 && csvWritten < (int)sizeof(csvLine)) {
-                        size_t writtenBytes = logFile.print(csvLine);
-                        if (writtenBytes != (size_t)csvWritten) {
-                            flags &= ~FLAG_SD_OK;
-                            Serial.println("SD:WARN write failed; disabling SD_OK flag");
-                            pulseIndicator(4);
-                        }
+                        checkedSdWrite(csvLine, "ROW_WRITE");
 
                         static uint32_t lastFlushMs = 0;
                         static uint32_t flushIntervalMs = 10000; // start at 10 seconds
-                        if ((flags & FLAG_SD_OK) && now - lastFlushMs >= flushIntervalMs) {
+                        if (sdHealthy() && now - lastFlushMs >= flushIntervalMs) {
                             uint32_t flushStart = millis();
-                            logFile.flush();
+                            checkedSdFlush("ROW_FLUSH");
                             uint32_t flushDuration = millis() - flushStart;
                             lastFlushMs = now;
                             
@@ -511,6 +607,8 @@ void loop() {
                                 flushIntervalMs = 10000;
                             }
                         }
+                    } else {
+                        latchSdFault("ROW_FORMAT");
                     }
                 }
                 pkt_id++;
@@ -524,13 +622,21 @@ void loop() {
         
         case TDM_STATE_LORA_TX: {
             // Check if transmission is complete (non-blocking 10ms wait check)
-            bool txDone = true;
-            if (radio_ok) {
+            bool txDone = !rfTxPending;
+            if (radio_ok && rfTxPending) {
                 txDone = rf69.waitPacketSent(10);
+                if (txDone) {
+                    radioTxSuccesses++;
+                    rfTxPending = false;
+                }
             }
             
             // If TX is complete OR 200ms safety timeout has expired
             if (txDone || (now - tdmStateStartMs >= 200)) {
+                if (!txDone && rfTxPending) {
+                    rfTxPending = false;
+                    latchRadioTxFault("TIMEOUT");
+                }
                 if (radio_ok) {
                     rf69.sleep();
                 }

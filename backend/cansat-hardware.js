@@ -77,13 +77,14 @@ const CIRCUIT = Object.freeze({
     frequency_mhz: 433.0,
     interface: 'USB Serial (CP2102/CH340) @ 115200 baud',
     accepted_frame_bytes: [PACKET_V2_LENGTH_BYTES, PACKET_V3_LENGTH_BYTES],
+    docs_source: 'backend/CANSAT_GROUNDSTATION.md',
     firmware: 'firmware/ground-station/src/main.cpp',
     pins: {
       rfm69_mosi: 'GPIO23',
       rfm69_miso: 'GPIO19',
       rfm69_sck:  'GPIO18',
       rfm69_cs:   'GPIO5',
-      rfm69_irq:  'GPIO4',
+      rfm69_irq:  'GPIO2',
       rfm69_rst:  'GPIO14'
     },
     competitive_advantage: [

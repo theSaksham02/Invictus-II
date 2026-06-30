@@ -2,6 +2,7 @@
  * INVICTUS II - CanSat Ground Station Receiver
  * Target: ESP32 WROOM-32
  * Radio: RFM69HCW @ 433.0 MHz
+ * Wiring source: backend/CANSAT_GROUNDSTATION.md
  *
  * Role:
  *   - Receives 43-byte CANSAT v2 and 60-byte CANSAT v3 binary telemetry frames over RFM69HCW
@@ -14,10 +15,14 @@
 #include <SPI.h>
 #include <RH_RF69.h>
 
-// ─── Pin Definitions (ESP32 WROOM) ───────────────────────────────────────────
+// ESP32 WROOM-32 pins from backend/CANSAT_GROUNDSTATION.md:
+// D5 -> NSS, D2 -> DIO0, D14 -> RESET, D18/D19/D23 -> SCK/MISO/MOSI.
 #define RFM69_CS      5
-#define RFM69_IRQ     4
+#define RFM69_IRQ     2
 #define RFM69_RST    14
+#define RFM69_SCK    18
+#define RFM69_MISO   19
+#define RFM69_MOSI   23
 #define RFM69_FREQ  433.0
 
 #define GCS_SERIAL_BAUD 115200
@@ -92,7 +97,12 @@ void resetRadio() {
 
 void setup() {
     Serial.begin(GCS_SERIAL_BAUD);
+    delay(100);
 
+    pinMode(RFM69_CS, OUTPUT);
+    digitalWrite(RFM69_CS, HIGH);
+    pinMode(RFM69_IRQ, INPUT);
+    SPI.begin(RFM69_SCK, RFM69_MISO, RFM69_MOSI, RFM69_CS);
     resetRadio();
 
     bool radioOk = false;
@@ -104,12 +114,8 @@ void setup() {
     }
     if (!radioOk) {
         Serial.println("GCS:FATAL RFM69HCW init failed completely. Halting...");
-        pinMode(2, OUTPUT);
         while (1) {
-            digitalWrite(2, HIGH);
-            delay(250);
-            digitalWrite(2, LOW);
-            delay(250);
+            delay(1000);
         }
     }
 
@@ -122,17 +128,12 @@ void setup() {
     }
     if (!freqOk) {
         Serial.println("GCS:FATAL RFM69HCW frequency set failed completely. Halting...");
-        pinMode(2, OUTPUT);
         while (1) {
-            digitalWrite(2, HIGH);
-            delay(250);
-            digitalWrite(2, LOW);
-            delay(250);
+            delay(1000);
         }
     }
 
-    rf69.setTxPower(13, true);
-    Serial.println("GCS:READY RFM69HCW 433MHz");
+    Serial.println("GCS:READY RFM69HCW 433MHz RX");
 }
 
 void loop() {
